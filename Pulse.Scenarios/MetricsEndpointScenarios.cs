@@ -6,7 +6,9 @@ using Xunit;
 namespace Pulse.Scenarios;
 
 /// <summary>The endpoint on a live server: it answers, it counts real ticks, and it sees real
-/// players. The seeded pulse.json pins the port these scenarios scrape.</summary>
+/// players, real worldgen and the runtime underneath. The seeded pulse.json pins the port these
+/// scenarios scrape and drops ChunksRefreshSeconds to a second, so the slow gauge reports inside
+/// a scenario rather than half a minute later.</summary>
 [AtlasDataFiles("data/endpoint/pulse.json", TargetPath = "ModConfig")]
 public class MetricsEndpointScenarios : AtlasScenarioBase
 {
@@ -19,6 +21,11 @@ public class MetricsEndpointScenarios : AtlasScenarioBase
         "pulse_players_online",
         "pulse_entities_loaded",
         "pulse_server_tick_budget_seconds",
+        "pulse_worldgen_queue_columns",
+        "pulse_worldgen_columns_generated_total",
+        "pulse_chunks_loaded",
+        "pulse_log_entries_total",
+        "pulse_engine_warnings_total",
     ];
 
     [AtlasScenario]
@@ -40,12 +47,14 @@ public class MetricsEndpointScenarios : AtlasScenarioBase
         Assert.Contains("pulse_server_tick_seconds_bucket{le=\"+Inf\"}", body);
         Assert.Contains("pulse_server_tick_seconds_count", body);
 
-        // A French locale on the host must not leak a comma decimal separator into the wire.
+        // A French locale on the host must not leak a comma decimal separator into the wire. The
+        // value is everything after the last space; commas inside a {label="..."} set are the
+        // format's own separator and legitimate.
         foreach (string line in body.Split('\n'))
         {
-            if (!line.StartsWith('#'))
+            if (!line.StartsWith('#') && line.Length > 0)
             {
-                Assert.DoesNotContain(",", line);
+                Assert.DoesNotContain(",", line[(line.LastIndexOf(' ') + 1)..]);
             }
         }
     }
@@ -97,5 +106,62 @@ public class MetricsEndpointScenarios : AtlasScenarioBase
         }
 
         Assert.Fail("pulse_players_online never reported the joined player:\n" + body);
+    }
+
+    [AtlasScenario]
+    public async Task WorldgenCounter_Counts_TheColumnsAFreshWorldGenerated()
+    {
+        await World.Ticks(5);
+
+        // The scenario world is generated, not loaded from a fixture, so MapChunkGeneration has
+        // fired for every spawn column before the first scrape.
+        double columns = Scrape.Value(await Scrape.Metrics(Port), "pulse_worldgen_columns_generated_total");
+
+        Assert.True(columns > 0, $"a freshly generated world reported no generated columns: {columns}");
+    }
+
+    [AtlasScenario]
+    public async Task ChunksLoaded_Reports_OnItsOwnSlowCadence()
+    {
+        // The gauge honestly reads 0 until the slow listener first fires, one second in here.
+        string body = string.Empty;
+        for (int attempt = 0; attempt < 20; attempt++)
+        {
+            await World.Ticks(30);
+            body = await Scrape.Metrics(Port);
+            if (Scrape.Value(body, "pulse_chunks_loaded") > 0)
+            {
+                return;
+            }
+        }
+
+        Assert.Fail("pulse_chunks_loaded never left zero:\n" + body);
+    }
+
+    [AtlasScenario]
+    public async Task LogCounters_Carry_ASeriesPerSeverityAndPerEngineWarning()
+    {
+        string body = await Scrape.Metrics(Port);
+
+        // Seeded at zero on startup, so a healthy server still exposes every series.
+        foreach (string level in new[] { "warning", "error", "fatal" })
+        {
+            Assert.Contains($"pulse_log_entries_total{{level=\"{level}\"}} ", body);
+        }
+
+        foreach (string kind in new[] { "overload", "memory", "suspend_timeout", "autosave_io" })
+        {
+            Assert.Contains($"pulse_engine_warnings_total{{kind=\"{kind}\"}} ", body);
+        }
+    }
+
+    [AtlasScenario]
+    public async Task RuntimeMetrics_Serve_TheDotnetFamilies_WhenTheConfigAsksForThem()
+    {
+        string body = await Scrape.Metrics(Port);
+
+        Assert.Contains("# TYPE dotnet_gc_collections_total counter\n", body);
+        Assert.Contains("dotnet_gc_collections_total{gc_heap_generation=\"gen0\"} ", body);
+        Assert.Contains("# TYPE dotnet_process_memory_working_set gauge\n", body);
     }
 }
