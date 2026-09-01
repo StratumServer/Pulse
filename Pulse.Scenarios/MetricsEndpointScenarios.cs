@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http;
+using Atlas.Api;
 using Atlas.XUnit;
 using Xunit;
 
@@ -26,6 +27,26 @@ public class MetricsEndpointScenarios : AtlasScenarioBase
         "pulse_chunks_loaded",
         "pulse_log_entries_total",
         "pulse_engine_warnings_total",
+        "pulse_server_uptime_seconds",
+        "pulse_player_ping_seconds",
+        "pulse_network_sent_bytes_total",
+        "pulse_network_received_bytes_total",
+        "pulse_player_deaths_total",
+        "pulse_server_suspends_total",
+        "pulse_server_suspend_seconds_total",
+    ];
+
+    /// <summary>The families that only exist when the cast to the concrete engine type worked.
+    /// The embedded server Atlas boots is a real ServerMain, so all of them have to be here; if
+    /// one goes missing, the probe degraded and the scenario has caught exactly what it is for.</summary>
+    private static readonly string[] EngineFamilies =
+    [
+        "pulse_server_tick_busy_seconds_avg",
+        "pulse_network_packets_in_window",
+        "pulse_network_bytes_in_window",
+        "pulse_connection_queue_clients",
+        "pulse_network_udp_sent_bytes_total",
+        "pulse_network_udp_received_bytes_total",
     ];
 
     [AtlasScenario]
@@ -163,5 +184,146 @@ public class MetricsEndpointScenarios : AtlasScenarioBase
         Assert.Contains("# TYPE dotnet_gc_collections_total counter\n", body);
         Assert.Contains("dotnet_gc_collections_total{gc_heap_generation=\"gen0\"} ", body);
         Assert.Contains("# TYPE dotnet_process_memory_working_set gauge\n", body);
+    }
+
+    /// <summary>The whole point of the engine probe: these six families do not exist through the
+    /// modding API at all, and their presence here is proof the cast resolved against a real
+    /// server rather than a mock.</summary>
+    [AtlasScenario]
+    public async Task EngineProbe_Serves_TheFamiliesThePublicApiCannotProduce()
+    {
+        await World.Ticks(5);
+
+        string body = await Scrape.Metrics(Port);
+
+        foreach (string family in EngineFamilies)
+        {
+            Assert.Contains("# TYPE " + family + " ", body);
+        }
+
+        Assert.Contains("pulse_network_packets_in_window{channel=\"tcp\"} ", body);
+        Assert.Contains("pulse_network_packets_in_window{channel=\"udp\"} ", body);
+        Assert.Contains("pulse_network_bytes_in_window{channel=\"tcp\"} ", body);
+        Assert.Contains("pulse_network_bytes_in_window{channel=\"udp\"} ", body);
+    }
+
+    [AtlasScenario]
+    public async Task TickBusyTime_Reports_APlausibleShareOfTheBudget()
+    {
+        // Two seconds of ticks: the engine only rotates its statistics buckets that often, and
+        // Pulse reads the one behind the live bucket.
+        await World.Ticks(90);
+
+        string body = await Scrape.Metrics(Port);
+        double busy = Scrape.Value(body, "pulse_server_tick_busy_seconds_avg");
+        double budget = Scrape.Value(body, "pulse_server_tick_budget_seconds");
+
+        // Not asserted above zero on purpose: the engine accumulates whole milliseconds per tick,
+        // so an idle server with sub-millisecond ticks legitimately averages zero. What matters is
+        // that the number is there and is not nonsense.
+        Assert.InRange(busy, 0, 1.0);
+        Assert.True(busy < budget * 10, $"tick busy time {busy}s is implausible against a {budget}s budget");
+        Assert.Equal(0, Scrape.Value(body, "pulse_connection_queue_clients"));
+    }
+
+    [AtlasScenario]
+    public async Task Uptime_Grows_AsTheServerRuns()
+    {
+        double before = Scrape.Value(await Scrape.Metrics(Port), "pulse_server_uptime_seconds");
+
+        // Seconds resolution, from a clock that only counts unpaused time, so this needs real
+        // wall clock to pass rather than a fixed number of ticks.
+        for (int attempt = 0; attempt < 30; attempt++)
+        {
+            await World.Ticks(30);
+            if (Scrape.Value(await Scrape.Metrics(Port), "pulse_server_uptime_seconds") > before)
+            {
+                return;
+            }
+        }
+
+        Assert.Fail($"pulse_server_uptime_seconds never moved past {before}");
+    }
+
+    [AtlasScenario]
+    public async Task Counters_ThatNothingHasTriggered_Are_SeededAtZero()
+    {
+        string body = await Scrape.Metrics(Port);
+
+        // Nobody died and nothing suspended the server in this world, and all three still have to
+        // be on the wire: a family that first appears the day something goes wrong is a family no
+        // dashboard is plotting when it does.
+        Assert.Contains("pulse_player_deaths_total 0", body);
+        Assert.Contains("pulse_server_suspends_total ", body);
+        Assert.Contains("pulse_server_suspend_seconds_total ", body);
+    }
+
+    [AtlasScenario]
+    public async Task PlayerPing_Reports_BothAggregates()
+    {
+        string body = await Scrape.Metrics(Port);
+
+        // A headless test player rides a dummy socket the engine never measures, so the value is
+        // whatever the engine reports (NaN, skipped, hence zero). The two series existing is the
+        // contract; the numbers are the server's to produce.
+        Assert.True(Scrape.Value(body, "pulse_player_ping_seconds{stat=\"avg\"}") >= 0);
+        Assert.True(Scrape.Value(body, "pulse_player_ping_seconds{stat=\"max\"}") >= 0);
+    }
+
+    [AtlasScenario]
+    public async Task EntityBreakdown_Reports_TheBusiestCodes_OnTheSlowCadence()
+    {
+        // Sixteen characters at most, and unique in this class: the world is shared by every
+        // scenario in it.
+        ITestPlayer player = await World.JoinPlayer("pulse-entities");
+        for (int i = 0; i < 12; i++)
+        {
+            World.SpawnEntity("game:chicken-rooster", player.Position);
+        }
+
+        // Twelve of one code guarantees a top-ten place whatever else the world generated, and the
+        // breakdown rides the ChunksRefreshSeconds listener, seeded at one second here.
+        string body = string.Empty;
+        for (int attempt = 0; attempt < 20; attempt++)
+        {
+            await World.Ticks(30);
+            body = await Scrape.Metrics(Port);
+            if (body.Contains("pulse_entities_by_code{code=\"chicken-rooster\"} 12", StringComparison.Ordinal))
+            {
+                Assert.Contains("pulse_entities_by_code{code=\"other\"} ", body);
+                return;
+            }
+        }
+
+        Assert.Fail("pulse_entities_by_code never reported the twelve spawned roosters:\n" + body);
+    }
+
+    /// <summary>The suspend window is what players actually feel when the world autosaves, and
+    /// /autosavenow drives exactly the engine path an unattended autosave takes.</summary>
+    [AtlasScenario]
+    public async Task SuspendCounters_Move_WhenTheServerAutosaves()
+    {
+        double before = Scrape.Value(await Scrape.Metrics(Port), "pulse_server_suspends_total");
+
+        // The command declines while the chunk unloader has the world mid-flight, and says so
+        // rather than failing, so this retries instead of asserting on the first answer.
+        for (int attempt = 0; attempt < 20; attempt++)
+        {
+            CommandResult result = await World.ExecuteCommand("/autosavenow");
+            Assert.True(result.Ok, result.Message);
+
+            string body = await Scrape.Metrics(Port);
+            if (Scrape.Value(body, "pulse_server_suspends_total") > before)
+            {
+                Assert.True(
+                    Scrape.Value(body, "pulse_server_suspend_seconds_total") >= 0,
+                    "accumulated suspend time went backwards");
+                return;
+            }
+
+            await World.Ticks(30);
+        }
+
+        Assert.Fail("pulse_server_suspends_total never moved across twenty autosaves");
     }
 }
