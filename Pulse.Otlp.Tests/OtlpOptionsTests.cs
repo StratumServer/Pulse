@@ -65,6 +65,19 @@ public class OtlpOptionsTests
         Assert.Null(uri);
     }
 
+    [Theory]
+    [InlineData("pulse-atlas-test", "pulse-atlas-test")]
+    [InlineData("  my-server  ", "my-server")]
+    public void ResolveServiceName_Keeps_AConfiguredName(string configured, string expected)
+        => Assert.Equal(expected, OtlpOptions.ResolveServiceName(configured));
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ResolveServiceName_Falls_BackToTheDefault_OnBlank(string? configured)
+        => Assert.Equal(OtlpOptions.DefaultServiceName, OtlpOptions.ResolveServiceName(configured));
+
     [Fact]
     public void RenderHeaders_Writes_Nothing_ForNoHeaders()
     {

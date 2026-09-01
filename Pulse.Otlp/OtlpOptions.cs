@@ -15,9 +15,20 @@ public static class OtlpOptions
 
     private const string MetricsPath = "/v1/metrics";
 
+    /// <summary>Fallback service.name when the config key is blank. Distinct from the SDK's own
+    /// "unknown_service:&lt;processname&gt;" fallback, so a server exports as something a human
+    /// would recognise even before anyone edits the config.</summary>
+    public const string DefaultServiceName = "vintagestory";
+
     /// <summary>Export interval in milliseconds, floored.</summary>
     public static int IntervalMilliseconds(int intervalSeconds)
         => Math.Max(MinimumIntervalSeconds, intervalSeconds) * 1000;
+
+    /// <summary>Resolves the service.name to export, falling back to <see
+    /// cref="DefaultServiceName"/> on a blank config value rather than exporting an empty resource
+    /// attribute. Trimmed like the other string config values this class handles.</summary>
+    public static string ResolveServiceName(string? configuredName)
+        => string.IsNullOrWhiteSpace(configuredName) ? DefaultServiceName : configuredName.Trim();
 
     /// <summary>Parses the OTLP specification's two protocol names. Returns false for anything
     /// else, having still produced http/protobuf: an unreadable protocol name is a reason to warn

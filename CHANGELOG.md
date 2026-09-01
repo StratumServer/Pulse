@@ -17,6 +17,9 @@ first.
 - `.github/workflows/game-watch.yml`, a weekly scheduled workflow that builds and runs both unit
   and scenario suites against the newest stable Vintage Story server version and fails if either
   doesn't hold up, catching an engine-side break before a user's server update does.
+- `ServiceName` config key in `pulse-otlp.json` (default `vintagestory`), setting the
+  `service.name` resource attribute so a backend receiving metrics from several servers can tell
+  them apart. `OTEL_SERVICE_NAME`, the ecosystem's standard override, takes precedence when set.
 
 ## [0.1.0] - 2026-09-01
 

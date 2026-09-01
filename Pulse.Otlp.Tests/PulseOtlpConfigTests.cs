@@ -17,6 +17,7 @@ public class PulseOtlpConfigTests
         Assert.Empty(config.Headers);
         Assert.Equal(60, config.IntervalSeconds);
         Assert.True(config.IncludeRuntimeMetrics);
+        Assert.Equal("vintagestory", config.ServiceName);
     }
 
     [Theory]

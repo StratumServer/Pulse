@@ -6,5 +6,6 @@
     "x-scope-orgid": "atlas"
   },
   "IntervalSeconds": 5,
-  "IncludeRuntimeMetrics": false
+  "IncludeRuntimeMetrics": false,
+  "ServiceName": "pulse-atlas-test"
 }

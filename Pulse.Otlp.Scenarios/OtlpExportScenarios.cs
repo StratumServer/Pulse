@@ -54,6 +54,11 @@ public class OtlpExportScenarios : AtlasScenarioBase, IDisposable
         Assert.Contains("pulse_server_ticks_total", body, StringComparison.Ordinal);
         Assert.Contains("Pulse.Server", body, StringComparison.Ordinal);
 
+        // service.name is a resource attribute, not a metric or scope name, but it travels in the
+        // same length-prefixed UTF-8 encoding inside the same protobuf message, so it is just as
+        // findable in the raw bytes.
+        Assert.Contains("pulse-atlas-test", body, StringComparison.Ordinal);
+
         // The configured header arrived with it: this is how a hosted backend authenticates.
         Assert.Equal("atlas", export.OrgId);
     }

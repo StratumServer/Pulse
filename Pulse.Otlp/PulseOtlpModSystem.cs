@@ -1,6 +1,7 @@
 using OpenTelemetry;
 using OpenTelemetry.Exporter;
 using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
 using Vintagestory.API.Common;
 using Vintagestory.API.Server;
 
@@ -59,6 +60,24 @@ public sealed class PulseOtlpModSystem : ModSystem
             ? [PulseMeterName, RuntimeMeterName]
             : [PulseMeterName];
 
+        // OTEL_SERVICE_NAME, the ecosystem's standard override, must win over the config key when
+        // it is set. That is not automatic: ResourceBuilder.CreateDefault() (the seed
+        // ConfigureResource lazily creates) already ends with the detector that reads this
+        // variable, but ConfigureResource's own AddService call is appended after it, and
+        // ResourceBuilder.Build() merges every detector's Resource left to right with the later
+        // one winning on a collision (Resource.Merge: "In case of a collision the other Resource
+        // takes precedence"). An unconditional AddService would therefore always beat the
+        // environment variable. Checked against MeterProviderBuilderSdk.ConfigureResource,
+        // ResourceBuilder.CreateDefault/Build and Resource.Merge in OpenTelemetry .NET 1.18.0
+        // (github.com/open-telemetry/opentelemetry-dotnet, tag core-1.18.0). Skipping the call
+        // when the variable is set leaves the SDK's own default resource pipeline, which already
+        // reads it, untouched.
+        string? serviceNameFromEnvironment = Environment.GetEnvironmentVariable("OTEL_SERVICE_NAME");
+        bool serviceNameSetByEnvironment = !string.IsNullOrWhiteSpace(serviceNameFromEnvironment);
+        string serviceName = serviceNameSetByEnvironment
+            ? serviceNameFromEnvironment!
+            : OtlpOptions.ResolveServiceName(config.ServiceName);
+
         // Nothing past this point can take the server down. Every export runs on the SDK's own
         // background thread ("OpenTelemetry-PeriodicExportingMetricReader-..."), and
         // MetricReader.Collect wraps the collect-and-send in a catch that only writes to the SDK's
@@ -67,6 +86,13 @@ public sealed class PulseOtlpModSystem : ModSystem
         // nothing. Checked against OpenTelemetry 1.18.0.
         provider = Sdk.CreateMeterProviderBuilder()
             .AddMeter(meters)
+            .ConfigureResource(r =>
+            {
+                if (!serviceNameSetByEnvironment)
+                {
+                    r.AddService(serviceName);
+                }
+            })
             .AddOtlpExporter((exporter, reader) =>
             {
                 exporter.Endpoint = endpoint;
@@ -77,9 +103,9 @@ public sealed class PulseOtlpModSystem : ModSystem
             .Build();
 
         api.Logger.Notification(
-            "Pulse OTLP exporting {0} to {1} over {2} every {3}s",
+            "Pulse OTLP exporting {0} to {1} over {2} every {3}s as service '{4}'",
             string.Join(", ", meters), endpoint,
-            protocol == OtlpExportProtocol.Grpc ? "grpc" : "http/protobuf", intervalMs / 1000);
+            protocol == OtlpExportProtocol.Grpc ? "grpc" : "http/protobuf", intervalMs / 1000, serviceName);
     }
 
     public override void Dispose()

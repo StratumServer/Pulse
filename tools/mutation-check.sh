@@ -187,6 +187,10 @@ mutate Pulse.Otlp/OtlpOptions.cs \
     's/\.Where\(h => !string\.IsNullOrWhiteSpace\(h\.Key\)\)//' \
     "otlp: a header with no name is rendered anyway"
 
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/string\.IsNullOrWhiteSpace\(configuredName\)/!string.IsNullOrWhiteSpace(configuredName)/' \
+    "otlp: a blank ServiceName exports as-is and a real one is replaced by the default"
+
 # Every mutation is reverted in the source, but the last one of each block was built before it
 # was, so the binaries on disk still carry it. Leave them matching the tree: anything running
 # with --no-build after this script would otherwise fail for reasons that are nowhere in the
