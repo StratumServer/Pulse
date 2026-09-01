@@ -33,3 +33,13 @@ first.
   `RuntimeMetrics` config flag, on by default: GC, heap, working set, CPU time, JIT, thread
   pool, exceptions.
 - Two config keys: `RuntimeMetrics` (bool, true) and `ChunksRefreshSeconds` (int, 30).
+- OTLP export, as a second optional mod (`pulseotlp`) shipped from the same repo and the same
+  tag. It carries the OpenTelemetry SDK and its dependencies so the base mod stays a single dll
+  with nothing to collide with, and it reaches the base mod through the meter name `Pulse.Server`
+  rather than an assembly reference.
+- `ModConfig/pulse-otlp.json` with `Enabled`, `Endpoint`, `Protocol` (`http/protobuf` or `grpc`),
+  `Headers` for backend authentication, `IntervalSeconds` (60, floored at 5) and
+  `IncludeRuntimeMetrics`, which is independent of the base mod's `RuntimeMetrics`.
+- An unknown `Protocol` warns and exports over `http/protobuf`; an `Endpoint` that is not an http
+  or https URL logs an error and registers nothing. A collector that is unreachable or refusing
+  costs the game server nothing, since the SDK exports from its own thread.
