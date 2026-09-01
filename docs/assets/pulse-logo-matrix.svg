@@ -1,0 +1,57 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 320" width="480" height="320">
+  <defs>
+    <filter id="mglow" x="-150%" y="-150%" width="400%" height="400%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <clipPath id="lensL"><ellipse cx="168" cy="126" rx="62" ry="44"/></clipPath>
+    <clipPath id="lensR"><ellipse cx="312" cy="126" rx="62" ry="44"/></clipPath>
+  </defs>
+
+  <rect x="0" y="0" width="480" height="320" fill="#000000"/>
+
+  <g font-family="Courier New, monospace" font-size="15" fill="#0f9d3f">
+    <text x="18" y="0" opacity="0.22"><tspan x="18" dy="20">ﾊ</tspan><tspan x="18" dy="20">ﾐ</tspan><tspan x="18" dy="20">7</tspan><tspan x="18" dy="20">ｼ</tspan><tspan x="18" dy="20">ﾅ</tspan><tspan x="18" dy="20">ﾓ</tspan><tspan x="18" dy="20">0</tspan><tspan x="18" dy="20">ﾆ</tspan><tspan x="18" dy="20">ｻ</tspan><tspan x="18" dy="20">ﾜ</tspan><tspan x="18" dy="20">ﾂ</tspan><tspan x="18" dy="20">ｵ</tspan><tspan x="18" dy="20">ﾘ</tspan><tspan x="18" dy="20">ｱ</tspan><tspan x="18" dy="20">ﾎ</tspan></text>
+    <text x="52" y="-30" opacity="0.14"><tspan x="52" dy="20">ﾃ</tspan><tspan x="52" dy="20">9</tspan><tspan x="52" dy="20">ﾏ</tspan><tspan x="52" dy="20">ｹ</tspan><tspan x="52" dy="20">ﾒ</tspan><tspan x="52" dy="20">ｴ</tspan><tspan x="52" dy="20">ｶ</tspan><tspan x="52" dy="20">4</tspan><tspan x="52" dy="20">ｷ</tspan><tspan x="52" dy="20">ﾑ</tspan><tspan x="52" dy="20">ﾗ</tspan><tspan x="52" dy="20">ｾ</tspan><tspan x="52" dy="20">ﾈ</tspan><tspan x="52" dy="20">ﾕ</tspan><tspan x="52" dy="20">ﾎ</tspan><tspan x="52" dy="20">1</tspan><tspan x="52" dy="20">ｳ</tspan></text>
+    <text x="86" y="10" opacity="0.30"><tspan x="86" dy="20">ｳ</tspan><tspan x="86" dy="20">ﾈ</tspan><tspan x="86" dy="20">ｵ</tspan><tspan x="86" dy="20">3</tspan><tspan x="86" dy="20">ﾜ</tspan><tspan x="86" dy="20">ﾋ</tspan><tspan x="86" dy="20">ﾐ</tspan><tspan x="86" dy="20">8</tspan><tspan x="86" dy="20">ｶ</tspan><tspan x="86" dy="20">ﾃ</tspan><tspan x="86" dy="20">ﾂ</tspan><tspan x="86" dy="20">ｼ</tspan><tspan x="86" dy="20" fill="#b8ffcc" opacity="0.9">ﾅ</tspan></text>
+    <text x="120" y="-16" opacity="0.17"><tspan x="120" dy="20">ﾓ</tspan><tspan x="120" dy="20">ｱ</tspan><tspan x="120" dy="20">ﾘ</tspan><tspan x="120" dy="20">5</tspan><tspan x="120" dy="20">ｹ</tspan><tspan x="120" dy="20">ﾒ</tspan><tspan x="120" dy="20">ﾊ</tspan><tspan x="120" dy="20">ｻ</tspan><tspan x="120" dy="20">2</tspan><tspan x="120" dy="20">ﾎ</tspan><tspan x="120" dy="20">ﾕ</tspan><tspan x="120" dy="20">ｷ</tspan><tspan x="120" dy="20">ﾗ</tspan><tspan x="120" dy="20">ﾃ</tspan><tspan x="120" dy="20">ｴ</tspan><tspan x="120" dy="20">ﾑ</tspan></text>
+    <text x="154" y="4" opacity="0.12"><tspan x="154" dy="20">ｶ</tspan><tspan x="154" dy="20">ﾜ</tspan><tspan x="154" dy="20">6</tspan><tspan x="154" dy="20">ﾈ</tspan><tspan x="154" dy="20">ｳ</tspan><tspan x="154" dy="20">ﾋ</tspan><tspan x="154" dy="20">ﾏ</tspan><tspan x="154" dy="20">ｵ</tspan><tspan x="154" dy="20">ﾂ</tspan><tspan x="154" dy="20">9</tspan><tspan x="154" dy="20">ｼ</tspan><tspan x="154" dy="20">ﾅ</tspan><tspan x="154" dy="20">ﾓ</tspan><tspan x="154" dy="20">ﾐ</tspan></text>
+    <text x="188" y="-24" opacity="0.20"><tspan x="188" dy="20">ﾆ</tspan><tspan x="188" dy="20">ｻ</tspan><tspan x="188" dy="20">ﾘ</tspan><tspan x="188" dy="20">ｱ</tspan><tspan x="188" dy="20">0</tspan><tspan x="188" dy="20">ﾃ</tspan><tspan x="188" dy="20">ｹ</tspan><tspan x="188" dy="20">ﾒ</tspan><tspan x="188" dy="20">ｴ</tspan><tspan x="188" dy="20">7</tspan><tspan x="188" dy="20">ｷ</tspan><tspan x="188" dy="20">ﾑ</tspan><tspan x="188" dy="20">ﾗ</tspan><tspan x="188" dy="20">ﾊ</tspan><tspan x="188" dy="20">ｾ</tspan><tspan x="188" dy="20">ﾈ</tspan><tspan x="188" dy="20">ﾕ</tspan></text>
+    <text x="222" y="6" opacity="0.15"><tspan x="222" dy="20">ﾎ</tspan><tspan x="222" dy="20">1</tspan><tspan x="222" dy="20">ｳ</tspan><tspan x="222" dy="20">ﾋ</tspan><tspan x="222" dy="20">ﾅ</tspan><tspan x="222" dy="20">ﾜ</tspan><tspan x="222" dy="20">ｵ</tspan><tspan x="222" dy="20">8</tspan><tspan x="222" dy="20">ﾂ</tspan><tspan x="222" dy="20">ｼ</tspan><tspan x="222" dy="20">ﾏ</tspan><tspan x="222" dy="20">ﾓ</tspan><tspan x="222" dy="20">ｶ</tspan></text>
+    <text x="256" y="-12" opacity="0.26"><tspan x="256" dy="20">ﾐ</tspan><tspan x="256" dy="20">ﾃ</tspan><tspan x="256" dy="20">4</tspan><tspan x="256" dy="20">ｹ</tspan><tspan x="256" dy="20">ﾒ</tspan><tspan x="256" dy="20">ｴ</tspan><tspan x="256" dy="20">ﾆ</tspan><tspan x="256" dy="20">ｻ</tspan><tspan x="256" dy="20">ﾘ</tspan><tspan x="256" dy="20">ｱ</tspan><tspan x="256" dy="20">3</tspan><tspan x="256" dy="20">ｷ</tspan><tspan x="256" dy="20">ﾑ</tspan><tspan x="256" dy="20">ﾗ</tspan><tspan x="256" dy="20" fill="#b8ffcc" opacity="0.85">ｾ</tspan></text>
+    <text x="290" y="2" opacity="0.13"><tspan x="290" dy="20">ﾈ</tspan><tspan x="290" dy="20">ﾕ</tspan><tspan x="290" dy="20">ﾎ</tspan><tspan x="290" dy="20">ｳ</tspan><tspan x="290" dy="20">5</tspan><tspan x="290" dy="20">ﾋ</tspan><tspan x="290" dy="20">ﾅ</tspan><tspan x="290" dy="20">ﾜ</tspan><tspan x="290" dy="20">ｵ</tspan><tspan x="290" dy="20">ﾂ</tspan><tspan x="290" dy="20">2</tspan><tspan x="290" dy="20">ｼ</tspan><tspan x="290" dy="20">ﾏ</tspan><tspan x="290" dy="20">ﾓ</tspan></text>
+    <text x="324" y="-20" opacity="0.19"><tspan x="324" dy="20">ｶ</tspan><tspan x="324" dy="20">ﾐ</tspan><tspan x="324" dy="20">ﾃ</tspan><tspan x="324" dy="20">ｹ</tspan><tspan x="324" dy="20">6</tspan><tspan x="324" dy="20">ﾒ</tspan><tspan x="324" dy="20">ｴ</tspan><tspan x="324" dy="20">ﾆ</tspan><tspan x="324" dy="20">ｻ</tspan><tspan x="324" dy="20">ﾘ</tspan><tspan x="324" dy="20">ｱ</tspan><tspan x="324" dy="20">9</tspan><tspan x="324" dy="20">ｷ</tspan><tspan x="324" dy="20">ﾑ</tspan><tspan x="324" dy="20">ﾗ</tspan><tspan x="324" dy="20">ﾊ</tspan></text>
+    <text x="358" y="8" opacity="0.28"><tspan x="358" dy="20">ｾ</tspan><tspan x="358" dy="20">ﾈ</tspan><tspan x="358" dy="20">ﾕ</tspan><tspan x="358" dy="20">1</tspan><tspan x="358" dy="20">ﾎ</tspan><tspan x="358" dy="20">ｳ</tspan><tspan x="358" dy="20">ﾋ</tspan><tspan x="358" dy="20">ﾅ</tspan><tspan x="358" dy="20">ﾜ</tspan><tspan x="358" dy="20">0</tspan><tspan x="358" dy="20">ｵ</tspan><tspan x="358" dy="20">ﾂ</tspan><tspan x="358" dy="20" fill="#b8ffcc" opacity="0.9">ｼ</tspan></text>
+    <text x="392" y="-8" opacity="0.16"><tspan x="392" dy="20">ﾏ</tspan><tspan x="392" dy="20">ﾓ</tspan><tspan x="392" dy="20">ｶ</tspan><tspan x="392" dy="20">ﾐ</tspan><tspan x="392" dy="20">8</tspan><tspan x="392" dy="20">ﾃ</tspan><tspan x="392" dy="20">ｹ</tspan><tspan x="392" dy="20">ﾒ</tspan><tspan x="392" dy="20">ｴ</tspan><tspan x="392" dy="20">ﾆ</tspan><tspan x="392" dy="20">ｻ</tspan><tspan x="392" dy="20">ﾘ</tspan><tspan x="392" dy="20">ｱ</tspan><tspan x="392" dy="20">7</tspan><tspan x="392" dy="20">ｷ</tspan><tspan x="392" dy="20">ﾑ</tspan></text>
+    <text x="426" y="12" opacity="0.22"><tspan x="426" dy="20">ﾗ</tspan><tspan x="426" dy="20">ﾊ</tspan><tspan x="426" dy="20">ｾ</tspan><tspan x="426" dy="20">ﾈ</tspan><tspan x="426" dy="20">ﾕ</tspan><tspan x="426" dy="20">ﾎ</tspan><tspan x="426" dy="20">3</tspan><tspan x="426" dy="20">ｳ</tspan><tspan x="426" dy="20">ﾋ</tspan><tspan x="426" dy="20">ﾅ</tspan><tspan x="426" dy="20">ﾜ</tspan><tspan x="426" dy="20">ｵ</tspan><tspan x="426" dy="20">ﾂ</tspan></text>
+    <text x="460" y="-4" opacity="0.12"><tspan x="460" dy="20">ｼ</tspan><tspan x="460" dy="20">ﾏ</tspan><tspan x="460" dy="20">5</tspan><tspan x="460" dy="20">ﾓ</tspan><tspan x="460" dy="20">ｶ</tspan><tspan x="460" dy="20">ﾐ</tspan><tspan x="460" dy="20">ﾃ</tspan><tspan x="460" dy="20">ｹ</tspan><tspan x="460" dy="20">ﾒ</tspan><tspan x="460" dy="20">ｴ</tspan><tspan x="460" dy="20">ﾆ</tspan><tspan x="460" dy="20">ｻ</tspan><tspan x="460" dy="20">ﾘ</tspan><tspan x="460" dy="20">ｱ</tspan><tspan x="460" dy="20">4</tspan></text>
+  </g>
+
+  <ellipse cx="168" cy="126" rx="66" ry="48" fill="#000000" opacity="0.72"/>
+  <ellipse cx="312" cy="126" rx="66" ry="48" fill="#000000" opacity="0.72"/>
+
+  <g clip-path="url(#lensL)">
+    <ellipse cx="168" cy="126" rx="62" ry="44" fill="#020c05"/>
+    <ellipse cx="146" cy="104" rx="42" ry="20" fill="#9dffb0" opacity="0.07" transform="rotate(-18 146 104)"/>
+    <path d="M 106 132 H 138 L 148 118 L 160 146 L 172 96 L 186 154 L 196 132 H 232"
+          fill="none" stroke="#00ff41" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#mglow)"/>
+  </g>
+  <g clip-path="url(#lensR)">
+    <ellipse cx="312" cy="126" rx="62" ry="44" fill="#020c05"/>
+    <ellipse cx="290" cy="104" rx="42" ry="20" fill="#9dffb0" opacity="0.07" transform="rotate(-18 290 104)"/>
+    <path d="M 250 132 H 282 L 292 118 L 304 146 L 316 96 L 330 154 L 340 132 H 376"
+          fill="none" stroke="#00ff41" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" filter="url(#mglow)"/>
+  </g>
+
+  <ellipse cx="168" cy="126" rx="62" ry="44" fill="none" stroke="#2a7a44" stroke-width="3.5"/>
+  <ellipse cx="312" cy="126" rx="62" ry="44" fill="none" stroke="#2a7a44" stroke-width="3.5"/>
+  <path d="M 228 118 Q 240 106 252 118" fill="none" stroke="#2a7a44" stroke-width="4" stroke-linecap="round"/>
+
+  <rect x="0" y="236" width="480" height="84" fill="#000000" opacity="0.66"/>
+  <text x="240" y="284" text-anchor="middle"
+        font-family="Courier New, monospace" font-size="44" font-weight="bold"
+        letter-spacing="20" fill="#00ff41" filter="url(#mglow)">PULSE</text>
+</svg>
