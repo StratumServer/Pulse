@@ -39,8 +39,10 @@ mutate() { # <file> <sed -E expression> <label>
     git checkout -- "$file"
 }
 
-if ! git diff --quiet -- Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs; then
-    echo "Pulse/PrometheusText.cs or Pulse/MetricsAggregator.cs has uncommitted changes; refusing to mutate over them."
+MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs"
+
+if ! git diff --quiet -- $MUTATED; then
+    echo "One of $MUTATED has uncommitted changes; refusing to mutate over them."
     exit 2
 fi
 
@@ -92,6 +94,10 @@ mutate Pulse/MetricsAggregator.cs \
 mutate Pulse/MetricsAggregator.cs \
     's/return bounds\.Length;/return 0;/' \
     "aggregator: overflow values land in the first bucket"
+
+mutate Pulse/LogClassifier.cs \
+    's/\("Server suspend requested, but reached max wait time", "suspend_timeout"\)/("Server suspend requested and reached max wait time", "suspend_timeout")/' \
+    "classifier: an engine warning prefix drifts from the engine string"
 
 echo
 echo "$((TOTAL - FAILS))/$TOTAL mutations killed"

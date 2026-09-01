@@ -21,7 +21,10 @@ public sealed class PulseModSystem : ModSystem
     // Written by the main thread, read by the ObservableGauge callbacks, which run on whatever
     // thread scrapes. World state in this engine is main-thread-only, so the callbacks read this
     // snapshot and nothing else.
-    private volatile Snapshot snapshot = new(0, 0, 0);
+    private volatile Snapshot snapshot = new(0, 0, 0, 0);
+
+    // Same handoff, own cadence: the loaded-chunk count is far too expensive to read every second.
+    private volatile int chunksLoaded;
 
     private ICoreServerAPI? sapi;
     private Meter? meter;
@@ -29,7 +32,11 @@ public sealed class PulseModSystem : ModSystem
     private MetricsHttpServer? http;
     private Counter<long>? ticks;
     private Histogram<double>? tickSeconds;
+    private Counter<long>? columnsGenerated;
+    private Counter<long>? logEntries;
+    private Counter<long>? engineWarnings;
     private long listenerId = -1;
+    private long chunksListenerId = -1;
     private double sinceSnapshotSeconds;
 
     public override bool ShouldLoad(EnumAppSide forSide) => forSide == EnumAppSide.Server;
@@ -58,8 +65,22 @@ public sealed class PulseModSystem : ModSystem
         meter.CreateObservableGauge(
             "pulse_server_tick_budget_seconds", () => snapshot.TickBudgetSeconds, "s",
             "Configured server tick budget in seconds.");
+        meter.CreateObservableGauge(
+            "pulse_worldgen_queue_columns", () => snapshot.WorldgenQueue, "{column}",
+            "Chunk columns waiting in the generation queue.");
+        meter.CreateObservableGauge(
+            "pulse_chunks_loaded", () => chunksLoaded, "{chunk}", "Chunks loaded in the world.");
+        columnsGenerated = meter.CreateCounter<long>(
+            "pulse_worldgen_columns_generated_total", "{column}",
+            "Chunk columns generated since startup.");
+        logEntries = meter.CreateCounter<long>(
+            "pulse_log_entries_total", "{entry}", "Log entries written since startup, by severity.");
+        engineWarnings = meter.CreateCounter<long>(
+            "pulse_engine_warnings_total", "{warning}",
+            "Engine health warnings logged since startup, by kind.");
 
         aggregator = new MetricsAggregator(MeterName);
+        SeedCounters();
         PublishSnapshot();
 
         // The errorHandler overload is not optional. Without it an exception from this listener
@@ -68,18 +89,33 @@ public sealed class PulseModSystem : ModSystem
         // a server: log and swallow.
         listenerId = api.Event.RegisterGameTickListener(OnTick, OnTickError, 0);
 
+        // AllLoadedChunks clones the whole loaded-chunk dictionary under the chunk lock on every
+        // call, so it gets its own slow listener rather than riding the per-second snapshot. The
+        // floor is there because a 0 in the config would clone that dictionary every tick.
+        chunksListenerId = api.Event.RegisterGameTickListener(
+            OnChunksTick, OnTickError, Math.Max(1, config.ChunksRefreshSeconds) * 1000);
+
+        // Worldgen events reach only the handlers registered for the save's own world type, so
+        // hardcoding "standard" would silently count nothing on a superflat or custom world.
+        api.Event.MapChunkGeneration(OnMapChunkGenerated, api.WorldManager.SaveGame?.WorldType ?? "standard");
+        api.Logger.EntryAdded += OnLogEntry;
+
         StartEndpoint(api, config);
     }
 
     public override void Dispose()
     {
         http?.Dispose();
-        if (listenerId >= 0)
+        if (sapi != null)
         {
-            sapi?.Event.UnregisterGameTickListener(listenerId);
-            listenerId = -1;
+            sapi.Logger.EntryAdded -= OnLogEntry;
         }
 
+        UnregisterListener(ref listenerId);
+        UnregisterListener(ref chunksListenerId);
+
+        // MapChunkGeneration has no unregister counterpart. The handler stays on the engine's
+        // worldgen list until shutdown wipes it, and does nothing once the meter below is gone.
         aggregator?.Dispose();
         meter?.Dispose();
     }
@@ -137,6 +173,61 @@ public sealed class PulseModSystem : ModSystem
 
     private void OnTickError(Exception e) => sapi?.Logger.Error(e);
 
+    private void OnChunksTick(float _) => chunksLoaded = sapi!.WorldManager.AllLoadedChunks.Count;
+
+    /// <summary>Counts one newly generated chunk column.</summary>
+    /// <remarks>This fires on the worldgen thread, not the main thread. Counting is the only thing
+    /// it may do: no world reads, no snapshot writes, nothing that is not thread-safe on its
+    /// own.</remarks>
+    private void OnMapChunkGenerated(IMapChunk mapChunk, int chunkX, int chunkZ)
+        => columnsGenerated!.Add(1);
+
+    /// <summary>Counts one log entry by severity, and by engine warning when it is one.</summary>
+    /// <remarks>This fires on whatever thread wrote the entry, engine threads included. Classify,
+    /// count, return: the handler must never log, because ILogger.Error catches a throwing handler
+    /// by logging another error straight back through here, and must never read the world, because
+    /// it is not on the main thread.</remarks>
+    private void OnLogEntry(EnumLogType type, string message, params object[] args)
+    {
+        string? level = LogClassifier.Level(type);
+        if (level != null)
+        {
+            logEntries!.Add(1, new KeyValuePair<string, object?>("level", level));
+        }
+
+        string? kind = LogClassifier.EngineWarning(type, message);
+        if (kind != null)
+        {
+            engineWarnings!.Add(1, new KeyValuePair<string, object?>("kind", kind));
+        }
+    }
+
+    /// <summary>Records a zero for every label value Pulse can emit, so the counters exist from
+    /// boot instead of appearing the first time something goes wrong. A series starts at its first
+    /// measurement, and a family that shows up mid-scrape is a family no dashboard plots.</summary>
+    private void SeedCounters()
+    {
+        columnsGenerated!.Add(0);
+        foreach (string level in LogClassifier.Levels)
+        {
+            logEntries!.Add(0, new KeyValuePair<string, object?>("level", level));
+        }
+
+        foreach (string kind in LogClassifier.Kinds)
+        {
+            engineWarnings!.Add(0, new KeyValuePair<string, object?>("kind", kind));
+        }
+    }
+
+    private void UnregisterListener(ref long id)
+    {
+        if (id >= 0)
+        {
+            sapi?.Event.UnregisterGameTickListener(id);
+            id = -1;
+        }
+    }
+
     private void PublishSnapshot()
     {
         ICoreServerAPI api = sapi!;
@@ -146,9 +237,10 @@ public sealed class PulseModSystem : ModSystem
         snapshot = new Snapshot(
             api.World.AllOnlinePlayers.Length,
             api.World.LoadedEntities.Count,
-            api.Server.Config.TickTime / 1000.0);
+            api.Server.Config.TickTime / 1000.0,
+            api.WorldManager.CurrentGeneratingChunkCount);
     }
 
     /// <summary>Immutable handoff from the main thread to the scrape thread.</summary>
-    private sealed record Snapshot(int Players, int Entities, double TickBudgetSeconds);
+    private sealed record Snapshot(int Players, int Entities, double TickBudgetSeconds, int WorldgenQueue);
 }
