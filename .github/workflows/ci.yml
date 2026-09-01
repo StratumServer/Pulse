@@ -60,8 +60,8 @@ jobs:
             --logger "trx;LogFileName=otlp-unit-tests.trx" \
             --results-directory TestResults
 
-      # Applies representative mutations to the aggregator, the writer and the log classifier one
-      # at a time and requires the unit suite to fail on each. Stand-in for Stryker, which does
+      # Applies representative mutations to every file holding logic the unit suites can drive,
+      # one at a time, and requires the suite to fail on each. Stand-in for Stryker, which does
       # not yet run correctly on the .NET 10 SDK.
       - name: Mutation check
         run: ./tools/mutation-check.sh

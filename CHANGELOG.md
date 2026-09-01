@@ -43,3 +43,26 @@ first.
 - An unknown `Protocol` warns and exports over `http/protobuf`; an `Endpoint` that is not an http
   or https URL logs an error and registers nothing. A collector that is unreachable or refusing
   costs the game server nothing, since the SDK exports from its own thread.
+- The engine's own accounting, read through a guarded cast to the concrete server type:
+  `pulse_server_tick_busy_seconds_avg` (the number `/stats` prints, and the only view of tick
+  headroom below the budget that exists), `pulse_network_packets_in_window{channel}` and
+  `pulse_network_bytes_in_window{channel}` over the engine's completed two-second window,
+  `pulse_connection_queue_clients`, and the UDP byte totals
+  `pulse_network_udp_sent_bytes_total` and `pulse_network_udp_received_bytes_total`.
+- Degraded mode for those six: the cast is resolved once at startup inside a try/catch and every
+  read of a concrete engine type lives in one class. A failure logs one warning and the six
+  families are absent rather than wrong; every other metric keeps being served.
+- From the public server API, no cast involved: `pulse_server_uptime_seconds`,
+  `pulse_network_sent_bytes_total` and `pulse_network_received_bytes_total` (main TCP channel
+  only, as the help text says), `pulse_player_deaths_total`, `pulse_player_ping_seconds{stat}`
+  as `avg` and `max`, and `pulse_server_suspends_total` with
+  `pulse_server_suspend_seconds_total` bracketing every autosave pause.
+- `pulse_entities_by_code{code}`, the ten most numerous entity codes plus an `other` bucket,
+  refreshed on the `ChunksRefreshSeconds` listener. A code that drops out of the top ten is
+  explicitly zeroed once, so its series retires instead of freezing at its last count.
+
+### Fixed
+
+- The exposition writer now groups every series of a metric family together. Series of one
+  family are opened whenever a tag set is first measured, so a labelled family could previously
+  be split across the body with other families in between.

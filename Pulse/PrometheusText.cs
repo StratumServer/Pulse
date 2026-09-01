@@ -10,22 +10,26 @@ public static class PrometheusText
     {
         StringBuilder sb = new();
 
-        // HELP and TYPE belong to the family, not to the series: a labelled family has one sample
-        // per tag set and repeating the two header lines makes Prometheus reject the whole scrape.
-        HashSet<string> described = [];
-        foreach (MetricSample sample in samples)
+        // Grouped by family, in the order the families first appear. HELP and TYPE belong to the
+        // family, not to the series, and the exposition format wants every series of a family
+        // together in one block. The series of one family do not necessarily arrive together:
+        // a labelled family opens a new series whenever a tag set is measured for the first time,
+        // which for the entity breakdown happens minutes into a server's life.
+        foreach (IGrouping<string, MetricSample> family in
+                 samples.GroupBy(sample => MetricName(sample.Name, sample.Kind)))
         {
-            string name = MetricName(sample.Name, sample.Kind);
-            if (described.Add(name))
-            {
-                // ponytail: HELP text is not escaped. Help strings come from instrument
-                // descriptions written in this assembly and in the runtime's own meter, none of
-                // which carry a backslash or a newline. Escape it the day help text is user input.
-                sb.Append("# HELP ").Append(name).Append(' ').Append(sample.Help).Append('\n');
-                sb.Append("# TYPE ").Append(name).Append(' ').Append(TypeName(sample.Kind)).Append('\n');
-            }
+            MetricSample first = family.First();
 
-            Append(sb, sample, name);
+            // ponytail: HELP text is not escaped. Help strings come from instrument
+            // descriptions written in this assembly and in the runtime's own meter, none of
+            // which carry a backslash or a newline. Escape it the day help text is user input.
+            sb.Append("# HELP ").Append(family.Key).Append(' ').Append(first.Help).Append('\n');
+            sb.Append("# TYPE ").Append(family.Key).Append(' ').Append(TypeName(first.Kind)).Append('\n');
+
+            foreach (MetricSample sample in family)
+            {
+                Append(sb, sample, family.Key);
+            }
         }
 
         return sb.ToString();

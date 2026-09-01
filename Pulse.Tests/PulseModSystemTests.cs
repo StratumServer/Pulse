@@ -13,21 +13,25 @@ public class PulseModSystemTests
         => $"Pulse.Test.{caller}.{Guid.NewGuid():N}";
 
     [Fact]
-    public void SeedCounters_Seeds_EveryDeclaredLevelAndKind_AtZero()
+    public void SeedCounters_Seeds_EveryUntaggedCounterAndEveryDeclaredLevelAndKind_AtZero()
     {
         string meterName = UniqueMeterName();
         using Meter meter = new(meterName);
         using MetricsAggregator aggregator = new(meterName);
         Counter<long> columnsGenerated = meter.CreateCounter<long>("columns_total", "{column}", "C.");
+        Counter<long> deaths = meter.CreateCounter<long>("deaths_total", "{death}", "D.");
         Counter<long> logEntries = meter.CreateCounter<long>("log_entries_total", "{entry}", "L.");
         Counter<long> engineWarnings = meter.CreateCounter<long>("engine_warnings_total", "{warning}", "W.");
+        Counter<double> suspendSeconds = meter.CreateCounter<double>("suspend_seconds_total", "s", "S.");
 
         MethodInfo seedCounters = typeof(PulseModSystem)
             .GetMethod("SeedCounters", BindingFlags.NonPublic | BindingFlags.Static)!;
-        seedCounters.Invoke(null, [columnsGenerated, logEntries, engineWarnings]);
+        seedCounters.Invoke(null, [logEntries, engineWarnings, suspendSeconds, new[] { columnsGenerated, deaths }]);
 
         IReadOnlyList<MetricSample> samples = aggregator.Collect();
         Assert.Equal(0, samples.Single(s => s.Name == "columns_total").Value);
+        Assert.Equal(0, samples.Single(s => s.Name == "deaths_total").Value);
+        Assert.Equal(0, samples.Single(s => s.Name == "suspend_seconds_total").Value);
 
         List<MetricSample> logSamples = samples.Where(s => s.Name == "log_entries_total").ToList();
         Assert.Equal(LogClassifier.Levels.Count, logSamples.Count);
