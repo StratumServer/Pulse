@@ -9,6 +9,9 @@ public sealed class PulseModSystem : ModSystem
 {
     public const string MeterName = "Pulse.Server";
 
+    /// <summary>The runtime's own meter, published by the shared framework on .NET 8 and up.</summary>
+    private const string RuntimeMeterName = "System.Runtime";
+
     private const string ConfigFile = "pulse.json";
     private const double SnapshotIntervalSeconds = 1.0;
 
@@ -79,7 +82,11 @@ public sealed class PulseModSystem : ModSystem
             "pulse_engine_warnings_total", "{warning}",
             "Engine health warnings logged since startup, by kind.");
 
-        aggregator = new MetricsAggregator(MeterName);
+        // The runtime publishes System.Runtime itself, so listening to it is the whole of the
+        // integration: no instrumentation, no dependency, dotted OpenTelemetry names that the
+        // writer maps on the way out.
+        string[] meters = config.RuntimeMetrics ? [MeterName, RuntimeMeterName] : [MeterName];
+        aggregator = new MetricsAggregator(OnUnsupportedInstrument, meters);
         SeedCounters();
         PublishSnapshot();
 
@@ -172,6 +179,11 @@ public sealed class PulseModSystem : ModSystem
     }
 
     private void OnTickError(Exception e) => sapi?.Logger.Error(e);
+
+    /// <summary>A meter published an instrument shape the exporter has no rendering for. Say so
+    /// once, at publish time, and serve everything else.</summary>
+    private void OnUnsupportedInstrument(string name)
+        => sapi?.Logger.Debug("Pulse skips metric {0}: unsupported instrument shape.", name);
 
     private void OnChunksTick(float _) => chunksLoaded = sapi!.WorldManager.AllLoadedChunks.Count;
 
