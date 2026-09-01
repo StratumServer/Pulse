@@ -2,7 +2,7 @@
   "type": "code",
   "modid": "pulse",
   "name": "Pulse",
-  "version": "0.2.0",
+  "version": "0.1.0",
   "description": "Serves Vintage Story server health metrics on a local Prometheus scrape endpoint.",
   "authors": [ "Pixnop" ],
   "side": "server",
