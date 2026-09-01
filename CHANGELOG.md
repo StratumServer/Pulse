@@ -8,6 +8,14 @@ first.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.1.0] - 2026-09-01
+
+The first stable release, identical in content to v0.1.0-indev.5. Field-tested on a hosting
+provider's server, feeding one game panel's live metrics page, and exercised against the
+official OpenTelemetry collector.
+
 ### Added
 
 - Prometheus scrape endpoint on a dedicated thread, loopback by default, port 9464,
