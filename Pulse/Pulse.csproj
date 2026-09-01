@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>$(FrameworkVersion)</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <CopyLocalLockFileAssemblies>false</CopyLocalLockFileAssemblies>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- No PackageReference on purpose. The mod loader loads every root dll of every mod into
+         one shared context, so a bundled dependency is a collision risk against every other
+         mod on the server. System.Diagnostics.Metrics ships in the net10.0 shared framework. -->
+    <Reference Include="VintagestoryAPI" HintPath="$(VINTAGE_STORY)/VintagestoryAPI.dll" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="modinfo.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Packaging: modinfo.json and Pulse.dll at the ZIP ROOT, nothing else. The loader rejects
+       dlls in subfolders and loads every dll it finds at the root. -->
+  <Target Name="PackageMod" DependsOnTargets="Build">
+    <PropertyGroup>
+      <PulseStageDir>$(IntermediateOutputPath)package/</PulseStageDir>
+      <PulseZipPath>$(MSBuildThisFileDirectory)../artifacts/pulse_$(Version).zip</PulseZipPath>
+    </PropertyGroup>
+    <RemoveDir Directories="$(PulseStageDir)" />
+    <MakeDir Directories="$(PulseStageDir);$(MSBuildThisFileDirectory)../artifacts" />
+    <Copy SourceFiles="$(TargetPath);$(MSBuildThisFileDirectory)modinfo.json" DestinationFolder="$(PulseStageDir)" />
+    <Delete Files="$(PulseZipPath)" />
+    <ZipDirectory SourceDirectory="$(PulseStageDir)" DestinationFile="$(PulseZipPath)" />
+    <Message Importance="high" Text="Packaged $(PulseZipPath)" />
+  </Target>
+</Project>

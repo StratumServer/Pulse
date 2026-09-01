@@ -1,0 +1,13 @@
+{
+  "type": "code",
+  "modid": "pulse",
+  "name": "Pulse",
+  "version": "0.1.0",
+  "description": "Serves Vintage Story server health metrics on a local Prometheus scrape endpoint.",
+  "authors": [ "Pixnop" ],
+  "side": "server",
+  "requiredOnClient": false,
+  "dependencies": {
+    "game": "1.22.0"
+  }
+}
