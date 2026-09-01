@@ -82,12 +82,18 @@ jobs:
           # straight into a run block ends up in the generated script.
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
+          # PulseModSystem is excluded from coverage the way Nimbus excludes its ServerMod: the
+          # Atlas scenarios exercise it against a live embedded server, but the game's loader
+          # loads the staged dll outside coverlet's instrumentation, so that execution can never
+          # reach a coverage report. Everything with coverable logic lives in the classes the
+          # unit suite drives directly, and those stay under the 80% gate.
           dotnet sonarscanner begin \
             /k:"StratumServer_Pulse" \
             /o:"stratumserver" \
             /d:sonar.token="$SONAR_TOKEN" \
             /d:sonar.host.url="https://sonarcloud.io" \
             /d:sonar.exclusions="**/bin/**,**/obj/**" \
+            /d:sonar.coverage.exclusions="Pulse/PulseModSystem.cs" \
             /d:sonar.cs.opencover.reportsPaths="**/TestResults/**/coverage.opencover.xml"
 
       - name: Build
