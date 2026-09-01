@@ -50,12 +50,9 @@ internal sealed class EntityBreakdown(int limit)
         values.Add(new KeyValuePair<string, long>(OtherCode, total - top));
 
         HashSet<string> current = [.. values.Select(entry => entry.Key)];
-        foreach (string code in published)
+        foreach (string code in published.Where(code => !current.Contains(code)))
         {
-            if (!current.Contains(code))
-            {
-                values.Add(new KeyValuePair<string, long>(code, 0));
-            }
+            values.Add(new KeyValuePair<string, long>(code, 0));
         }
 
         published = [.. current];
