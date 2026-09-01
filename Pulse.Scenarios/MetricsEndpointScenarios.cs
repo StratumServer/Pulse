@@ -41,9 +41,9 @@ public class MetricsEndpointScenarios : AtlasScenarioBase
     /// one goes missing, the probe degraded and the scenario has caught exactly what it is for.</summary>
     private static readonly string[] EngineFamilies =
     [
-        "pulse_server_tick_busy_seconds_avg",
-        "pulse_network_packets_in_window",
-        "pulse_network_bytes_in_window",
+        "pulse_server_tick_busy_seconds",
+        "pulse_network_packets_per_second",
+        "pulse_network_bytes_per_second",
         "pulse_connection_queue_clients",
         "pulse_network_udp_sent_bytes_total",
         "pulse_network_udp_received_bytes_total",
@@ -201,10 +201,10 @@ public class MetricsEndpointScenarios : AtlasScenarioBase
             Assert.Contains("# TYPE " + family + " ", body);
         }
 
-        Assert.Contains("pulse_network_packets_in_window{channel=\"tcp\"} ", body);
-        Assert.Contains("pulse_network_packets_in_window{channel=\"udp\"} ", body);
-        Assert.Contains("pulse_network_bytes_in_window{channel=\"tcp\"} ", body);
-        Assert.Contains("pulse_network_bytes_in_window{channel=\"udp\"} ", body);
+        Assert.Contains("pulse_network_packets_per_second{channel=\"tcp\"} ", body);
+        Assert.Contains("pulse_network_packets_per_second{channel=\"udp\"} ", body);
+        Assert.Contains("pulse_network_bytes_per_second{channel=\"tcp\"} ", body);
+        Assert.Contains("pulse_network_bytes_per_second{channel=\"udp\"} ", body);
     }
 
     [AtlasScenario]
@@ -215,7 +215,7 @@ public class MetricsEndpointScenarios : AtlasScenarioBase
         await World.Ticks(90);
 
         string body = await Scrape.Metrics(Port);
-        double busy = Scrape.Value(body, "pulse_server_tick_busy_seconds_avg");
+        double busy = Scrape.Value(body, "pulse_server_tick_busy_seconds");
         double budget = Scrape.Value(body, "pulse_server_tick_budget_seconds");
 
         // Not asserted above zero on purpose: the engine accumulates whole milliseconds per tick,

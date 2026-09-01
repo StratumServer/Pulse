@@ -40,13 +40,13 @@ The metric families it serves:
 Six more come from the engine's own accounting, which no public API exposes. See the note on
 degraded mode below for what happens when they are unavailable.
 
-- `pulse_server_tick_busy_seconds_avg` (gauge): the average time one tick spent working, sleep
+- `pulse_server_tick_busy_seconds` (gauge): the average time one tick spent working, sleep
   excluded, over the engine's last completed two-second window. This is the number `/stats`
   prints, and the only view of headroom below the tick budget that exists at all. The engine
   measures in whole milliseconds, so an idle server legitimately averages zero.
-- `pulse_network_packets_in_window{channel}` and `pulse_network_bytes_in_window{channel}`
-  (gauges): traffic during that same two-second window, split `tcp` and `udp`. Gauges rather
-  than counters because the engine zeroes the window rather than accumulating it.
+- `pulse_network_packets_per_second{channel}` and `pulse_network_bytes_per_second{channel}`
+  (gauges): traffic rates over that same window, split `tcp` and `udp`. Gauges rather
+  than counters because the engine zeroes its window rather than accumulating it; a window cut short by a suspend reads low for one sample.
 - `pulse_connection_queue_clients` (gauge): clients waiting because the server is full.
 - `pulse_network_udp_sent_bytes_total` and `pulse_network_udp_received_bytes_total` (counters):
   the UDP totals missing from the two public byte counters above.

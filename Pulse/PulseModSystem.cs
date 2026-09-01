@@ -272,14 +272,14 @@ public sealed class PulseModSystem : ModSystem
         }
 
         engineMeter.CreateObservableGauge(
-            "pulse_server_tick_busy_seconds_avg", () => engine?.TickBusySeconds ?? 0, "s",
+            "pulse_server_tick_busy_seconds", () => engine?.TickBusySeconds ?? 0, "s",
             "Average time one tick spent working over the engine's last completed two second window, sleep excluded.");
         engineMeter.CreateObservableGauge(
-            "pulse_network_packets_in_window", PacketMeasurements,
-            "{packet}", "Packets handled during the engine's last completed two second window.");
+            "pulse_network_packets_per_second", PacketMeasurements,
+            "{packet}/s", "Packet rate over the engine's last completed statistics window, nominally two seconds.");
         engineMeter.CreateObservableGauge(
-            "pulse_network_bytes_in_window", ByteMeasurements,
-            "By", "Bytes handled during the engine's last completed two second window.");
+            "pulse_network_bytes_per_second", ByteMeasurements,
+            "By/s", "Byte rate over the engine's last completed statistics window, nominally two seconds.");
         engineMeter.CreateObservableGauge(
             "pulse_connection_queue_clients", () => engine?.ConnectionQueue ?? 0, "{client}",
             "Clients waiting in the connection queue because the server is full.");
@@ -358,22 +358,30 @@ public sealed class PulseModSystem : ModSystem
 
     /// <summary>Both windowed network families read the same sample once, so their two channels
     /// always describe the same two seconds.</summary>
-    private IEnumerable<Measurement<long>> PacketMeasurements()
+    /// <summary>The engine rotates its statistics ring every two seconds, a constant wired into
+    /// the tick loop, so a completed bucket nominally spans this long. A bucket cut short around a
+    /// suspend makes the rate read low for one window; the engine's own /stats has the same
+    /// approximation.</summary>
+    private const double EngineWindowSeconds = 2.0;
+
+    private IEnumerable<Measurement<double>> PacketMeasurements()
     {
         EngineSample? sample = engine;
-        return ChannelMeasurements(sample?.TcpPackets ?? 0, sample?.UdpPackets ?? 0);
+        return ChannelMeasurements(
+            (sample?.TcpPackets ?? 0) / EngineWindowSeconds, (sample?.UdpPackets ?? 0) / EngineWindowSeconds);
     }
 
-    private IEnumerable<Measurement<long>> ByteMeasurements()
+    private IEnumerable<Measurement<double>> ByteMeasurements()
     {
         EngineSample? sample = engine;
-        return ChannelMeasurements(sample?.TcpBytes ?? 0, sample?.UdpBytes ?? 0);
+        return ChannelMeasurements(
+            (sample?.TcpBytes ?? 0) / EngineWindowSeconds, (sample?.UdpBytes ?? 0) / EngineWindowSeconds);
     }
 
-    private static IEnumerable<Measurement<long>> ChannelMeasurements(long tcp, long udp) =>
+    private static IEnumerable<Measurement<double>> ChannelMeasurements(double tcp, double udp) =>
     [
-        new Measurement<long>(tcp, new KeyValuePair<string, object?>("channel", "tcp")),
-        new Measurement<long>(udp, new KeyValuePair<string, object?>("channel", "udp")),
+        new Measurement<double>(tcp, new KeyValuePair<string, object?>("channel", "tcp")),
+        new Measurement<double>(udp, new KeyValuePair<string, object?>("channel", "udp")),
     ];
 
     private static IEnumerable<Measurement<double>> PingMeasurements(Snapshot from) =>
