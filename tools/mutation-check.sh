@@ -187,6 +187,12 @@ mutate Pulse.Otlp/OtlpOptions.cs \
     's/\.Where\(h => !string\.IsNullOrWhiteSpace\(h\.Key\)\)//' \
     "otlp: a header with no name is rendered anyway"
 
+# Every mutation is reverted in the source, but the last one of each block was built before it
+# was, so the binaries on disk still carry it. Leave them matching the tree: anything running
+# with --no-build after this script would otherwise fail for reasons that are nowhere in the
+# source it is looking at.
+dotnet build Pulse.slnx -c Release --nologo >/dev/null 2>&1
+
 echo
 echo "$((TOTAL - FAILS))/$TOTAL mutations killed"
 if [[ "$FAILS" -ne 0 ]]; then
