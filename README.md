@@ -5,6 +5,9 @@ Prometheus scrape endpoint. It runs on the dedicated server only, ships as a sin
 bundled dependencies, and does not talk to anything on its own: something has to come and read
 `/metrics`. A separate optional mod pushes the same metrics over OTLP, described further down.
 
+Grab both from the [ModDB page](https://mods.vintagestory.at/pulse) or from
+[GitHub releases](https://github.com/StratumServer/Pulse/releases).
+
 The metric families it serves:
 
 - `pulse_server_ticks_total` (counter): server ticks processed since startup. Prometheus
