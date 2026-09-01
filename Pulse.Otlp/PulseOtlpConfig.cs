@@ -28,4 +28,13 @@ public sealed class PulseOtlpConfig
     /// base mod's RuntimeMetrics flag: that one decides what the scrape endpoint serves, this one
     /// decides what gets pushed, and a host may well want different answers.</summary>
     public bool IncludeRuntimeMetrics { get; set; } = true;
+
+    /// <summary>The service.name resource attribute every export carries. This is how a backend
+    /// that receives metrics from more than one server tells them apart: grouping, filtering and
+    /// dashboard variables are usually keyed off it. A blank value falls back to the default
+    /// rather than exporting an empty attribute; see <see cref="OtlpOptions.ResolveServiceName"/>.
+    /// The OTEL_SERVICE_NAME environment variable, the ecosystem's standard override, takes
+    /// precedence over this key when it is set: see the guard in
+    /// PulseOtlpModSystem.StartServerSide.</summary>
+    public string ServiceName { get; set; } = "vintagestory";
 }
