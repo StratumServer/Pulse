@@ -165,6 +165,36 @@ public class PrometheusTextTests
             text);
     }
 
+    /// <summary>Series of one family do not necessarily reach the writer together. A labelled
+    /// gauge opens a series the first time a tag set is measured, so the entity breakdown starts
+    /// one series at boot and another an hour later, with whatever else was published in between
+    /// sitting between them.</summary>
+    [Fact]
+    public void Render_Gathers_TheSeriesOfAFamily_EvenWhenTheyArriveApart()
+    {
+        string text = PrometheusText.Render([
+            new MetricSample("pulse_entities_by_code", MetricKind.Gauge, "By code.", 4)
+            {
+                Labels = [new("code", "other")],
+            },
+            new MetricSample("pulse_players_online", MetricKind.Gauge, "Players.", 2),
+            new MetricSample("pulse_entities_by_code", MetricKind.Gauge, "By code.", 9)
+            {
+                Labels = [new("code", "drifter")],
+            },
+        ]);
+
+        Assert.Equal(
+            "# HELP pulse_entities_by_code By code.\n" +
+            "# TYPE pulse_entities_by_code gauge\n" +
+            "pulse_entities_by_code{code=\"other\"} 4\n" +
+            "pulse_entities_by_code{code=\"drifter\"} 9\n" +
+            "# HELP pulse_players_online Players.\n" +
+            "# TYPE pulse_players_online gauge\n" +
+            "pulse_players_online 2\n",
+            text);
+    }
+
     [Theory]
     [InlineData("dotnet.gc.collections", MetricKind.Counter, "dotnet_gc_collections_total")]
     [InlineData("dotnet.gc.pause.time", MetricKind.Counter, "dotnet_gc_pause_time_total")]
