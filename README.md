@@ -185,7 +185,8 @@ On first boot it writes `ModConfig/pulse-otlp.json`:
   "Protocol": "http/protobuf",
   "Headers": {},
   "IntervalSeconds": 60,
-  "IncludeRuntimeMetrics": true
+  "IncludeRuntimeMetrics": true,
+  "ServiceName": "vintagestory"
 }
 ```
 
@@ -197,6 +198,11 @@ specification defines, `http/protobuf` and `grpc`; anything else logs a warning 
 `System.Runtime` meter to what gets pushed, and it is separate from the base mod's
 `RuntimeMetrics` flag, so you can serve the `dotnet_*` families locally and not ship them, or the
 other way round.
+
+`ServiceName` sets the `service.name` resource attribute, which is how a backend receiving
+metrics from more than one server tells them apart: grouping, filtering and dashboard variables
+are usually keyed off it. The `OTEL_SERVICE_NAME` environment variable, the ecosystem's standard
+override, takes precedence over this key when it is set.
 
 `IntervalSeconds` is floored at 5. Sixty is the OTLP default and the right answer for almost
 everyone: the interval also decides how often every observable gauge is polled, and the
