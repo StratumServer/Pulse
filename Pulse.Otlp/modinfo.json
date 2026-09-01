@@ -2,7 +2,7 @@
   "type": "code",
   "modid": "pulseotlp",
   "name": "Pulse OTLP",
-  "version": "0.2.0",
+  "version": "0.1.0",
   "description": "Pushes the metrics Pulse instruments to any OpenTelemetry collector or OTLP-speaking backend.",
   "authors": [ "Pixnop" ],
   "side": "server",
