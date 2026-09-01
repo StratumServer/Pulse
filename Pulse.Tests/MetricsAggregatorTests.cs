@@ -178,8 +178,10 @@ public class MetricsAggregatorTests
         Histogram<double> histogram = CreateHistogram(meter);
         const int records = 20_000;
 
+        using ManualResetEventSlim recording = new();
         Thread recorder = new(() =>
         {
+            recording.Set();
             for (int i = 0; i < records; i++)
             {
                 counter.Add(1);
@@ -187,9 +189,14 @@ public class MetricsAggregatorTests
             }
         });
 
+        // The start signal lines the scraper up with the recorder's first measurements, but how
+        // many scrapes land inside the recording window is still the scheduler's call, so there is
+        // no assertion on the count: the recorder can finish inside the very first Collect. What
+        // every scrape must guarantee, concurrent or not, is a histogram whose count matches its
+        // buckets.
         recorder.Start();
-        int scrapes = 0;
-        while (recorder.IsAlive)
+        recording.Wait();
+        do
         {
             // A series exists from its first measurement, so the opening scrapes can beat the
             // recorder to it. Every scrape that does see the histogram must see it consistent.
@@ -200,11 +207,10 @@ public class MetricsAggregatorTests
             }
 
             Assert.Equal(h.Count, h.Buckets.Sum());
-            scrapes++;
         }
+        while (recorder.IsAlive);
 
         recorder.Join();
-        Assert.True(scrapes > 0, "the scraping loop never ran");
         Assert.Equal(records, Sample(aggregator.Collect(), "c_total").Value);
         Assert.Equal(records, Sample(aggregator.Collect(), "h_seconds").Count);
     }
