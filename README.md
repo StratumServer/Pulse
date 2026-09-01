@@ -24,6 +24,32 @@ The metric families it serves:
   by the text it logs. `overload` is a tick past 500 ms, `memory` is crossing 90% of
   `DieAboveMemoryUsageMb`, `suspend_timeout` is a server suspend that gave up waiting for a
   thread, and `autosave_io` is an autosave arriving while the previous one is still writing.
+- `pulse_server_uptime_seconds` (gauge): seconds the server has been ticking. This is the
+  engine's own unpaused clock, so it stops during a save and is not process uptime.
+- `pulse_entities_by_code{code}` (gauge): loaded entities by entity code, the ten most numerous
+  plus an `other` bucket for the rest. Refreshed on the same slow cadence as the chunk count.
+- `pulse_player_ping_seconds{stat}` (gauge): round trip time to the players online, as `avg` and
+  `max`. Both read 0 with nobody connected.
+- `pulse_player_deaths_total` (counter): player deaths since startup.
+- `pulse_server_suspends_total` and `pulse_server_suspend_seconds_total` (counters): how often
+  the server suspended ticking and how long it spent suspended. Every autosave is one of these,
+  and the seconds are the pause players actually feel.
+- `pulse_network_sent_bytes_total` and `pulse_network_received_bytes_total` (counters): bytes
+  over the main TCP channel. UDP is not in these two; the public server API does not report it.
+
+Six more come from the engine's own accounting, which no public API exposes. See the note on
+degraded mode below for what happens when they are unavailable.
+
+- `pulse_server_tick_busy_seconds_avg` (gauge): the average time one tick spent working, sleep
+  excluded, over the engine's last completed two-second window. This is the number `/stats`
+  prints, and the only view of headroom below the tick budget that exists at all. The engine
+  measures in whole milliseconds, so an idle server legitimately averages zero.
+- `pulse_network_packets_in_window{channel}` and `pulse_network_bytes_in_window{channel}`
+  (gauges): traffic during that same two-second window, split `tcp` and `udp`. Gauges rather
+  than counters because the engine zeroes the window rather than accumulating it.
+- `pulse_connection_queue_clients` (gauge): clients waiting because the server is full.
+- `pulse_network_udp_sent_bytes_total` and `pulse_network_udp_received_bytes_total` (counters):
+  the UDP totals missing from the two public byte counters above.
 
 The tick period is measured rather than taken from the value the engine hands tick listeners,
 because that one is rounded to whole milliseconds. Overruns still land exactly: once a tick's
@@ -33,11 +59,31 @@ server's main thread, so a scrape never touches live world state.
 
 Loaded chunks are the exception. The engine offers no cheap count, and the one accessor that
 exists clones the entire loaded-chunk dictionary under the chunk lock, so that gauge gets its
-own listener at `ChunksRefreshSeconds` and reads 0 until the first refresh. The two event-driven
-counters do not ride the tick listener either: columns generated is incremented from
-`MapChunkGeneration`, which fires on the worldgen thread, and the log counters from
-`Logger.EntryAdded`, which fires on whichever thread wrote the line. Both handlers classify and
-increment, and nothing else.
+own listener at `ChunksRefreshSeconds` and reads 0 until the first refresh. The entity breakdown
+rides that same slow listener. The event-driven counters do not ride the tick listener either:
+columns generated is incremented from `MapChunkGeneration`, which fires on the worldgen thread,
+and the log counters from `Logger.EntryAdded`, which fires on whichever thread wrote the line.
+Both handlers classify and increment, and nothing else.
+
+## Degraded mode
+
+Six of those families come from a place the modding API does not reach. Tick busy time, the
+per-window packet and byte counts, the connection queue depth and the UDP byte totals are all
+measured by the engine on concrete types inside `VintagestoryLib.dll`, which the game's authors
+change freely between versions and make no promises about. Pulse casts the server world to
+`Vintagestory.Server.ServerMain` once, at startup, in a try/catch, and every read of those types
+lives in one small class.
+
+If that cast ever stops working, Pulse logs one warning naming what went wrong and carries on.
+The six families are simply absent from `/metrics` rather than present and lying, and every other
+metric on this page keeps being served exactly as before, including the tick period histogram,
+which still catches every overrun: once a tick's work exceeds the budget the engine's throttle
+sleep is zero and the period is the busy time. What you lose is the view of headroom on a healthy
+server. One warning, no retry loop, no log spam, and nothing that can stop a game server.
+
+The compile-time reference to `VintagestoryLib.dll` is deliberate for the same reason. A game
+version that renames or moves `ServerMain` breaks the Pulse build, loudly, before a release goes
+out, instead of shipping a mod that quietly serves six families fewer.
 
 ## Runtime metrics
 
@@ -199,8 +245,9 @@ error and registers nothing.
 ## Building and testing
 
 You need the .NET 10 SDK and a Vintage Story 1.22.x install, with `VINTAGE_STORY` pointing at
-the folder that holds `VintagestoryAPI.dll` (the `.pdb` next to it is required too, or the
-engine's logger crashes at boot).
+the folder that holds `VintagestoryAPI.dll` and `VintagestoryLib.dll` (the `.pdb` next to the
+first is required too, or the engine's logger crashes at boot). Both dlls are compile-time
+references only; neither is copied into the mod, which still ships as one file.
 
 ```sh
 export VINTAGE_STORY=/path/to/vintagestory
@@ -224,20 +271,22 @@ their zips are, and the base suite's staging should stay as it is. It stands up 
 as a fake collector, points the mod at it, runs the world, and asserts on the protobuf that
 arrives.
 
-Unit tests in `Pulse.Tests` cover the aggregator, the exposition writer and the log classifier
-with no server at all; `Pulse.Otlp.Tests` covers the config translation, which is where the OTLP
-mod's only non-obvious logic lives. Mutation verification over those three files runs through
-`tools/mutation-check.sh`, which applies twelve representative mutations and requires the suite
-to fail on every one; CI runs it on each push. A `stryker-config.json` sits ready for
+Unit tests in `Pulse.Tests` cover the aggregator, the exposition writer, the log classifier and
+the small classes behind the wave of engine and world metrics: the busy-time average, the ping
+aggregates, the entity top-ten with its series retirement rule, and the suspend window. None of
+them needs a server. `Pulse.Otlp.Tests` covers the config translation, which is where the OTLP
+mod's only non-obvious logic lives. Mutation verification over those files runs through
+`tools/mutation-check.sh`, which applies representative mutations one at a time and requires the
+suite to fail on every one; CI runs it on each push. A `stryker-config.json` sits ready for
 `dotnet stryker`, which currently finds the tests but runs mutants against the unmutated
 assembly on the .NET 10 SDK.
 
 ## Where this is going
 
-The survey in `docs/metrics-feasibility.md` lists what else is measurable on this engine: the
-global network byte counters, the suspend window that brackets every autosave, and the engine's
-own busy-time accounting, which needs a cast to a concrete engine type and so has to degrade
-cleanly when a game update moves it.
+The survey in `docs/metrics-feasibility.md` lists what is measurable on this engine and what is
+not. Save duration is the honest gap: the world-save event fires before any writing happens and
+there is no completion signal, so Pulse reports the suspend window instead of inventing a
+number. Per-player traffic does not exist anywhere in the engine, not even internally.
 
 Traces and logs over OTLP would reuse most of the exporter mod, but neither has an obvious
 consumer on a game server yet, so they stay unbuilt until someone asks.
