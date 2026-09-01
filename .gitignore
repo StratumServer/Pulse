@@ -1,0 +1,15 @@
+bin/
+obj/
+TestResults/
+StrykerOutput/
+*.trx
+*.user
+*.suo
+.vs/
+.idea/
+
+# Raw engine survey notes: working material, not a deliverable.
+.survey/
+
+# Packaged mod zips built locally.
+*.zip
