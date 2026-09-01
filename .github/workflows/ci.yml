@@ -56,6 +56,9 @@ jobs:
           dotnet test Pulse.Tests/Pulse.Tests.csproj -c Release --no-build \
             --logger "trx;LogFileName=unit-tests.trx" \
             --results-directory TestResults
+          dotnet test Pulse.Otlp.Tests/Pulse.Otlp.Tests.csproj -c Release --no-build \
+            --logger "trx;LogFileName=otlp-unit-tests.trx" \
+            --results-directory TestResults
 
       # Applies representative mutations to the aggregator, the writer and the log classifier one
       # at a time and requires the unit suite to fail on each. Stand-in for Stryker, which does
@@ -64,18 +67,26 @@ jobs:
         run: ./tools/mutation-check.sh
 
       # These boot a real headless Vintage Story server in-process (Atlas), load the staged
-      # mod, and scrape it over HTTP.
+      # mod, and scrape it over HTTP. The OTLP suite stages both mods and puts a fake collector
+      # on the other end of a socket, so it proves the export path end to end.
       - name: Atlas scenarios
         run: |
           dotnet test Pulse.Scenarios/Pulse.Scenarios.csproj -c Release --no-build \
             --logger "trx;LogFileName=scenarios.trx" \
             --results-directory TestResults
+          dotnet test Pulse.Otlp.Scenarios/Pulse.Otlp.Scenarios.csproj -c Release --no-build \
+            --logger "trx;LogFileName=otlp-scenarios.trx" \
+            --results-directory TestResults
 
-      - name: Package the mod zip
-        run: dotnet build Pulse/Pulse.csproj -c Release -t:PackageMod
+      - name: Package the mod zips
+        run: |
+          dotnet build Pulse/Pulse.csproj -c Release -t:PackageMod
+          dotnet build Pulse.Otlp/Pulse.Otlp.csproj -c Release -t:PackageMod
+          unzip -l artifacts/pulse_*.zip
+          unzip -l artifacts/pulseotlp_*.zip
 
       - uses: actions/upload-artifact@v4
         with:
-          name: pulse-mod-zip
-          path: artifacts/pulse_*.zip
+          name: pulse-mod-zips
+          path: artifacts/*.zip
           if-no-files-found: error

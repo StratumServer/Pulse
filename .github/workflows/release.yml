@@ -34,11 +34,15 @@ jobs:
         run: |
           set -e
           BASE="${GITHUB_REF_NAME#v}"; BASE="${BASE%%-*}"
-          MOD_VERSION=$(grep -oP '"version":\s*"\K[^"]+' Pulse/modinfo.json)
-          CSPROJ_VERSION=$(grep -oP '<Version>\K[^<]+' Pulse/Pulse.csproj)
           FAIL=0
-          [ "$MOD_VERSION" = "$BASE" ] || { echo "::error::Pulse/modinfo.json says '$MOD_VERSION', tag base says '$BASE'"; FAIL=1; }
-          [ "$CSPROJ_VERSION" = "$BASE" ] || { echo "::error::Pulse/Pulse.csproj says '$CSPROJ_VERSION', tag base says '$BASE'"; FAIL=1; }
+          check() { # <file> <extracted version>
+            [ "$2" = "$BASE" ] || { echo "::error::$1 says '$2', tag base says '$BASE'"; FAIL=1; }
+          }
+          # Both mods ship from one tag and share one version, so both are checked against it.
+          check Pulse/modinfo.json "$(grep -oP '"version":\s*"\K[^"]+' Pulse/modinfo.json)"
+          check Pulse/Pulse.csproj "$(grep -oP '<Version>\K[^<]+' Pulse/Pulse.csproj)"
+          check Pulse.Otlp/modinfo.json "$(grep -oP '"version":\s*"\K[^"]+' Pulse.Otlp/modinfo.json)"
+          check Pulse.Otlp/Pulse.Otlp.csproj "$(grep -oP '<Version>\K[^<]+' Pulse.Otlp/Pulse.Otlp.csproj)"
           exit $FAIL
 
       - name: Cache Vintage Story server
@@ -67,17 +71,22 @@ jobs:
           set -e
           dotnet build Pulse.slnx -c Release
           dotnet test Pulse.Tests/Pulse.Tests.csproj -c Release --no-build
+          dotnet test Pulse.Otlp.Tests/Pulse.Otlp.Tests.csproj -c Release --no-build
           dotnet test Pulse.Scenarios/Pulse.Scenarios.csproj -c Release --no-build
+          dotnet test Pulse.Otlp.Scenarios/Pulse.Otlp.Scenarios.csproj -c Release --no-build
 
-      # The zip is named after the tag, prerelease suffix included; modinfo.json keeps the base
+      # The zips are named after the tag, prerelease suffix included; modinfo.json keeps the base
       # version, which is what the game compares.
       - name: Package
         run: |
           set -e
           dotnet build Pulse/Pulse.csproj -c Release -t:PackageMod
+          dotnet build Pulse.Otlp/Pulse.Otlp.csproj -c Release -t:PackageMod
           VERSION="${GITHUB_REF_NAME#v}"
-          SOURCE=(artifacts/pulse_*.zip)
-          mv "${SOURCE[0]}" "artifacts/pulse_${VERSION}.zip"
+          for MOD in pulse pulseotlp; do
+            SOURCE=(artifacts/${MOD}_*.zip)
+            mv "${SOURCE[0]}" "artifacts/${MOD}_${VERSION}.zip"
+          done
           ls -l artifacts/
 
       - name: Publish the GitHub release
@@ -91,6 +100,7 @@ jobs:
           esac
           gh release create "$GITHUB_REF_NAME" \
             "artifacts/pulse_${GITHUB_REF_NAME#v}.zip" \
+            "artifacts/pulseotlp_${GITHUB_REF_NAME#v}.zip" \
             --title "Pulse $GITHUB_REF_NAME" \
             --generate-notes \
             $PRERELEASE
