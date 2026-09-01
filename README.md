@@ -279,9 +279,11 @@ atlas run Pulse.Otlp.Scenarios/bin/Release/net10.0/Pulse.Otlp.Scenarios.dll
 ```
 
 `Pulse.Otlp.Scenarios` is a separate project because it stages both mods, laid out exactly as
-their zips are, and the base suite's staging should stay as it is. It stands up an `HttpListener`
-as a fake collector, points the mod at it, runs the world, and asserts on the protobuf that
-arrives.
+their zips are, and the base suite's staging should stay as it is. It stands up a fake collector,
+points the mod at it, runs the world, and asserts on the protobuf that arrives. There is one
+collector per protocol the config accepts: an `HttpListener` for http/protobuf, and for grpc a
+small HTTP/2 server, since a gRPC client wants its own service path, a length-prefixed message
+and a status trailer before it calls an export delivered.
 
 Unit tests in `Pulse.Tests` cover the aggregator, the exposition writer, the log classifier and
 the small classes behind the wave of engine and world metrics: the busy-time average, the ping

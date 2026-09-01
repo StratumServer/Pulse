@@ -1,0 +1,11 @@
+{
+  "Enabled": true,
+  "Endpoint": "http://127.0.0.1:39471",
+  "Protocol": "grpc",
+  "Headers": {
+    "x-scope-orgid": "atlas"
+  },
+  "IntervalSeconds": 5,
+  "IncludeRuntimeMetrics": false,
+  "ServiceName": "pulse-atlas-grpc"
+}
