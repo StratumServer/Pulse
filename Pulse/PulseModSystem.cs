@@ -87,7 +87,7 @@ public sealed class PulseModSystem : ModSystem
         // writer maps on the way out.
         string[] meters = config.RuntimeMetrics ? [MeterName, RuntimeMeterName] : [MeterName];
         aggregator = new MetricsAggregator(OnUnsupportedInstrument, meters);
-        SeedCounters(columnsGenerated!, logEntries!, engineWarnings!);
+        SeedCounters(columnsGenerated, logEntries, engineWarnings);
         PublishSnapshot();
 
         // The errorHandler overload is not optional. Without it an exception from this listener
