@@ -13,9 +13,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Plain reference: these tests exercise the aggregator and the exposition writer in
-         process, with no server and no mod loader, so the ordinary assembly identity applies.
-         The Atlas scenarios live in Pulse.Scenarios, which stages the mod instead. -->
+    <!-- Plain reference: these tests exercise the aggregator, the exposition writer and the log
+         classifier in process, with no server and no mod loader, so the ordinary assembly identity
+         applies. The Atlas scenarios live in Pulse.Scenarios, which stages the mod instead. -->
     <ProjectReference Include="..\Pulse\Pulse.csproj" />
+
+    <!-- Private=true: the classifier takes an EnumLogType, so the game dll has to sit next to the
+         test assembly. No server is booted here; only the enum is loaded. -->
+    <Reference Include="VintagestoryAPI" HintPath="$(VINTAGE_STORY)/VintagestoryAPI.dll" Private="true" />
   </ItemGroup>
 </Project>

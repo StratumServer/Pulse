@@ -191,8 +191,14 @@ public class MetricsAggregatorTests
         int scrapes = 0;
         while (recorder.IsAlive)
         {
-            IReadOnlyList<MetricSample> samples = aggregator.Collect();
-            MetricSample h = Sample(samples, "h_seconds");
+            // A series exists from its first measurement, so the opening scrapes can beat the
+            // recorder to it. Every scrape that does see the histogram must see it consistent.
+            MetricSample? h = aggregator.Collect().SingleOrDefault(s => s.Name == "h_seconds");
+            if (h == null)
+            {
+                continue;
+            }
+
             Assert.Equal(h.Count, h.Buckets.Sum());
             scrapes++;
         }
@@ -201,5 +207,112 @@ public class MetricsAggregatorTests
         Assert.True(scrapes > 0, "the scraping loop never ran");
         Assert.Equal(records, Sample(aggregator.Collect(), "c_total").Value);
         Assert.Equal(records, Sample(aggregator.Collect(), "h_seconds").Count);
+    }
+
+    [Fact]
+    public void Counter_Keeps_OneSeriesPerTagSet()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        Counter<long> counter = meter.CreateCounter<long>("c_total", "{entry}", "C.");
+
+        counter.Add(1, new KeyValuePair<string, object?>("level", "warning"));
+        counter.Add(2, new KeyValuePair<string, object?>("level", "error"));
+        counter.Add(4, new KeyValuePair<string, object?>("level", "warning"));
+
+        IReadOnlyList<MetricSample> samples = aggregator.Collect();
+        Assert.Equal(2, samples.Count);
+        Assert.Equal(5, samples.Single(s => s.Labels[0].Value == "warning").Value);
+        Assert.Equal(2, samples.Single(s => s.Labels[0].Value == "error").Value);
+        Assert.All(samples, s => Assert.Equal("c_total", s.Name));
+    }
+
+    [Fact]
+    public void Tags_Sort_ByKey_SoCallSiteOrderDoesNotSplitASeries()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        Counter<long> counter = meter.CreateCounter<long>("c_total", "{x}", "C.");
+
+        counter.Add(1, new KeyValuePair<string, object?>("zone", "b"), new KeyValuePair<string, object?>("kind", "a"));
+        counter.Add(1, new KeyValuePair<string, object?>("kind", "a"), new KeyValuePair<string, object?>("zone", "b"));
+
+        MetricSample sample = Assert.Single(aggregator.Collect());
+        Assert.Equal(2, sample.Value);
+        Assert.Equal(["kind", "zone"], sample.Labels.Select(l => l.Key));
+    }
+
+    [Fact]
+    public void ObservableCounter_Reports_ARunningTotal_SoTheSeriesTakesItRatherThanAddsIt()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        long collections = 5;
+        meter.CreateObservableCounter("oc_total", () => collections, "{collection}", "OC.");
+
+        MetricSample first = Sample(aggregator.Collect(), "oc_total");
+        Assert.Equal(MetricKind.Counter, first.Kind);
+        Assert.Equal(5, first.Value);
+
+        collections = 9;
+        Assert.Equal(9, Sample(aggregator.Collect(), "oc_total").Value);
+    }
+
+    [Fact]
+    public void UpDownCounter_Adds_ItsDeltas_AndRendersAsAGauge()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        UpDownCounter<long> counter = meter.CreateUpDownCounter<long>("u_current", "{x}", "U.");
+
+        counter.Add(5);
+        counter.Add(-2);
+
+        MetricSample sample = Sample(aggregator.Collect(), "u_current");
+        Assert.Equal(MetricKind.Gauge, sample.Kind);
+        Assert.Equal(3, sample.Value);
+    }
+
+    [Fact]
+    public void Aggregator_Skips_AnInstrumentShapeItCannotRender()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        List<string> skipped = [];
+        using MetricsAggregator aggregator = new(skipped.Add, meterName);
+
+        _ = new UnknownShape(meter);
+
+        Assert.Equal(["odd_thing"], skipped);
+        Assert.Empty(aggregator.Collect());
+    }
+
+    [Fact]
+    public void Aggregator_Renders_TheRuntimeMeter_WhenSubscribedToIt()
+    {
+        using MetricsAggregator aggregator = new("System.Runtime");
+
+        string text = PrometheusText.Render(aggregator.Collect());
+
+        // The built-in net10 meter, mapped: dotted names, an ObservableCounter that is a counter
+        // with a _total suffix, an ObservableUpDownCounter that is a gauge, and real tags.
+        Assert.Contains("# TYPE dotnet_gc_collections_total counter\n", text);
+        Assert.Contains("dotnet_gc_collections_total{gc_heap_generation=\"gen0\"} ", text);
+        Assert.Contains("# TYPE dotnet_process_memory_working_set gauge\n", text);
+        Assert.Contains("dotnet_process_cpu_time_total{cpu_mode=\"user\"} ", text);
+    }
+
+    /// <summary>An instrument that is none of the seven shapes the aggregator knows.</summary>
+    private sealed class UnknownShape : Instrument
+    {
+        public UnknownShape(Meter meter)
+            : base(meter, "odd_thing", null, "Odd.")
+        {
+            Publish();
+        }
     }
 }
