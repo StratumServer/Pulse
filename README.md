@@ -83,8 +83,10 @@ atlas run Pulse.Scenarios/bin/Release/net10.0/Pulse.Scenarios.dll
 ```
 
 Unit tests in `Pulse.Tests` cover the aggregator and the exposition writer with no server at
-all. Mutation testing over those two files runs through `dotnet stryker` (see
-`stryker-config.json`).
+all. Mutation verification over those two files runs through `tools/mutation-check.sh`, which
+applies eight representative mutations and requires the suite to fail on every one; CI runs
+it on each push. A `stryker-config.json` sits ready for `dotnet stryker`, which currently
+finds the tests but runs mutants against the unmutated assembly on the .NET 10 SDK.
 
 ## Where this is going
 

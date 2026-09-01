@@ -1,0 +1,21 @@
+{
+  "stryker-config": {
+    "solution": "Pulse.Mutation.slnx",
+    "project": "Pulse.csproj",
+    "mutate": [
+      "**/PrometheusText.cs",
+      "**/MetricsAggregator.cs"
+    ],
+    "coverage-analysis": "off",
+    "reporters": [
+      "progress",
+      "cleartext",
+      "json"
+    ],
+    "thresholds": {
+      "high": 100,
+      "low": 100,
+      "break": 100
+    }
+  }
+}

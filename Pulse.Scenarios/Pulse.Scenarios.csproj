@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>$(FrameworkVersion)</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageReference Include="Pixnop.Atlas.XUnit" Version="0.11.0" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Private=true: the runner needs the game dll next to the test assembly to JIT scenario
+         bodies. Running the suite needs a full VS 1.22.x install via VINTAGE_STORY, since Atlas
+         boots a real embedded server. -->
+    <Reference Include="VintagestoryAPI" HintPath="$(VINTAGE_STORY)/VintagestoryAPI.dll" Private="true" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Build order only. No assembly reference on purpose: the game's ModLoader loads its own
+         copy of the staged mod, so compile-time types would never be identity-equal. These
+         scenarios talk to the mod over HTTP, which is how an operator does. -->
+    <ProjectReference Include="..\Pulse\Pulse.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Config fixtures seeded into the embedded server's data path by [AtlasDataFiles]. -->
+    <Content Include="data\**\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Stage the mod under test the way it ships: a folder holding modinfo.json and Pulse.dll,
+       which is exactly the zip layout. [assembly: AtlasMods("mod")] stages that folder. -->
+  <Target Name="StageModUnderTest" AfterTargets="Build">
+    <ItemGroup>
+      <ModFile Include="..\Pulse\bin\$(Configuration)\$(TargetFramework)\Pulse.dll" />
+      <ModFile Include="..\Pulse\modinfo.json" />
+    </ItemGroup>
+    <Copy SourceFiles="@(ModFile)" DestinationFolder="$(OutDir)mod" SkipUnchangedFiles="true" />
+  </Target>
+</Project>
