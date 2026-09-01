@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>$(FrameworkVersion)</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.*" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
+    <PackageReference Include="Pixnop.Atlas.XUnit" Version="0.11.0" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Reference Include="VintagestoryAPI" HintPath="$(VINTAGE_STORY)/VintagestoryAPI.dll" Private="true" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Build order only, for both mods. No assembly reference on purpose: the game's ModLoader
+         loads its own copy of each staged mod, and keeping the OpenTelemetry dlls out of this
+         project's own output means the only copy in the process is the one the loader loaded, the
+         same as on a real server. -->
+    <ProjectReference Include="..\Pulse\Pulse.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\Pulse.Otlp\Pulse.Otlp.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="data\**\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Stage both mods the way a server holds them: one folder per mod, side by side, each with its
+       modinfo.json and its dlls at the root. [assembly: AtlasMods("mod", "otlpmod")] hands Atlas
+       both folders, and it copies each under its own name into the embedded server's mod path.
+       The glob is what makes this worth having: it stages exactly the dll set the zip ships, so a
+       dependency going missing from the package shows up here rather than on someone's server. -->
+  <Target Name="StageModsUnderTest" AfterTargets="Build">
+    <ItemGroup>
+      <BaseModFile Include="..\Pulse\bin\$(Configuration)\$(TargetFramework)\Pulse.dll" />
+      <BaseModFile Include="..\Pulse\modinfo.json" />
+      <OtlpModFile Include="..\Pulse.Otlp\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <OtlpModFile Include="..\Pulse.Otlp\modinfo.json" />
+    </ItemGroup>
+    <Copy SourceFiles="@(BaseModFile)" DestinationFolder="$(OutDir)mod" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(OtlpModFile)" DestinationFolder="$(OutDir)otlpmod" SkipUnchangedFiles="true" />
+  </Target>
+</Project>
