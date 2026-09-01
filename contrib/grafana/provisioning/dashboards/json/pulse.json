@@ -1,0 +1,86 @@
+{
+  "uid": "pulse-overview",
+  "title": "Pulse server overview",
+  "timezone": "browser",
+  "refresh": "5s",
+  "time": { "from": "now-5m", "to": "now" },
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "type": "timeseries", "title": "Tick rate", "id": 1,
+      "gridPos": { "x": 0, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "pulse-prom" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "max": 32, "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "rate(pulse_server_ticks_total[$__rate_interval])", "legendFormat": "ticks per second" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Tick time", "id": 2,
+      "gridPos": { "x": 12, "y": 0, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "pulse-prom" },
+      "fieldConfig": { "defaults": { "unit": "ms", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "1000 * rate(pulse_server_tick_seconds_sum[30s]) / rate(pulse_server_tick_seconds_count[30s])", "legendFormat": "average" },
+        { "refId": "B", "expr": "1000 * histogram_quantile(0.95, rate(pulse_server_tick_seconds_bucket[30s]))", "legendFormat": "p95" },
+        { "refId": "C", "expr": "1000 * pulse_server_tick_budget_seconds", "legendFormat": "budget" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Worldgen queue", "id": 3,
+      "gridPos": { "x": 0, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "pulse-prom" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 15, "showPoints": "never" } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "pulse_worldgen_queue_columns", "legendFormat": "columns queued" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Columns generated per minute", "id": 4,
+      "gridPos": { "x": 12, "y": 8, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "pulse-prom" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "increase(pulse_worldgen_columns_generated_total[1m])", "legendFormat": "generated per minute" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "World counts", "id": 5,
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "pulse-prom" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "pulse_chunks_loaded", "legendFormat": "chunks loaded" },
+        { "refId": "B", "expr": "pulse_entities_loaded", "legendFormat": "entities" },
+        { "refId": "C", "expr": "pulse_players_online", "legendFormat": "players" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Working set", "id": 6,
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "pulse-prom" },
+      "fieldConfig": { "defaults": { "unit": "bytes", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "dotnet_process_memory_working_set", "legendFormat": "working set" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "GC collections per minute", "id": 7,
+      "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "pulse-prom" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "increase(dotnet_gc_collections_total[1m])", "legendFormat": "{{gc_heap_generation}}" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Engine warnings, 5 minute window", "id": 8,
+      "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "pulse-prom" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" } }, "overrides": [] },
+      "targets": [
+        { "refId": "A", "expr": "increase(pulse_engine_warnings_total[5m])", "legendFormat": "{{kind}}" }
+      ]
+    }
+  ]
+}
