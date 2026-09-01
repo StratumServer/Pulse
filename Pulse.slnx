@@ -2,4 +2,5 @@
   <Project Path="Pulse/Pulse.csproj" />
   <Project Path="Pulse.Tests/Pulse.Tests.csproj" />
   <Project Path="Pulse.Scenarios/Pulse.Scenarios.csproj" />
+  <Project Path="Pulse.Otlp/Pulse.Otlp.csproj" />
 </Solution>
