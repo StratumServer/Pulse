@@ -106,7 +106,7 @@ public sealed class MetricsAggregator : IDisposable
     // event or at scrape time, never per tick, and the untagged path returns the shared empty
     // array, so the hot tick counter still allocates nothing. Pool it the day something tagged
     // records every tick.
-    private static KeyValuePair<string, string>[] Labels(ReadOnlySpan<KeyValuePair<string, object?>> tags)
+    private static KeyValuePair<string, string>[] ToLabels(ReadOnlySpan<KeyValuePair<string, object?>> tags)
     {
         if (tags.Length == 0)
         {
@@ -162,7 +162,7 @@ public sealed class MetricsAggregator : IDisposable
 
     private void Record(Instrument instrument, double value, ReadOnlySpan<KeyValuePair<string, object?>> tags)
     {
-        KeyValuePair<string, string>[] labels = Labels(tags);
+        KeyValuePair<string, string>[] labels = ToLabels(tags);
 
         lock (gate)
         {
