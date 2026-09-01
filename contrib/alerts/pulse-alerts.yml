@@ -1,0 +1,143 @@
+# Prometheus alerting rules for Pulse, calibrated against the engine's own numbers instead of
+# picked out of the air: 30 TPS is the engine's nominal tick rate (Config.TickTime defaults to
+# 33.333ms), 500ms is the engine's own "Server overloaded" cutoff, and 90%/100% of
+# DieAboveMemoryUsageMb are the engine's own memory self-monitoring thresholds. See
+# docs/metrics-feasibility.md and Pulse/LogClassifier.cs for where these numbers come from, and
+# the main README's metric list for what each family means.
+#
+# Not wired in automatically. Add this file to `rule_files` in your prometheus.yml, and point
+# prometheus.yml's `alerting:` block at an Alertmanager if you want these to page anyone; on its
+# own Prometheus only lists firing alerts on its own /alerts page. See README.md next to this
+# file.
+
+groups:
+  - name: pulse-tick
+    rules:
+      # rate() over the tick counter is TPS. Two-tier: 27 is "visibly behind", 20 is "players are
+      # feeling this". Both use the same alert name so Alertmanager groups them; a very sick
+      # server fires both at once, which is expected, not a bug.
+      - alert: PulseTickRateLow
+        expr: rate(pulse_server_ticks_total[2m]) < 27
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tick rate below 27 TPS for 5m (target 30)."
+          description: "Tick rate has been under 27 TPS for 5 minutes; check pulse_server_tick_busy_seconds and the worldgen queue for what's eating the budget before it gets worse."
+
+      - alert: PulseTickRateLow
+        expr: rate(pulse_server_ticks_total[2m]) < 20
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Tick rate below 20 TPS for 5m."
+          description: "Tick rate has been under 20 TPS for 5 minutes, deep into player-visible lag; this needs attention now, not a wait-and-see."
+
+      # Busy time over budget is the leading indicator, before rate() over the tick counter even
+      # moves: a server can hold 30 TPS while spending most of its budget getting there. Only
+      # meaningful when the engine-probe families are being served (the guarded cast in
+      # Pulse/EngineProbe.cs succeeded) -- if it failed, pulse_server_tick_busy_seconds is simply
+      # absent from /metrics and this rule has no data to evaluate, silently not firing either
+      # way. Absence of this alert is not proof of headroom; check /metrics for the family before
+      # trusting silence here.
+      - alert: PulseTickSaturationHigh
+        expr: pulse_server_tick_busy_seconds / pulse_server_tick_budget_seconds > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Tick busy time over 80% of budget for 5m."
+          description: "Average tick busy time has been over 80% of the configured budget for 5 minutes; find what's using the headroom before ticks start missing budget outright."
+
+      # Two ways to phrase "ticks are overrunning": count buckets past a fixed 50ms line, or take
+      # a quantile against the live budget gauge. Went with the quantile: it tracks
+      # pulse_server_tick_budget_seconds, so it stays correct if an operator retunes the tick rate
+      # with /serverconfig, where a hardcoded 50ms cutoff would quietly go stale. It also doesn't
+      # depend on 0.05 staying a bucket boundary in Pulse/PulseModSystem.cs's TickBuckets array.
+      # The tradeoff is bucket-interpolation error from only eight finite buckets, which is fine
+      # at warning granularity -- this is "is the tail bad", not a latency SLO.
+      - alert: PulseTickOverrunsHigh
+        expr: histogram_quantile(0.99, rate(pulse_server_tick_seconds_bucket[5m])) > 3 * pulse_server_tick_budget_seconds
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p99 tick time over 3x budget for 5m."
+          description: "The slowest 1% of ticks have been running past three times the tick budget for 5 minutes; look for worldgen, an autosave, or a mod spiking before this turns into a sustained TPS drop."
+
+  - name: pulse-engine
+    rules:
+      # increase() > 0 over a 10m window already is the debounce; a single stray warning ten
+      # minutes ago still counts, which is the point. Same alert name for both severities, kind
+      # excluded from the warning leg so memory doesn't double-fire under its own critical rule
+      # below.
+      - alert: PulseEngineWarning
+        expr: increase(pulse_engine_warnings_total{kind!="memory"}[10m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Engine {{ $labels.kind }} warning firing."
+          description: "The engine logged a {{ $labels.kind }} warning in the last 10 minutes; check the server log around that time for what triggered it."
+
+      # DieAboveMemoryUsageMb: the "memory" kind is the engine crossing 90% of its ceiling, and
+      # the engine kills itself outright at 100%. That gap is small enough to treat as critical
+      # from the first warning rather than waiting for a repeat.
+      - alert: PulseEngineWarning
+        expr: increase(pulse_engine_warnings_total{kind="memory"}[10m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Engine memory warning firing."
+          description: "The engine crossed 90% of its memory ceiling in the last 10 minutes and self-terminates at 100%; raise DieAboveMemoryUsageMb or free heap now, not after it restarts itself."
+
+  - name: pulse-log
+    rules:
+      # A single stray error is normal noise (a malformed packet, a one-off mod hiccup); a burst
+      # is one thing failing repeatedly. 5 in 10 minutes is a judgement call, not a measured
+      # value like the tick numbers above -- tune it if your server's baseline error rate differs.
+      - alert: PulseLogErrorBurst
+        expr: increase(pulse_log_entries_total{level="error"}[10m]) > 5
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 5 error log entries in 10m."
+          description: "More than 5 error-level log entries landed in the last 10 minutes; tail the server log for the recurring one rather than a one-off."
+
+      # Fatal entries abort the rest of the tick they land in and count toward the engine's own
+      # DieAboveErrorCount self-shutdown, so even one is worth a page, not a threshold.
+      - alert: PulseLogFatal
+        expr: increase(pulse_log_entries_total{level="fatal"}[10m]) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "Fatal log entry."
+          description: "A fatal log entry landed in the last 10 minutes; read the server log now, fatals count toward the engine's own self-shutdown threshold."
+
+  - name: pulse-availability
+    rules:
+      # `up` is Prometheus's own synthetic series, one per scrape target; job name here matches
+      # contrib/grafana/prometheus.yml's `job_name: vintagestory`. Change the job label if yours
+      # scrapes Pulse under a different name.
+      - alert: PulseEndpointDown
+        expr: up{job="vintagestory"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Pulse scrape target down for 2m."
+          description: "Prometheus has not been able to scrape the vintagestory job for 2 minutes; confirm the game server process is up and Pulse's endpoint is still bound before assuming it's just network flakiness."
+
+  - name: pulse-worldgen
+    rules:
+      # A queue that fills during a player exploration burst and drains afterwards is the queue
+      # doing its job. 15m of staying above 500 is long enough that draining stopped, not that it
+      # is merely busy.
+      - alert: PulseWorldgenQueueStuck
+        expr: pulse_worldgen_queue_columns > 500
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Worldgen queue over 500 columns for 15m."
+          description: "The worldgen queue has held more than 500 pending columns for 15 minutes without draining; check the worldgen thread isn't stalled and that disk I/O for chunk writes isn't backed up."

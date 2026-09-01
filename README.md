@@ -133,6 +133,9 @@ scrape_configs:
 
 `GET /metrics` returns the exposition text; every other path returns 404.
 
+A ready-to-run Prometheus and Grafana pair lives in `contrib/grafana`; Prometheus alerting rules
+calibrated to these thresholds live in `contrib/alerts`.
+
 ### For panel authors
 
 The exposition text is the contract: game panels can read `/metrics` directly instead of going
