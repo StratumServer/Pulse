@@ -139,7 +139,7 @@ mutate Pulse/PingSummary.cs \
     "ping summary: the maximum becomes whichever player was read last"
 
 mutate Pulse/EntityBreakdown.cs \
-    's/if \(!current\.Contains\(code\)\)/if (current.Contains(code))/' \
+    's/Where\(code => !current\.Contains\(code\)\)/Where(code => current.Contains(code))/' \
     "entity breakdown: a code that left the top ten is never zeroed and its series freezes"
 
 mutate Pulse/EntityBreakdown.cs \

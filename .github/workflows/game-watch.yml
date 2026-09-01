@@ -53,7 +53,7 @@ jobs:
         id: newest
         run: |
           set -e
-          NEWEST="$(curl -sSL --max-time 30 "https://mods.vintagestory.at/api/gameversions" \
+          NEWEST="$(curl -sSL --proto '=https' --max-time 30 "https://mods.vintagestory.at/api/gameversions" \
             | grep -oP '"name":"\K[^"]+' | grep -v -- '-' | sort -V | tail -1)"
           [ -n "$NEWEST" ] || { echo "::error::could not determine the newest stable version from mods.vintagestory.at"; exit 1; }
           echo "version=$NEWEST" >> "$GITHUB_OUTPUT"
