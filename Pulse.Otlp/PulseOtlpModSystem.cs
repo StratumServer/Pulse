@@ -78,7 +78,8 @@ public sealed class PulseOtlpModSystem : ModSystem
 
         api.Logger.Notification(
             "Pulse OTLP exporting {0} to {1} over {2} every {3}s",
-            string.Join(", ", meters), endpoint, config.Protocol, intervalMs / 1000);
+            string.Join(", ", meters), endpoint,
+            protocol == OtlpExportProtocol.Grpc ? "grpc" : "http/protobuf", intervalMs / 1000);
     }
 
     public override void Dispose()
