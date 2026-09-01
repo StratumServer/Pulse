@@ -8,7 +8,15 @@ first.
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `contrib/alerts/pulse-alerts.yml`, a Prometheus alerting rules file covering tick rate, tick
+  saturation, sustained tick overruns, engine warnings, log errors, endpoint availability and a
+  stuck worldgen queue, calibrated against the engine's own thresholds. `contrib/alerts/README.md`
+  explains how to load it.
+- `.github/workflows/game-watch.yml`, a weekly scheduled workflow that builds and runs both unit
+  and scenario suites against the newest stable Vintage Story server version and fails if either
+  doesn't hold up, catching an engine-side break before a user's server update does.
 
 ## [0.1.0] - 2026-09-01
 
