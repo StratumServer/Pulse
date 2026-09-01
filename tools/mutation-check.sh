@@ -39,7 +39,7 @@ mutate() { # <file> <sed -E expression> <label>
     git checkout -- "$file"
 }
 
-MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs"
+MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs"
 
 if ! git diff --quiet -- $MUTATED; then
     echo "One of $MUTATED has uncommitted changes; refusing to mutate over them."
@@ -98,6 +98,14 @@ mutate Pulse/MetricsAggregator.cs \
 mutate Pulse/LogClassifier.cs \
     's/\("Server suspend requested, but reached max wait time", "suspend_timeout"\)/("Server suspend requested and reached max wait time", "suspend_timeout")/' \
     "classifier: an engine warning prefix drifts from the engine string"
+
+mutate Pulse/MetricsHttpServer.cs \
+    's/now - lastErrorLogMs < ErrorLogIntervalMs/false/' \
+    "http server: error log rate limit never suppresses a repeat failure"
+
+mutate Pulse/TickBookkeeper.cs \
+    's/sinceSnapshotSeconds < snapshotIntervalSeconds/sinceSnapshotSeconds <= snapshotIntervalSeconds/' \
+    "tick bookkeeper: snapshot cadence boundary made inclusive, delaying the due tick that lands exactly on it"
 
 echo
 echo "$((TOTAL - FAILS))/$TOTAL mutations killed"
