@@ -7,10 +7,16 @@ public enum MetricKind
     Histogram,
 }
 
-/// <summary>One metric family as of a single scrape. The histogram fields stay empty for the
-/// other two kinds.</summary>
+/// <summary>One series of a metric family as of a single scrape. The histogram fields stay empty
+/// for the other two kinds.</summary>
+/// <remarks>A family with tagged measurements yields one sample per distinct tag set, all
+/// carrying the same <see cref="Name"/>, so the writer emits HELP and TYPE once for the lot.</remarks>
 public sealed record MetricSample(string Name, MetricKind Kind, string Help, double Value)
 {
+    /// <summary>Label pairs, sorted by key, values already stringified. Empty for an untagged
+    /// series, which renders without braces.</summary>
+    public KeyValuePair<string, string>[] Labels { get; init; } = [];
+
     /// <summary>Upper bucket bounds, ascending, without the implicit +Inf bucket.</summary>
     public double[] Bounds { get; init; } = [];
 

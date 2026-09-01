@@ -123,4 +123,107 @@ public class PrometheusTextTests
     {
         Assert.Equal(string.Empty, PrometheusText.Render([]));
     }
+
+    [Fact]
+    public void Render_Writes_Labels_InTheOrderGiven_WithTheThreeEscapes()
+    {
+        string text = PrometheusText.Render([
+            new MetricSample("pulse_engine_warnings_total", MetricKind.Counter, "Warnings.", 2)
+            {
+                Labels = [new("kind", "back\\slash"), new("note", "a \"quote\" and a\nnewline")],
+            },
+        ]);
+
+        Assert.Equal(
+            "# HELP pulse_engine_warnings_total Warnings.\n" +
+            "# TYPE pulse_engine_warnings_total counter\n" +
+            "pulse_engine_warnings_total{kind=\"back\\\\slash\",note=\"a \\\"quote\\\" and a\\nnewline\"} 2\n",
+            text);
+    }
+
+    [Fact]
+    public void Render_Writes_OneHelpAndTypeHeader_ForEveryTagSetOfAFamily()
+    {
+        string text = PrometheusText.Render([
+            new MetricSample("pulse_log_entries_total", MetricKind.Counter, "Entries.", 3)
+            {
+                Labels = [new("level", "warning")],
+            },
+            new MetricSample("pulse_log_entries_total", MetricKind.Counter, "Entries.", 1)
+            {
+                Labels = [new("level", "error")],
+            },
+        ]);
+
+        // Prometheus rejects a scrape that repeats HELP or TYPE for a metric name, so the header
+        // belongs to the family and the braces separate the series.
+        Assert.Equal(
+            "# HELP pulse_log_entries_total Entries.\n" +
+            "# TYPE pulse_log_entries_total counter\n" +
+            "pulse_log_entries_total{level=\"warning\"} 3\n" +
+            "pulse_log_entries_total{level=\"error\"} 1\n",
+            text);
+    }
+
+    [Theory]
+    [InlineData("dotnet.gc.collections", MetricKind.Counter, "dotnet_gc_collections_total")]
+    [InlineData("dotnet.gc.pause.time", MetricKind.Counter, "dotnet_gc_pause_time_total")]
+    [InlineData("dotnet.process.memory.working_set", MetricKind.Gauge, "dotnet_process_memory_working_set")]
+    [InlineData("dotnet.gc.heap.size", MetricKind.Histogram, "dotnet_gc_heap_size")]
+    [InlineData("pulse_server_ticks_total", MetricKind.Counter, "pulse_server_ticks_total")]
+    [InlineData("pulse_players_online", MetricKind.Gauge, "pulse_players_online")]
+    public void MetricName_Underscores_Dots_AndSuffixesMonotonicCountersOnly(
+        string name, MetricKind kind, string expected)
+    {
+        Assert.Equal(expected, PrometheusText.MetricName(name, kind));
+    }
+
+    [Fact]
+    public void Render_Maps_RuntimeNamesAndLabelKeys_ToPrometheusSpelling()
+    {
+        string text = PrometheusText.Render([
+            new MetricSample("dotnet.gc.collections", MetricKind.Counter, "Collections.", 12)
+            {
+                Labels = [new("gc.heap.generation", "gen0")],
+            },
+        ]);
+
+        Assert.Equal(
+            "# HELP dotnet_gc_collections_total Collections.\n" +
+            "# TYPE dotnet_gc_collections_total counter\n" +
+            "dotnet_gc_collections_total{gc_heap_generation=\"gen0\"} 12\n",
+            text);
+    }
+
+    [Fact]
+    public void Render_Writes_ABoundlessHistogram_AsSumAndCountAlone()
+    {
+        string text = PrometheusText.Render([
+            new MetricSample("h_seconds", MetricKind.Histogram, "H.", 0) { Sum = 1.5, Count = 3 },
+        ]);
+
+        Assert.Equal(
+            "# HELP h_seconds H.\n# TYPE h_seconds histogram\nh_seconds_sum 1.5\nh_seconds_count 3\n",
+            text);
+    }
+
+    [Fact]
+    public void Render_Puts_TheBucketBound_AfterTheSeriesLabels()
+    {
+        string text = PrometheusText.Render([
+            new MetricSample("h_seconds", MetricKind.Histogram, "H.", 0)
+            {
+                Labels = [new("pass", "terrain")],
+                Bounds = [0.5],
+                Buckets = [1],
+                Sum = 0.4,
+                Count = 1,
+            },
+        ]);
+
+        Assert.Contains("h_seconds_bucket{pass=\"terrain\",le=\"0.5\"} 1\n", text);
+        Assert.Contains("h_seconds_bucket{pass=\"terrain\",le=\"+Inf\"} 1\n", text);
+        Assert.Contains("h_seconds_sum{pass=\"terrain\"} 0.4\n", text);
+        Assert.Contains("h_seconds_count{pass=\"terrain\"} 1\n", text);
+    }
 }

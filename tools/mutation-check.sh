@@ -66,8 +66,20 @@ mutate Pulse/MetricsAggregator.cs \
     "aggregator: bucket bound made exclusive"
 
 mutate Pulse/MetricsAggregator.cs \
-    's/s\.Value \+= value;/s.Value = value;/' \
+    's/s\.Absolute \? value : s\.Value \+ value/value/' \
     "aggregator: counter stops accumulating"
+
+mutate Pulse/MetricsAggregator.cs \
+    's/s\.Absolute \? value : s\.Value \+ value/s.Value + value/' \
+    "aggregator: an observable counter accumulates the totals it reports"
+
+mutate Pulse/MetricsAggregator.cs \
+    's/ && SameLabels\(s\.Labels, labels\)//' \
+    "aggregator: series lookup ignores the tag set"
+
+mutate Pulse/PrometheusText.cs \
+    's/Escape\(label\.Value\)/label.Value/' \
+    "writer: label values written unescaped"
 
 mutate Pulse/MetricsAggregator.cs \
     's/s\.Count\+\+;/s.Count += 2;/' \

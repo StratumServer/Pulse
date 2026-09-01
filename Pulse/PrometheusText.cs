@@ -9,24 +9,83 @@ public static class PrometheusText
     public static string Render(IReadOnlyList<MetricSample> samples)
     {
         StringBuilder sb = new();
+
+        // HELP and TYPE belong to the family, not to the series: a labelled family has one sample
+        // per tag set and repeating the two header lines makes Prometheus reject the whole scrape.
+        HashSet<string> described = [];
         foreach (MetricSample sample in samples)
         {
-            Append(sb, sample);
+            string name = MetricName(sample.Name, sample.Kind);
+            if (described.Add(name))
+            {
+                // ponytail: HELP text is not escaped. Help strings come from instrument
+                // descriptions written in this assembly and in the runtime's own meter, none of
+                // which carry a backslash or a newline. Escape it the day help text is user input.
+                sb.Append("# HELP ").Append(name).Append(' ').Append(sample.Help).Append('\n');
+                sb.Append("# TYPE ").Append(name).Append(' ').Append(TypeName(sample.Kind)).Append('\n');
+            }
+
+            Append(sb, sample, name);
         }
 
         return sb.ToString();
     }
 
-    private static void Append(StringBuilder sb, MetricSample sample)
+    /// <summary>The exposition spelling of an instrument name: underscores for dots, and the
+    /// _total suffix a monotonic counter is expected to carry.</summary>
+    /// <remarks>The runtime's built-in meter uses dotted OpenTelemetry names, so
+    /// <c>dotnet.gc.collections</c> becomes <c>dotnet_gc_collections_total</c>. Pulse's own names
+    /// already comply and pass through untouched.</remarks>
+    public static string MetricName(string name, MetricKind kind)
     {
-        // ponytail: HELP text is not escaped. Every help string is a literal in this assembly and
-        // carries no backslash or newline. Escape it the day help text becomes configurable.
-        sb.Append("# HELP ").Append(sample.Name).Append(' ').Append(sample.Help).Append('\n');
-        sb.Append("# TYPE ").Append(sample.Name).Append(' ').Append(TypeName(sample.Kind)).Append('\n');
+        string mapped = name.Replace('.', '_');
+        return kind == MetricKind.Counter && !mapped.EndsWith("_total", StringComparison.Ordinal)
+            ? mapped + "_total"
+            : mapped;
+    }
 
+    /// <summary>Label names take the same character set as metric names, so a tag key like
+    /// <c>gc.heap.generation</c> renders as <c>gc_heap_generation</c>.</summary>
+    private static string LabelName(string key) => key.Replace('.', '_');
+
+    /// <summary>The three escapes the exposition format defines for a label value.</summary>
+    // ponytail: three passes over the string, once per label per scrape. Hand-roll a single pass
+    // the day a scrape carries enough labels for it to show up in a profile.
+    private static string Escape(string value) => value
+        .Replace("\\", "\\\\", StringComparison.Ordinal)
+        .Replace("\"", "\\\"", StringComparison.Ordinal)
+        .Replace("\n", "\\n", StringComparison.Ordinal);
+
+    /// <summary>The brace-wrapped label list, or an empty string when there is nothing to put in
+    /// it. <paramref name="le"/> is the histogram bucket bound, appended after the labels.</summary>
+    private static string Braces(KeyValuePair<string, string>[] labels, string? le)
+    {
+        if (labels.Length == 0 && le == null)
+        {
+            return string.Empty;
+        }
+
+        StringBuilder sb = new("{");
+        foreach (KeyValuePair<string, string> label in labels)
+        {
+            sb.Append(LabelName(label.Key)).Append("=\"").Append(Escape(label.Value)).Append("\",");
+        }
+
+        if (le != null)
+        {
+            sb.Append("le=\"").Append(le).Append("\",");
+        }
+
+        sb.Length--;
+        return sb.Append('}').ToString();
+    }
+
+    private static void Append(StringBuilder sb, MetricSample sample, string name)
+    {
         if (sample.Kind != MetricKind.Histogram)
         {
-            sb.Append(sample.Name).Append(' ').Append(Number(sample.Value)).Append('\n');
+            sb.Append(name).Append(Braces(sample.Labels, null)).Append(' ')
+              .Append(Number(sample.Value)).Append('\n');
             return;
         }
 
@@ -34,13 +93,22 @@ public static class PrometheusText
         for (int i = 0; i < sample.Bounds.Length; i++)
         {
             cumulative += sample.Buckets[i];
-            sb.Append(sample.Name).Append("_bucket{le=\"").Append(Number(sample.Bounds[i]))
-              .Append("\"} ").Append(Number(cumulative)).Append('\n');
+            sb.Append(name).Append("_bucket").Append(Braces(sample.Labels, Number(sample.Bounds[i])))
+              .Append(' ').Append(Number(cumulative)).Append('\n');
         }
 
-        sb.Append(sample.Name).Append("_bucket{le=\"+Inf\"} ").Append(Number(sample.Count)).Append('\n');
-        sb.Append(sample.Name).Append("_sum ").Append(Number(sample.Sum)).Append('\n');
-        sb.Append(sample.Name).Append("_count ").Append(Number(sample.Count)).Append('\n');
+        // A histogram with no bucket advice has no bucket lines to write, +Inf included, and
+        // degrades to the sum and count every Prometheus parser reads anyway.
+        if (sample.Bounds.Length > 0)
+        {
+            sb.Append(name).Append("_bucket").Append(Braces(sample.Labels, "+Inf"))
+              .Append(' ').Append(Number(sample.Count)).Append('\n');
+        }
+
+        sb.Append(name).Append("_sum").Append(Braces(sample.Labels, null)).Append(' ')
+          .Append(Number(sample.Sum)).Append('\n');
+        sb.Append(name).Append("_count").Append(Braces(sample.Labels, null)).Append(' ')
+          .Append(Number(sample.Count)).Append('\n');
     }
 
     private static string TypeName(MetricKind kind) => kind switch
