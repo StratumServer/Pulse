@@ -20,6 +20,9 @@ first.
 - `ServiceName` config key in `pulse-otlp.json` (default `vintagestory`), setting the
   `service.name` resource attribute so a backend receiving metrics from several servers can tell
   them apart. `OTEL_SERVICE_NAME`, the ecosystem's standard override, takes precedence when set.
+- A wire-level test for the grpc protocol: a scenario boots the server against a fake gRPC
+  collector and reads the export off the socket, so both protocols `pulse-otlp.json` accepts are
+  now proven end to end, not just http/protobuf.
 
 ## [0.1.0] - 2026-09-01
 
