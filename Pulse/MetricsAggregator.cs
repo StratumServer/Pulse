@@ -152,9 +152,19 @@ public sealed class MetricsAggregator : IDisposable
             // Bucket bounds ride on the instrument itself (InstrumentAdvice), so the aggregator
             // needs no per-instrument configuration of its own.
             double[] bounds = (instrument as Histogram<double>)?.Advice?.HistogramBucketBoundaries?.ToArray() ?? [];
-            MetricKind kind = instrument is Histogram<double> ? MetricKind.Histogram
-                : instrument.IsObservable ? MetricKind.Gauge
-                : MetricKind.Counter;
+            MetricKind kind;
+            if (instrument is Histogram<double>)
+            {
+                kind = MetricKind.Histogram;
+            }
+            else if (instrument.IsObservable)
+            {
+                kind = MetricKind.Gauge;
+            }
+            else
+            {
+                kind = MetricKind.Counter;
+            }
 
             return new Series
             {

@@ -18,6 +18,7 @@ TOTAL=0
 
 run_tests() {
     dotnet test Pulse.Tests/Pulse.Tests.csproj -c Release --nologo -v q >/dev/null 2>&1
+    return $?
 }
 
 mutate() { # <file> <sed -E expression> <label>
@@ -82,7 +83,7 @@ mutate Pulse/MetricsAggregator.cs \
 
 echo
 echo "$((TOTAL - FAILS))/$TOTAL mutations killed"
-if [ "$FAILS" -ne 0 ]; then
+if [[ "$FAILS" -ne 0 ]]; then
     echo "Mutation check FAILED: a mutation survived or went inert."
     exit 1
 fi

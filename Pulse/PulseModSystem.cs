@@ -32,7 +32,7 @@ public sealed class PulseModSystem : ModSystem
     private long listenerId = -1;
     private double sinceSnapshotSeconds;
 
-    public override bool ShouldLoad(EnumAppSide side) => side == EnumAppSide.Server;
+    public override bool ShouldLoad(EnumAppSide forSide) => forSide == EnumAppSide.Server;
 
     public override void StartServerSide(ICoreServerAPI api)
     {
