@@ -1,9 +1,9 @@
-<div style="background-color: #0b0d0b; background-image: url('https://raw.githubusercontent.com/StratumServer/Pulse/dev/docs/assets/pulse-rain-tile.gif'); background-repeat: repeat; background-attachment: fixed; padding: 22px 14px;">
+<div style="background-color: #0b0d0b; padding: 22px 14px;">
 <div style="max-width: 980px; margin: 0 auto;">
 <p style="margin: 0;"><img src="https://raw.githubusercontent.com/StratumServer/Pulse/dev/docs/assets/pulse-rain.gif" alt="PULSE" style="width: 100%; max-width: 100%; height: auto; display: block; border: 2px solid #00ff41;"></p>
 <p style="text-align: center; margin: 10px 0 0 0;">
 <span style="font-family: 'Courier New', monospace; background-color: #001a08; color: #00ff41; padding: 3px 10px; border: 1px solid #00ff41; font-size: 12px; font-weight: bold; display: inline-block; margin: 3px;">v0.1.0</span> <span style="font-family: 'Courier New', monospace; background-color: #001a08; color: #00ff41; padding: 3px 10px; border: 1px solid #00ff41; font-size: 12px; font-weight: bold; display: inline-block; margin: 3px;">VS 1.22.x</span> <span style="font-family: 'Courier New', monospace; background-color: #001a08; color: #00ff41; padding: 3px 10px; border: 1px solid #00ff41; font-size: 12px; font-weight: bold; display: inline-block; margin: 3px;">SERVER SIDE</span> <span style="font-family: 'Courier New', monospace; background-color: #001a08; color: #00ff41; padding: 3px 10px; border: 1px solid #00ff41; font-size: 12px; font-weight: bold; display: inline-block; margin: 3px;">OPEN SOURCE</span> <span style="font-family: 'Courier New', monospace; background-color: #001a08; color: #00ff41; padding: 3px 10px; border: 1px solid #00ff41; font-size: 12px; font-weight: bold; display: inline-block; margin: 3px;">ZERO DEPENDENCIES</span></p>
-<p>&nbsp;</p>
+<p style="margin: 14px 0;"><img src="https://raw.githubusercontent.com/StratumServer/Pulse/dev/docs/assets/pulse-rain-band.webp" alt="" style="width: 100%; max-width: 100%; height: auto; display: block;"></p>
 <div style="background-color: #030a04; border: 1px solid #00ff41;">
 <div style="background-color: #06180b; border-bottom: 1px solid #00ff41; padding: 7px 14px;"><span style="color: #ff5f57; font-size: 12px;">&#9679;</span> <span style="color: #febc2e; font-size: 12px;">&#9679;</span> <span style="color: #28c840; font-size: 12px;">&#9679;</span>&nbsp;&nbsp;<span style="font-family: 'Courier New', monospace; color: #7dff9b; font-size: 12px;">admin@vs-server: ~</span></div>
 <div style="padding: 14px 18px;">
@@ -19,7 +19,7 @@ dotnet_gc_pause_time_total 41.2
 <span style="color: #00ff41; font-weight: bold;">$ &#9610;</span></pre></div>
 <div style="border-top: 1px solid #003b00; padding: 10px 18px;"><span style="font-family: 'Courier New', monospace; color: #9dffb0; font-size: 13px;">Real output, one zip, no agent, no database, no account. Drop <span style="color: #00ff41;">pulse_x.x.x.zip</span> into <span style="color: #00ff41;">Mods/</span>, start the server, scrape.</span></div>
 </div>
-<p>&nbsp;</p>
+<p style="margin: 14px 0;"><img src="https://raw.githubusercontent.com/StratumServer/Pulse/dev/docs/assets/pulse-rain-band.webp" alt="" style="width: 100%; max-width: 100%; height: auto; display: block;"></p>
 <div>
 <div style="display: inline-block; vertical-align: top; width: 56%; min-width: 290px; background-color: #000000; border: 1px solid #003b00; padding: 16px 20px; box-sizing: border-box; margin: 0 1% 12px 0;">
 <span style="font-family: 'Courier New', monospace; font-size: 17px; font-weight: bold; color: #00ff41;">&gt; what_you_get_to_graph</span>
@@ -34,7 +34,7 @@ dotnet_gc_pause_time_total 41.2
 <div style="background-color: #000000; border: 1px solid #003b00; padding: 12px; text-align: center;"><span style="font-family: 'Courier New', monospace; font-size: 30px; font-weight: bold; color: #00ff41; text-shadow: 0 0 10px #00ff41;">31/31</span><br><span style="font-family: 'Courier New', monospace; font-size: 12px; color: #7dff9b;">mutations killed, every release, in CI</span></div>
 </div>
 </div>
-<p>&nbsp;</p>
+<p style="margin: 14px 0;"><img src="https://raw.githubusercontent.com/StratumServer/Pulse/dev/docs/assets/pulse-rain-band.webp" alt="" style="width: 100%; max-width: 100%; height: auto; display: block;"></p>
 <div>
 <div style="display: inline-block; vertical-align: top; width: 32%; min-width: 230px; background-color: #000000; border: 1px solid #003b00; border-top: 3px solid #00ff41; padding: 14px 16px; box-sizing: border-box; margin: 0 0.5% 12px 0;">
 <span style="font-family: 'Courier New', monospace; font-size: 15px; font-weight: bold; color: #00ff41;">[1] scrape</span>
@@ -44,11 +44,11 @@ dotnet_gc_pause_time_total 41.2
 <span style="font-family: 'Courier New', monospace; font-size: 15px; font-weight: bold; color: #00ff41;">[3] push</span>
 <p style="font-family: 'Courier New', monospace; color: #9dffb0; font-size: 12px; line-height: 1.65; margin: 8px 0 0 0;">The optional <span style="color: #00ff41;">pulseotlp</span> mod (<a style="color: #00ff41;" href="https://github.com/StratumServer/Pulse/releases">GitHub releases</a>) pushes everything over OTLP: otel-collector, Grafana Cloud, Datadog. Its dependencies ride in its own zip.</p></div>
 </div>
-<p>&nbsp;</p>
+<p style="margin: 14px 0;"><img src="https://raw.githubusercontent.com/StratumServer/Pulse/dev/docs/assets/pulse-rain-band.webp" alt="" style="width: 100%; max-width: 100%; height: auto; display: block;"></p>
 <div style="background-color: #010a03; border: 1px solid #003b00; border-left: 14px solid #00ff41; padding: 14px 18px;">
 <span style="font-family: 'Courier New', monospace; color: #9dffb0; font-size: 12px; line-height: 1.7;">Loopback bind by default: a game server is a public host, and widening the bind is a decision, not an accident. One dll, nothing bundled, nothing to collide with other mods. World state is never touched off the main thread. A failed bind, an unreachable backend or a game update hitting the deep-metrics probe all degrade cleanly; nothing here can take a server down. Built from a survey of the 1.22 internals, MIT licensed, and it runs on vanilla, <span style="color: #00ff41;">Stratum</span> and <span style="color: #00ff41;">Lithos</span> alike.</span>
 </div>
-<p>&nbsp;</p>
+<p style="margin: 14px 0;"><img src="https://raw.githubusercontent.com/StratumServer/Pulse/dev/docs/assets/pulse-rain-band.webp" alt="" style="width: 100%; max-width: 100%; height: auto; display: block;"></p>
 <div style="background-color: #000000; border: 2px solid #00ff41; padding: 14px 22px; text-align: center;">
 <span style="font-family: 'Courier New', monospace; font-size: 13px;"><a style="color: #00ff41; font-weight: bold;" href="https://github.com/StratumServer/Pulse">source_on_github</a> &nbsp;&middot;&nbsp; <a style="color: #00ff41; font-weight: bold;" href="https://github.com/StratumServer/Pulse/issues">issues_and_ideas</a> &nbsp;&middot;&nbsp; <a style="color: #00ff41; font-weight: bold;" href="https://discord.gg/pd24fawhsD">stratum_discord</a> &nbsp;&middot;&nbsp; <a style="color: #00ff41; font-weight: bold;" href="https://opencollective.com/stratum">support_stratum</a></span><br>
 <span style="font-family: 'Courier New', monospace; color: #0a5c22; font-size: 12px; font-style: italic;">There is no spoon. Only metrics.</span><br>
