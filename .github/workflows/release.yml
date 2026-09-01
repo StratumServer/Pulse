@@ -83,9 +83,14 @@ jobs:
           dotnet build Pulse/Pulse.csproj -c Release -t:PackageMod
           dotnet build Pulse.Otlp/Pulse.Otlp.csproj -c Release -t:PackageMod
           VERSION="${GITHUB_REF_NAME#v}"
+          BASE="${VERSION%%-*}"
+          # PackageMod names the zips after the base version, which the tag check above
+          # guarantees matches the tag. A prerelease tag renames them to carry the suffix;
+          # a stable tag leaves them exactly as built.
           for MOD in pulse pulseotlp; do
-            SOURCE=(artifacts/${MOD}_*.zip)
-            mv "${SOURCE[0]}" "artifacts/${MOD}_${VERSION}.zip"
+            if [ "$VERSION" != "$BASE" ]; then
+              mv "artifacts/${MOD}_${BASE}.zip" "artifacts/${MOD}_${VERSION}.zip"
+            fi
           done
           ls -l artifacts/
 
