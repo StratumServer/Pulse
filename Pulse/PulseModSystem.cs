@@ -33,14 +33,12 @@ public sealed class PulseModSystem : ModSystem
     private Meter? meter;
     private MetricsAggregator? aggregator;
     private MetricsHttpServer? http;
-    private Counter<long>? ticks;
-    private Histogram<double>? tickSeconds;
+    private TickBookkeeper? tickBookkeeper;
     private Counter<long>? columnsGenerated;
     private Counter<long>? logEntries;
     private Counter<long>? engineWarnings;
     private long listenerId = -1;
     private long chunksListenerId = -1;
-    private double sinceSnapshotSeconds;
 
     public override bool ShouldLoad(EnumAppSide forSide) => forSide == EnumAppSide.Server;
 
@@ -56,11 +54,13 @@ public sealed class PulseModSystem : ModSystem
         }
 
         meter = new Meter(MeterName);
-        ticks = meter.CreateCounter<long>(
-            "pulse_server_ticks_total", "{tick}", "Server ticks processed since startup.");
-        tickSeconds = meter.CreateHistogram(
-            "pulse_server_tick_seconds", "s", "Wall clock seconds between consecutive server ticks.",
-            tags: null, new InstrumentAdvice<double> { HistogramBucketBoundaries = TickBuckets });
+        tickBookkeeper = new TickBookkeeper(
+            meter.CreateCounter<long>(
+                "pulse_server_ticks_total", "{tick}", "Server ticks processed since startup."),
+            meter.CreateHistogram(
+                "pulse_server_tick_seconds", "s", "Wall clock seconds between consecutive server ticks.",
+                tags: null, new InstrumentAdvice<double> { HistogramBucketBoundaries = TickBuckets }),
+            SnapshotIntervalSeconds);
         meter.CreateObservableGauge(
             "pulse_players_online", () => snapshot.Players, "{player}", "Players currently connected.");
         meter.CreateObservableGauge(
@@ -87,7 +87,7 @@ public sealed class PulseModSystem : ModSystem
         // writer maps on the way out.
         string[] meters = config.RuntimeMetrics ? [MeterName, RuntimeMeterName] : [MeterName];
         aggregator = new MetricsAggregator(OnUnsupportedInstrument, meters);
-        SeedCounters();
+        SeedCounters(columnsGenerated!, logEntries!, engineWarnings!);
         PublishSnapshot();
 
         // The errorHandler overload is not optional. Without it an exception from this listener
@@ -156,26 +156,17 @@ public sealed class PulseModSystem : ModSystem
 
     private void OnTick(float _)
     {
-        ticks!.Add(1);
-
         // The mod's own stopwatch, not the float the engine passes: that one is derived from
-        // Stopwatch.ElapsedMilliseconds and is quantised to whole milliseconds.
-        if (tickClock.IsRunning)
-        {
-            double seconds = tickClock.Elapsed.TotalSeconds;
-            tickSeconds!.Record(seconds);
-            sinceSnapshotSeconds += seconds;
-        }
-
+        // Stopwatch.ElapsedMilliseconds and is quantised to whole milliseconds. Elapsed reads
+        // zero before the clock is first started, which the bookkeeper treats as "no prior tick"
+        // and ignores rather than records.
+        double elapsedSeconds = tickClock.Elapsed.TotalSeconds;
         tickClock.Restart();
 
-        if (sinceSnapshotSeconds < SnapshotIntervalSeconds)
+        if (tickBookkeeper!.OnTick(elapsedSeconds))
         {
-            return;
+            PublishSnapshot();
         }
-
-        sinceSnapshotSeconds = 0;
-        PublishSnapshot();
     }
 
     private void OnTickError(Exception e) => sapi?.Logger.Error(e);
@@ -217,17 +208,20 @@ public sealed class PulseModSystem : ModSystem
     /// <summary>Records a zero for every label value Pulse can emit, so the counters exist from
     /// boot instead of appearing the first time something goes wrong. A series starts at its first
     /// measurement, and a family that shows up mid-scrape is a family no dashboard plots.</summary>
-    private void SeedCounters()
+    /// <remarks>Static and parameterised on the three counters it seeds, rather than reading the
+    /// instance fields directly, so the seeding logic is drivable from a test with a plain Meter
+    /// and no server.</remarks>
+    private static void SeedCounters(Counter<long> columnsGenerated, Counter<long> logEntries, Counter<long> engineWarnings)
     {
-        columnsGenerated!.Add(0);
+        columnsGenerated.Add(0);
         foreach (string level in LogClassifier.Levels)
         {
-            logEntries!.Add(0, new KeyValuePair<string, object?>("level", level));
+            logEntries.Add(0, new KeyValuePair<string, object?>("level", level));
         }
 
         foreach (string kind in LogClassifier.Kinds)
         {
-            engineWarnings!.Add(0, new KeyValuePair<string, object?>("kind", kind));
+            engineWarnings.Add(0, new KeyValuePair<string, object?>("kind", kind));
         }
     }
 
