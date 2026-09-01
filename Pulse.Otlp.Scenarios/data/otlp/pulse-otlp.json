@@ -1,0 +1,10 @@
+{
+  "Enabled": true,
+  "Endpoint": "http://127.0.0.1:39469",
+  "Protocol": "http/protobuf",
+  "Headers": {
+    "x-scope-orgid": "atlas"
+  },
+  "IntervalSeconds": 5,
+  "IncludeRuntimeMetrics": false
+}

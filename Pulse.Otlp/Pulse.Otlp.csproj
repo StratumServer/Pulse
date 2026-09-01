@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>$(FrameworkVersion)</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- The opposite of the base mod: this one exists to carry its dependencies. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <Version>0.2.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The OTLP exporter and nothing else. It pulls the Microsoft.Extensions.* fan-out with it,
+         which is the whole reason this is a separate zip: those dlls load into the same shared
+         context as every other mod, so they stay confined to the server that asked for OTLP. -->
+    <PackageReference Include="OpenTelemetry" Version="1.18.0" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.18.0" />
+    <Reference Include="VintagestoryAPI" HintPath="$(VINTAGE_STORY)/VintagestoryAPI.dll" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="modinfo.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!-- Packaging: modinfo.json and every runtime dll at the ZIP ROOT. The loader refuses a dll in a
+       subfolder, loads every dll it finds at the root, and then requires exactly one of them to
+       hold a ModSystem or a ModInfo attribute, which is Pulse.Otlp.dll. The pdb and the deps.json
+       are left out: the loader never reads a deps.json, so shipping one is noise that only invites
+       questions. VintagestoryAPI.dll is excluded by being a Private=false reference. -->
+  <Target Name="PackageMod" DependsOnTargets="Publish">
+    <PropertyGroup>
+      <OtlpStageDir>$(IntermediateOutputPath)package/</OtlpStageDir>
+      <OtlpZipPath>$(MSBuildThisFileDirectory)../artifacts/pulseotlp_$(Version).zip</OtlpZipPath>
+    </PropertyGroup>
+    <ItemGroup>
+      <OtlpPayload Include="$(PublishDir)*.dll" />
+      <OtlpPayload Include="$(MSBuildThisFileDirectory)modinfo.json" />
+    </ItemGroup>
+    <RemoveDir Directories="$(OtlpStageDir)" />
+    <MakeDir Directories="$(OtlpStageDir);$(MSBuildThisFileDirectory)../artifacts" />
+    <Copy SourceFiles="@(OtlpPayload)" DestinationFolder="$(OtlpStageDir)" />
+    <Delete Files="$(OtlpZipPath)" />
+    <ZipDirectory SourceDirectory="$(OtlpStageDir)" DestinationFile="$(OtlpZipPath)" />
+    <Message Importance="high" Text="Packaged $(OtlpZipPath)" />
+  </Target>
+</Project>

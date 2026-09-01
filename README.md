@@ -3,7 +3,7 @@
 Pulse is a server-side Vintage Story mod that serves the server's own health numbers on a
 Prometheus scrape endpoint. It runs on the dedicated server only, ships as a single dll with no
 bundled dependencies, and does not talk to anything on its own: something has to come and read
-`/metrics`.
+`/metrics`. A separate optional mod pushes the same metrics over OTLP, described further down.
 
 The metric families it serves:
 
@@ -56,8 +56,9 @@ framework here would only make the series harder to correlate with any other .NE
 
 ## Install
 
-Drop `pulse_0.1.0.zip` into your server's `Mods/` folder and start the server. On first boot
-Pulse writes `ModConfig/pulse.json` with its defaults:
+Drop `pulse_0.1.0.zip` into your server's `Mods/` folder and start the server. Add
+`pulseotlp_0.1.0.zip` beside it if you want OTLP push as well; the base mod works on its own and
+the OTLP one does not. On first boot Pulse writes `ModConfig/pulse.json` with its defaults:
 
 ```json
 {
@@ -98,6 +99,93 @@ you should make on purpose, not a default you inherit.
 If the port is already taken, Pulse logs an error and carries on without the endpoint. The game
 server keeps running; you get no metrics until you fix the config.
 
+## OTLP export
+
+OTLP is the push counterpart to the scrape endpoint: instead of waiting for Prometheus to come
+and read `/metrics`, the server sends its metrics to a collector on a timer, in the wire format
+every major observability backend accepts. Grafana Cloud, Honeycomb, Datadog, New Relic and an
+`otel-collector` you run yourself all take the same payload.
+
+It ships as a second mod, `pulseotlp_0.1.0.zip`, and both zips go in `Mods/`. The base mod stays
+a single dll with no dependencies; the OTLP one carries the OpenTelemetry SDK and its
+`Microsoft.Extensions.*` fan-out, eighteen dlls in all. That split is not tidiness. The game's
+mod loader puts every root-level dll of every mod into one shared assembly context with no
+version arbitration, so a bundled dependency is a collision risk against every other mod on the
+server, and a server that does not push metrics should not be paying it.
+
+The two mods share no code. `Pulse.Otlp.dll` has no reference to `Pulse.dll`; it subscribes to
+the meter named `Pulse.Server`, which is all `System.Diagnostics.Metrics` needs, and
+`modinfo.json` declares the dependency so the loader guarantees the base mod is there first.
+
+On first boot it writes `ModConfig/pulse-otlp.json`:
+
+```json
+{
+  "Enabled": true,
+  "Endpoint": "http://localhost:4318",
+  "Protocol": "http/protobuf",
+  "Headers": {},
+  "IntervalSeconds": 60,
+  "IncludeRuntimeMetrics": true
+}
+```
+
+Those defaults suit a collector running on the same host. `Endpoint` is the base address, without
+a signal path: Pulse appends `/v1/metrics` for `http/protobuf` and leaves it alone for `grpc`,
+where the exporter appends its own service path. `Protocol` takes the two names the OTLP
+specification defines, `http/protobuf` and `grpc`; anything else logs a warning and falls back to
+`http/protobuf` rather than leaving you with no export at all. `IncludeRuntimeMetrics` adds the
+`System.Runtime` meter to what gets pushed, and it is separate from the base mod's
+`RuntimeMetrics` flag, so you can serve the `dotnet_*` families locally and not ship them, or the
+other way round.
+
+`IntervalSeconds` is floored at 5. Sixty is the OTLP default and the right answer for almost
+everyone: the interval also decides how often every observable gauge is polled, and the
+loaded-chunk read behind one of them is not free.
+
+For a local collector, the whole config is the endpoint:
+
+```json
+{
+  "Endpoint": "http://localhost:4318",
+  "Protocol": "http/protobuf"
+}
+```
+
+A hosted backend wants an auth header. Grafana Cloud's OTLP endpoint takes HTTP basic auth, with
+the instance ID as the user and an access policy token as the password:
+
+```json
+{
+  "Endpoint": "https://otlp-gateway-prod-eu-west-2.grafana.net/otlp",
+  "Protocol": "http/protobuf",
+  "Headers": {
+    "Authorization": "Basic MTIzNDU2OmdsY19leGFtcGxldG9rZW4="
+  },
+  "IntervalSeconds": 60
+}
+```
+
+`Headers` goes out with every export, so anything a backend accepts works the same way:
+`x-honeycomb-team` for Honeycomb, `api-key` for New Relic, `x-scope-orgid` for a multi-tenant
+Mimir. Values are percent-encoded on the way into the exporter, which the OTLP header format
+expects, so a base64 token with `+`, `/` and `=` in it needs no special handling. A literal comma
+in a header value is the one thing that cannot survive the trip, because the exporter unescapes
+the whole header string before splitting it on commas. No auth scheme in the wild puts a comma in
+a token.
+
+**`pulse-otlp.json` holds a credential.** It sits in `ModConfig/` in plain text, with whatever
+permissions your server's umask gave it. On a shared or rented host, `chmod 600` it and make sure
+it is owned by the account the server runs as. It is also worth keeping out of any config backup
+you push somewhere public.
+
+A collector that is down, refusing, or answering 401 costs you nothing on the game side. The
+OpenTelemetry SDK exports from its own background thread and swallows the failure into its
+internal event source, so the tick loop never sees it. You get no metrics until the collector
+comes back, and the server does not notice either way. A malformed `Endpoint` is the one case
+Pulse checks itself, because that one would throw while the exporter is being built: it logs an
+error and registers nothing.
+
 ## Building and testing
 
 You need the .NET 10 SDK and a Vintage Story 1.22.x install, with `VINTAGE_STORY` pointing at
@@ -106,9 +194,10 @@ engine's logger crashes at boot).
 
 ```sh
 export VINTAGE_STORY=/path/to/vintagestory
-dotnet build -c Release
+dotnet build Pulse.slnx -c Release
 dotnet test                      # unit tests, then the Atlas scenarios
-dotnet build Pulse/Pulse.csproj -c Release -t:PackageMod   # writes artifacts/pulse_0.1.0.zip
+dotnet build Pulse/Pulse.csproj -c Release -t:PackageMod            # artifacts/pulse_0.1.0.zip
+dotnet build Pulse.Otlp/Pulse.Otlp.csproj -c Release -t:PackageMod  # artifacts/pulseotlp_0.1.0.zip
 ```
 
 The scenarios in `Pulse.Scenarios` boot a real headless server in-process through
@@ -117,10 +206,17 @@ The scenarios in `Pulse.Scenarios` boot a real headless server in-process throug
 
 ```sh
 atlas run Pulse.Scenarios/bin/Release/net10.0/Pulse.Scenarios.dll
+atlas run Pulse.Otlp.Scenarios/bin/Release/net10.0/Pulse.Otlp.Scenarios.dll
 ```
 
+`Pulse.Otlp.Scenarios` is a separate project because it stages both mods, laid out exactly as
+their zips are, and the base suite's staging should stay as it is. It stands up an `HttpListener`
+as a fake collector, points the mod at it, runs the world, and asserts on the protobuf that
+arrives.
+
 Unit tests in `Pulse.Tests` cover the aggregator, the exposition writer and the log classifier
-with no server at all. Mutation verification over those three files runs through
+with no server at all; `Pulse.Otlp.Tests` covers the config translation, which is where the OTLP
+mod's only non-obvious logic lives. Mutation verification over those three files runs through
 `tools/mutation-check.sh`, which applies twelve representative mutations and requires the suite
 to fail on every one; CI runs it on each push. A `stryker-config.json` sits ready for
 `dotnet stryker`, which currently finds the tests but runs mutants against the unmutated
@@ -128,13 +224,13 @@ assembly on the .NET 10 SDK.
 
 ## Where this is going
 
-OTLP export is the next thing worth building, since no Vintage Story exporter has it today and
-it is the reason to instrument through `System.Diagnostics.Metrics` rather than write to the
-Prometheus format directly. It will land when it lands. Beyond that, the survey in
-`docs/metrics-feasibility.md` lists what else is measurable on this engine: the global network
-byte counters, the suspend window that brackets every autosave, and the engine's own busy-time
-accounting, which needs a cast to a concrete engine type and so has to degrade cleanly when a
-game update moves it.
+The survey in `docs/metrics-feasibility.md` lists what else is measurable on this engine: the
+global network byte counters, the suspend window that brackets every autosave, and the engine's
+own busy-time accounting, which needs a cast to a concrete engine type and so has to degrade
+cleanly when a game update moves it.
+
+Traces and logs over OTLP would reuse most of the exporter mod, but neither has an obvious
+consumer on a game server yet, so they stay unbuilt until someone asks.
 
 ## License
 
