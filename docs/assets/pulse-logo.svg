@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 320" width="480" height="320">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#122036"/>
+      <stop offset="1" stop-color="#0a1220"/>
+    </linearGradient>
+    <pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse">
+      <path d="M 32 0 L 0 0 0 32" fill="none" stroke="#1b2b44" stroke-width="1"/>
+    </pattern>
+    <filter id="glow" x="-150%" y="-150%" width="400%" height="400%">
+      <feGaussianBlur stdDeviation="6" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <clipPath id="frame">
+    <rect x="0" y="0" width="480" height="320" rx="20"/>
+  </clipPath>
+
+  <rect x="0" y="0" width="480" height="320" rx="20" fill="url(#bg)"/>
+  <rect x="0" y="0" width="480" height="320" rx="20" fill="url(#grid)"/>
+
+  <g clip-path="url(#frame)">
+    <path d="M 44 150 H 128 L 146 128 L 164 150 H 208 L 226 76 L 250 210 L 268 118 L 282 150 H 322 L 338 136 L 354 150 H 424"
+          fill="none" stroke="#59d98c" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"
+          filter="url(#glow)"/>
+    <circle cx="424" cy="150" r="7" fill="#8af0b4" filter="url(#glow)"/>
+  </g>
+
+  <rect x="1.5" y="1.5" width="477" height="317" rx="19" fill="none" stroke="#2a4266" stroke-width="3"/>
+
+  <text x="240" y="272" text-anchor="middle"
+        font-family="Arial, Helvetica, sans-serif" font-size="46" font-weight="bold"
+        letter-spacing="16" fill="#e9f3ff">PULSE</text>
+</svg>

@@ -1,0 +1,48 @@
+<table style="width: 100%; border-collapse: collapse; background-color: #efe3c4; border: 2px solid #8a6d3b;"><tbody><tr><td style="padding: 28px 24px; text-align: center;"><span style="font-size: 34px; font-weight: bold; color: #4a3315; letter-spacing: 4px;">P U L S E</span><br><span style="font-size: 16px; color: #6d5527; font-style: italic;">Your server's vital signs.</span><br><br><span style="color: #4a3a22; font-size: 14px;">A server-side observability mod for Vintage Story. Drop the zip in <code>Mods/</code>, start the server, and <code>http://127.0.0.1:9464/metrics</code> answers with everything Prometheus and Grafana need: tick health, players, world activity, memory, and the engine's own accounting.</span><br><br><span style="background-color: #e4d5ac; color: #4a3315; padding: 3px 10px; border: 1px solid #8a6d3b; font-size: 12px; font-weight: bold;">v0.1.0</span>&nbsp; <span style="background-color: #dcead0; color: #2f5214; padding: 3px 10px; border: 1px solid #5a8f2e; font-size: 12px; font-weight: bold;">VS 1.22.x</span>&nbsp; <span style="background-color: #e4def0; color: #3f3366; padding: 3px 10px; border: 1px solid #7a68a8; font-size: 12px; font-weight: bold;">SERVER SIDE</span>&nbsp; <span style="background-color: #d8e6ef; color: #23455c; padding: 3px 10px; border: 1px solid #4d7fa3; font-size: 12px; font-weight: bold;">OPEN SOURCE</span>&nbsp; <span style="background-color: #dcead0; color: #2f5214; padding: 3px 10px; border: 1px solid #5a8f2e; font-size: 12px; font-weight: bold;">ZERO DEPENDENCIES</span></td>
+</tr>
+</tbody>
+</table>
+<p>&nbsp;</p>
+<table style="width: 100%; border-collapse: collapse; background-color: #f0e6cf; border: 1px solid #b39a66;">
+<tbody>
+<tr><td style="padding: 18px 22px;">
+<span style="font-size: 20px; font-weight: bold; color: #4a3315;">What you get to graph</span>
+<ul style="color: #4a3a22; font-size: 14px; margin-top: 10px;">
+<li><b>Tick health:</b> tick rate, tick time as a histogram (p95 and p99 are yours), the configured budget to read saturation against, and the engine's own <b>tick busy time</b>: how much of each tick was actual work. That is the <code>/stats</code> number, and it shows load climbing long before TPS ever drops.</li>
+<li><b>Players:</b> online count, ping average and max, deaths.</li>
+<li><b>World:</b> entities loaded plus the ten most numerous types, chunks loaded, worldgen queue depth, columns generated.</li>
+<li><b>Network:</b> TCP and UDP, live rates and running totals.</li>
+<li><b>Autosave pauses:</b> how often the server suspended and for how long. That is the freeze players feel.</li>
+<li><b>Log health:</b> warnings, errors and fatals as counters, plus four engine warnings worth alerting on: tick overload, high memory, suspend timeout, autosave disk contention.</li>
+<li><b>The .NET runtime:</b> GC collections and pause time, heap, working set, CPU, thread pool.</li>
+</ul>
+</td></tr>
+</tbody>
+</table>
+<p>&nbsp;</p>
+<table style="width: 100%; border-collapse: collapse; background-color: #f0e6cf; border: 1px solid #b39a66;">
+<tbody>
+<tr><td style="padding: 18px 22px;">
+<span style="font-size: 20px; font-weight: bold; color: #4a3315;">Three ways to consume it</span>
+<p style="color: #4a3a22; font-size: 14px;"><b>Prometheus and Grafana.</b> Point a Prometheus at the endpoint; the repository's <a style="color: #3f6617;" href="https://github.com/StratumServer/Pulse/tree/main/contrib/grafana">contrib/grafana</a> folder holds a fully provisioned dashboard that comes up with two docker commands.</p>
+<p style="color: #4a3a22; font-size: 14px;"><b>Game panels.</b> Panels can skip Prometheus entirely and read <code>/metrics</code> directly. The first panel integration was built that way in an afternoon, without a line changing on the mod side.</p>
+<p style="color: #4a3a22; font-size: 14px;"><b>OTLP push.</b> A second optional mod, <code>pulseotlp</code> (on the <a style="color: #3f6617;" href="https://github.com/StratumServer/Pulse/releases">GitHub releases page</a>), pushes the same metrics to whatever you already run: an OpenTelemetry collector, Grafana Cloud, Datadog and the rest. It carries its own dependencies in its own zip, so the base mod stays clean.</p>
+</td></tr>
+</tbody>
+</table>
+<p>&nbsp;</p>
+<table style="width: 100%; border-collapse: collapse; background-color: #f0e6cf; border: 1px solid #b39a66;">
+<tbody>
+<tr><td style="padding: 18px 22px;">
+<span style="font-size: 20px; font-weight: bold; color: #4a3315;">Built careful</span>
+<p style="color: #4a3a22; font-size: 14px;">The endpoint binds loopback by default: a game server is a public host and metrics carry no authentication, so widening the bind is a decision you make on purpose, ideally behind a reverse proxy. The base mod is a single dll with nothing bundled, so there is nothing to collide with other mods. Metrics never touch live world state off the main thread, and a failed port bind logs an error while the game server carries on.</p>
+<p style="color: #4a3a22; font-size: 14px;">Built from a survey of the 1.22 server internals rather than guesswork. Every release ships from CI with 126 unit tests, 20 scenarios that boot a real headless server, and a mutation check. Works on the vanilla dedicated server; the Stratum and Lithos forks keep the modding API intact, so the same zip loads there too.</p>
+</td></tr>
+</tbody>
+</table>
+<p>&nbsp;</p>
+<table style="width: 100%; border-collapse: collapse; background-color: #efe3c4; border: 2px solid #8a6d3b;"><tbody><tr><td style="padding: 16px 22px; text-align: center;">
+<span style="color: #4a3a22; font-size: 14px;"><a style="color: #3f6617; font-weight: bold;" href="https://github.com/StratumServer/Pulse">Source on GitHub</a> &middot; <a style="color: #3f6617; font-weight: bold;" href="https://github.com/StratumServer/Pulse/issues">Issues and ideas</a> &middot; <a style="color: #3f6617; font-weight: bold;" href="https://discord.gg/pd24fawhsD">Stratum Discord</a> &middot; <a style="color: #3f6617; font-weight: bold;" href="https://opencollective.com/stratum">Support Stratum</a></span><br><span style="color: #6d5527; font-size: 12px; font-style: italic;">MIT licensed. Built by the Stratum team.</span>
+</td></tr>
+</tbody>
+</table>
