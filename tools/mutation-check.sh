@@ -43,7 +43,7 @@ mutate() { # <file> <sed -E expression> <label>
     git checkout -- "$file"
 }
 
-MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse.Otlp/OtlpOptions.cs"
+MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse/EngineSample.cs Pulse/PingSummary.cs Pulse/EntityBreakdown.cs Pulse/SuspendBookkeeper.cs Pulse.Otlp/OtlpOptions.cs"
 
 if ! git diff --quiet -- $MUTATED; then
     echo "One of $MUTATED has uncommitted changes; refusing to mutate over them."
@@ -113,6 +113,54 @@ mutate Pulse/MetricsHttpServer.cs \
 mutate Pulse/TickBookkeeper.cs \
     's/sinceSnapshotSeconds < snapshotIntervalSeconds/sinceSnapshotSeconds <= snapshotIntervalSeconds/' \
     "tick bookkeeper: snapshot cadence boundary made inclusive, delaying the due tick that lands exactly on it"
+
+mutate Pulse/PrometheusText.cs \
+    's/samples\.GroupBy\(sample => MetricName\(sample\.Name, sample\.Kind\)\)/samples.GroupBy(sample => MetricName(sample.Name, sample.Kind) + sample.Labels.Length)/' \
+    "writer: a family is split by tag set, repeating its HELP and TYPE lines"
+
+mutate Pulse/EngineSample.cs \
+    's/ticksTotal > 0 \?/ticksTotal >= 0 ?/' \
+    "engine sample: busy average divides by a bucket that counted no ticks"
+
+mutate Pulse/EngineSample.cs \
+    's|tickTimeTotalMs / \(double\)ticksTotal / 1000\.0|tickTimeTotalMs / (double)ticksTotal * 1000.0|' \
+    "engine sample: engine milliseconds published as if they were seconds"
+
+mutate Pulse/PingSummary.cs \
+    's/if \(!float\.IsFinite\(ping\)\)/if (float.IsFinite(ping))/' \
+    "ping summary: the NaN skip keeps the NaNs and drops the real pings"
+
+mutate Pulse/PingSummary.cs \
+    's|new PingSummary\(total / counted, max\)|new PingSummary(total, max)|' \
+    "ping summary: the average stops dividing by the number of players"
+
+mutate Pulse/PingSummary.cs \
+    's/max = Math\.Max\(max, ping\);/max = ping;/' \
+    "ping summary: the maximum becomes whichever player was read last"
+
+mutate Pulse/EntityBreakdown.cs \
+    's/if \(!current\.Contains\(code\)\)/if (current.Contains(code))/' \
+    "entity breakdown: a code that left the top ten is never zeroed and its series freezes"
+
+mutate Pulse/EntityBreakdown.cs \
+    's/published = \[\.\. current\];/published = [];/' \
+    "entity breakdown: nothing is remembered as published, so nothing is ever retired"
+
+mutate Pulse/EntityBreakdown.cs \
+    's/\.ThenBy\(entry => entry\.Key, StringComparer\.Ordinal\)//' \
+    "entity breakdown: tied codes are ordered by whatever the dictionary hands back"
+
+mutate Pulse/EntityBreakdown.cs \
+    's/\(OtherCode, total - top\)/(OtherCode, total)/' \
+    "entity breakdown: the other bucket counts the codes it already published"
+
+mutate Pulse/SuspendBookkeeper.cs \
+    '/public void Open/,/^    }/s/if \(startSeconds < 0\)/if (true)/' \
+    "suspend bookkeeper: every poll of the suspend handler restarts the window"
+
+mutate Pulse/SuspendBookkeeper.cs \
+    '/Close/,/^    }/s/startSeconds = -1;/startSeconds = 0;/' \
+    "suspend bookkeeper: the window is never marked closed, so a second resume counts again"
 
 # The OTLP mod is thin wiring apart from this one file, where every line is something that fails
 # silently when it is wrong: a wrong endpoint path 404s on every export and a header encoded the
