@@ -96,12 +96,14 @@ def main(paths):
     for path in paths:
         try:
             problems = check(repo_path(path))
-        except ValueError:
-            print(f"{path}: outside the repository, refusing to read it")
-            failed = True
-            continue
+        # Before the ValueError clause: JSONDecodeError is a ValueError, and a
+        # broken dashboard deserves its parse error, not the outside-repo line.
         except (OSError, json.JSONDecodeError) as e:
             print(f"{path}: {e}")
+            failed = True
+            continue
+        except ValueError:
+            print(f"{path}: outside the repository, refusing to read it")
             failed = True
             continue
         for problem in problems:
