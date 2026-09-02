@@ -12,9 +12,22 @@ Exits nonzero and prints one line per violation.
 """
 
 import json
+import pathlib
 import sys
 
 COLUMNS = 24
+
+# The dashboards this script exists to check live in the repository, so that is
+# the only place it will read from: a stray argument cannot walk it out to an
+# arbitrary file.
+REPO = pathlib.Path(__file__).resolve().parent.parent.parent
+
+
+def inside_repo(path):
+    try:
+        return pathlib.Path(path).resolve().is_relative_to(REPO)
+    except OSError:
+        return False
 
 
 def panels(dashboard):
@@ -81,6 +94,10 @@ def main(paths):
 
     failed = False
     for path in paths:
+        if not inside_repo(path):
+            print(f"{path}: outside the repository, refusing to read it")
+            failed = True
+            continue
         try:
             problems = check(path)
         except (OSError, json.JSONDecodeError) as e:
