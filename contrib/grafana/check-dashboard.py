@@ -23,11 +23,11 @@ COLUMNS = 24
 REPO = pathlib.Path(__file__).resolve().parent.parent.parent
 
 
-def inside_repo(path):
-    try:
-        return pathlib.Path(path).resolve().is_relative_to(REPO)
-    except OSError:
-        return False
+def repo_path(path):
+    """The argument rebuilt from the repository root, so what gets opened is
+    always REPO/<something inside it>. Raises ValueError for anything outside,
+    OSError for anything that does not exist."""
+    return REPO / pathlib.Path(path).resolve(strict=True).relative_to(REPO)
 
 
 def panels(dashboard):
@@ -94,12 +94,12 @@ def main(paths):
 
     failed = False
     for path in paths:
-        if not inside_repo(path):
+        try:
+            problems = check(repo_path(path))
+        except ValueError:
             print(f"{path}: outside the repository, refusing to read it")
             failed = True
             continue
-        try:
-            problems = check(path)
         except (OSError, json.JSONDecodeError) as e:
             print(f"{path}: {e}")
             failed = True
