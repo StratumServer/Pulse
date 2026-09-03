@@ -10,6 +10,16 @@ first.
 
 ### Added
 
+- Per-mod tick attribution, behind a new `Attribution` block in `pulse.json` and off by default.
+  `pulse_mod_tick_share{modid}` is the fraction of profiled main-thread busy time one mod took over
+  the last burst, `pulse_mod_tick_seconds_total{modid}` the sampled seconds behind it,
+  `pulse_attribution_ticks_total` the ticks those seconds were measured over, and
+  `pulse_attribution_dropped_samples_total` the readings discarded because the engine's 32 bit
+  marker counter had wrapped. It drives the engine's own frame profiler in short bursts (30 ticks
+  every 10 seconds by default) rather than leaving it on, which costs about 0.3% of the tick
+  budget amortised against roughly 2.8% while a burst runs. The README section lists what it
+  cannot see: broadcast event handlers carry no markers, and thread-safe physics is measured for
+  the main thread only.
 - `contrib/alerts/pulse-alerts.yml`, a Prometheus alerting rules file covering tick rate, tick
   saturation, sustained tick overruns, engine warnings, log errors, endpoint availability and a
   stuck worldgen queue, calibrated against the engine's own thresholds. `contrib/alerts/README.md`

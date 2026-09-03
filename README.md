@@ -54,6 +54,9 @@ degraded mode below for what happens when they are unavailable.
 - `pulse_network_udp_sent_bytes_total` and `pulse_network_udp_received_bytes_total` (counters):
   the UDP totals missing from the two public byte counters above.
 
+Four more answer "which mod is eating the tick", and only when you turn them on. They have a
+section of their own further down.
+
 The tick period is measured rather than taken from the value the engine hands tick listeners,
 because that one is rounded to whole milliseconds. Overruns still land exactly: once a tick's
 work exceeds the budget the engine's throttle sleep is zero, and the period is the busy time.
@@ -103,6 +106,91 @@ Pulse renders the shape each instrument declares, including where that is arguab
 as an ObservableCounter, even though the number goes down as often as up. Second-guessing the
 framework here would only make the series harder to correlate with any other .NET exporter.
 
+## Attribution
+
+Tick busy time tells you the server is working hard. Attribution tells you what it is working on.
+Turned on, it reports a per-mod share of the main thread, on a continuous series you can graph and
+alert on, rather than in a one-off profiling report.
+
+It is off by default, because it is not free. Add an `Attribution` block to `ModConfig/pulse.json`:
+
+```json
+{
+  "Attribution": {
+    "Enabled": true,
+    "BurstTicks": 30,
+    "IntervalSeconds": 10
+  }
+}
+```
+
+`BurstTicks` is how many consecutive ticks each measurement covers, `IntervalSeconds` how long the
+server runs unmeasured between two of them. The defaults measure about one tick in twelve. Both are
+clamped on read: at least a second between bursts, at most 300 ticks in one.
+
+Four families appear once it is on:
+
+- `pulse_mod_tick_share{modid}` (gauge): the fraction of profiled main-thread busy time that went
+  to one mod over the last completed burst. The shares add up to 1 across every `modid`, including
+  the two Pulse adds: `engine` for the server's own systems and for the time no marker named, and
+  `unattributed` for work that was marked but that no loaded mod claims.
+- `pulse_mod_tick_seconds_total{modid}` (counter): main-thread seconds attributed to one mod.
+  Sampled, not total: this is time measured inside the bursts, not time since startup. Divide by
+  the tick counter below to compare two servers, or take `rate()` of it against
+  `rate(pulse_attribution_ticks_total)` for seconds per profiled tick.
+- `pulse_attribution_ticks_total` (counter): ticks actually profiled, which is what makes the
+  sampled seconds mean anything.
+- `pulse_attribution_dropped_samples_total` (counter): profiler readings thrown away because they
+  overflowed. The engine accumulates each marker's time into a 32 bit counter of stopwatch ticks,
+  which wraps negative somewhere past two seconds inside a single tick. A wrapped reading is not a
+  large number, it is garbage, so it is dropped and counted here instead of being published as
+  data. Anything but a flat zero means the server had a tick so bad that a single marker ran for
+  over two seconds.
+
+### How it works, and what it costs
+
+The engine already contains a per-mod tick attributor and simply never switches it on. With its
+frame profiler enabled, the server stamps a marker after every game tick listener, every delayed
+callback and every main-thread entity behaviour, keyed by the type that declared the handler or by
+the behaviour's registered code. Pulse turns the profiler on for a burst, reads the tree the tick
+left behind, maps each key back to a mod through the mod loader, and turns it off again. No
+Harmony, no engine patch, no bundled dependency.
+
+The cost is why it bursts. Each marker is a dictionary write and a clock read, and the number of
+markers scales with loaded entities times their behaviours, not with how many mods you run. On a
+twenty-player server holding four thousand entities, a profiled tick costs roughly 2.8% of the
+33 ms budget. At the default duty cycle that averages out to about 0.3%, and on an idle server it
+is nothing at all. Raising `BurstTicks` or lowering `IntervalSeconds` moves that number in the
+obvious direction.
+
+One visible side effect: the engine logs "Over 400ms tick. Skipping N physics ticks" only when its
+profiler is on. If your server is already overloaded you will see that warning appear during
+bursts. It is the engine reporting a real condition it otherwise keeps to itself.
+
+### What it cannot see
+
+Say this out loud before reading a dashboard built on it.
+
+Broadcast events carry no markers. Roughly forty of them, `PlayerJoin`, `DidBreakBlock`,
+`OnEntityDeath` and the rest, are plain C# events the engine invokes without timing. A mod that
+does all its work in an event handler shows up as a rounding error here, and the time it spends
+lands in the `engine` bucket. The listener-and-behaviour half is what this measures.
+
+It is a main-thread share, not a total. Entity behaviours that declare themselves thread-safe run
+across several threads, and only the main thread's slice is marked. A mod whose behaviour is
+thread-safe therefore reads low, by roughly the thread count.
+
+Mapping is by assembly. A mod that ships several dlls only has the one its `ModSystem` lives in
+claimed, so a listener registered from a side library reads as `unattributed`. So does a handler
+on a static method, which the engine marks with no identity at all.
+
+And it is a sample. Thirty ticks out of every twelve seconds describe a steady server well and a
+spiky one badly. The share is an average over the burst, so a mod that stalls for 200 ms once a
+minute may well be profiled during a quiet stretch and read as harmless.
+
+If the numbers matter enough to act on, this is a first pass that says which mod to look at, not
+a call tree. Lithos Probe's sampling profiler is the tool for the second pass.
+
 ## Install
 
 Drop `pulse_0.1.0.zip` into your server's `Mods/` folder and start the server. Add
@@ -115,7 +203,12 @@ the OTLP one does not. On first boot Pulse writes `ModConfig/pulse.json` with it
   "Bind": "127.0.0.1",
   "Port": 9464,
   "RuntimeMetrics": true,
-  "ChunksRefreshSeconds": 30
+  "ChunksRefreshSeconds": 30,
+  "Attribution": {
+    "Enabled": false,
+    "BurstTicks": 30,
+    "IntervalSeconds": 10
+  }
 }
 ```
 
@@ -123,7 +216,9 @@ Set `Enabled` to false and the mod loads but registers nothing at all: no tick l
 socket, no meter. `RuntimeMetrics` false drops the `dotnet_*` families and keeps the rest, which
 is what you want if something else already collects them on that host. `ChunksRefreshSeconds`
 is how often the loaded-chunk gauge is refreshed, and 30 is already fast for what that read
-costs; lower it only if you know why. Every one of these takes a server restart.
+costs; lower it only if you know why. `Attribution` is the per-mod breakdown described above, off
+because it costs tick time; with it off, nothing in that section is registered and the engine's
+profiler is never touched. Every one of these takes a server restart.
 
 ## Scraping it
 

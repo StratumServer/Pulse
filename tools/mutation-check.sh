@@ -43,7 +43,7 @@ mutate() { # <file> <sed -E expression> <label>
     git checkout -- "$file"
 }
 
-MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse/EngineSample.cs Pulse/PingSummary.cs Pulse/EntityBreakdown.cs Pulse/SuspendBookkeeper.cs Pulse.Otlp/OtlpOptions.cs"
+MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse/EngineSample.cs Pulse/PingSummary.cs Pulse/EntityBreakdown.cs Pulse/SuspendBookkeeper.cs Pulse/TickAttribution.cs Pulse/ModOwners.cs Pulse.Otlp/OtlpOptions.cs"
 
 if ! git diff --quiet -- $MUTATED; then
     echo "One of $MUTATED has uncommitted changes; refusing to mutate over them."
@@ -161,6 +161,30 @@ mutate Pulse/SuspendBookkeeper.cs \
 mutate Pulse/SuspendBookkeeper.cs \
     '/Close/,/^    }/s/startSeconds = -1;/startSeconds = 0;/' \
     "suspend bookkeeper: the window is never marked closed, so a second resume counts again"
+
+mutate Pulse/TickAttribution.cs \
+    's/if \(entry\.ElapsedTicks < 0\)/if (entry.ElapsedTicks <= 0)/' \
+    "attribution: the wrap clamp fires on a mark that legitimately took no time"
+
+mutate Pulse/TickAttribution.cs \
+    's/if \(!warm\)/if (false)/' \
+    "attribution: the stale sample from the tick the profiler came on is folded instead of discarded"
+
+mutate Pulse/TickAttribution.cs \
+    's/if \(mark\.Key == SleepMark\)/if (false)/' \
+    "attribution: the throttle sleep is attributed as if it were work"
+
+mutate Pulse/TickAttribution.cs \
+    's/total \+= Walk\(child, owner\);/total += 0;/' \
+    "attribution: nested ranges go unwalked, losing every entity behavior to the engine bucket"
+
+mutate Pulse/TickAttribution.cs \
+    's/foreach \(string modid in seenMods\.Order\(StringComparer\.Ordinal\)\)/foreach (string modid in ticksByMod.Keys.Order(StringComparer.Ordinal))/' \
+    "attribution: a mod that goes quiet is dropped, freezing its share gauge at whatever it last read"
+
+mutate Pulse/ModOwners.cs \
+    's/byName\[name\] = resolved;//' \
+    "mod owners: a class registry miss is asked again on every profiled tick"
 
 # The OTLP mod is thin wiring apart from this one file, where every line is something that fails
 # silently when it is wrong: a wrong endpoint path 404s on every export and a header encoded the
