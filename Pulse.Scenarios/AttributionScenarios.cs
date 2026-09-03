@@ -44,14 +44,9 @@ public class AttributionScenarios : AtlasScenarioBase
         return body;
     }
 
-    /// <summary>Reads one labelled sample line, of which there is exactly one per mod.</summary>
+    /// <summary>One mod's share line, of which there is exactly one per mod.</summary>
     private static double Share(string exposition, string modid)
-    {
-        string name = $"pulse_mod_tick_share{{modid=\"{modid}\"}}";
-        string? line = exposition.Split('\n').FirstOrDefault(l => l.StartsWith(name + " ", StringComparison.Ordinal));
-        Assert.True(line != null, $"{name} is not in the exposition:\n{exposition}");
-        return double.Parse(line![(name.Length + 1)..], CultureInfo.InvariantCulture);
-    }
+        => Scrape.Value(exposition, $"pulse_mod_tick_share{{modid=\"{modid}\"}}");
 
     [AtlasScenario]
     public async Task Attribution_Serves_ItsFamilies_FromBoot()

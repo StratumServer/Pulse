@@ -193,8 +193,8 @@ a call tree. Lithos Probe's sampling profiler is the tool for the second pass.
 
 ## Install
 
-Drop `pulse_0.1.0.zip` into your server's `Mods/` folder and start the server. Add
-`pulseotlp_0.1.0.zip` beside it if you want OTLP push as well; the base mod works on its own and
+Drop `pulse_x.x.x.zip` into your server's `Mods/` folder and start the server. Add
+`pulseotlp_x.x.x.zip` beside it if you want OTLP push as well; the base mod works on its own and
 the OTLP one does not. On first boot Pulse writes `ModConfig/pulse.json` with its defaults:
 
 ```json
@@ -263,7 +263,7 @@ and read `/metrics`, the server sends its metrics to a collector on a timer, in 
 every major observability backend accepts. Grafana Cloud, Honeycomb, Datadog, New Relic and an
 `otel-collector` you run yourself all take the same payload.
 
-It ships as a second mod, `pulseotlp_0.1.0.zip`, and both zips go in `Mods/`. The base mod stays
+It ships as a second mod, `pulseotlp_x.x.x.zip`, and both zips go in `Mods/`. The base mod stays
 a single dll with no dependencies; the OTLP one carries the OpenTelemetry SDK and its
 `Microsoft.Extensions.*` fan-out, eighteen dlls in all. That split is not tidiness. The game's
 mod loader puts every root-level dll of every mod into one shared assembly context with no
@@ -360,8 +360,8 @@ references only; neither is copied into the mod, which still ships as one file.
 export VINTAGE_STORY=/path/to/vintagestory
 dotnet build Pulse.slnx -c Release
 dotnet test                      # unit tests, then the Atlas scenarios
-dotnet build Pulse/Pulse.csproj -c Release -t:PackageMod            # artifacts/pulse_0.1.0.zip
-dotnet build Pulse.Otlp/Pulse.Otlp.csproj -c Release -t:PackageMod  # artifacts/pulseotlp_0.1.0.zip
+dotnet build Pulse/Pulse.csproj -c Release -t:PackageMod            # artifacts/pulse_x.x.x.zip
+dotnet build Pulse.Otlp/Pulse.Otlp.csproj -c Release -t:PackageMod  # artifacts/pulseotlp_x.x.x.zip
 ```
 
 The scenarios in `Pulse.Scenarios` boot a real headless server in-process through
@@ -386,9 +386,9 @@ aggregates, the entity top-ten with its series retirement rule, and the suspend 
 them needs a server. `Pulse.Otlp.Tests` covers the config translation, which is where the OTLP
 mod's only non-obvious logic lives. Mutation verification over those files runs through
 `tools/mutation-check.sh`, which applies representative mutations one at a time and requires the
-suite to fail on every one; CI runs it on each push. A `stryker-config.json` sits ready for
-`dotnet stryker`, which currently finds the tests but runs mutants against the unmutated
-assembly on the .NET 10 SDK.
+suite to fail on every one; CI runs it on each push. Stryker itself is parked: on the .NET 10 SDK
+it finds the tests but runs every mutant against the unmutated assembly, so the script stays
+until a release of it reports a real score here (tracked in the issues).
 
 ## Where this is going
 

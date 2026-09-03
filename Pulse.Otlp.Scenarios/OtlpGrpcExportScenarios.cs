@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 using Atlas.XUnit;
 using Xunit;
@@ -76,22 +75,6 @@ public class OtlpGrpcExportScenarios : AtlasScenarioBase, IDisposable
         Assert.Contains("pulse-atlas-grpc", body, StringComparison.Ordinal);
     }
 
-    /// <summary>Pumps the world until the collector has an export in hand.</summary>
-    /// <remarks>The bound is wall clock rather than a tick count, which is why this is not
-    /// <c>World.Until</c>: the exporter waits on a real 5 s timer on its own thread, and it owes
-    /// the game loop nothing. Ticking is how the scenario passes that time without sleeping the
-    /// thread the world runs on.</remarks>
-    private async Task<FakeGrpcCollector.Export> WaitForExport()
-    {
-        TimeSpan deadline = ExportInterval * 12;
-        Stopwatch clock = Stopwatch.StartNew();
-        while (collector.First == null && clock.Elapsed < deadline)
-        {
-            await World.Ticks(10);
-        }
-
-        return collector.First
-            ?? throw new InvalidOperationException(
-                $"no export reached the collector on port {CollectorPort} within {deadline.TotalSeconds:0}s");
-    }
+    private Task<FakeGrpcCollector.Export> WaitForExport()
+        => Exports.WaitFor(() => collector.First, () => World.Ticks(10), ExportInterval * 12, CollectorPort);
 }

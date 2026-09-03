@@ -1,5 +1,14 @@
 # Pulse metrics feasibility report
 
+**Historical document.** This is the day-one survey, written on 1 September 2026 before any
+mod code existed, and kept as the record of what was known then. Where it disagrees with the
+README, the README describes what shipped. The main places it has been overtaken: the join and
+leave counters were never built, the suspend window ships as two counters rather than a
+histogram, the packaging question closed as one dll plus a separate optional OTLP mod, the
+engine's frame profiler turned out to be the per-mod attribution source (it is dismissed below
+as a tick-time source, which is still true), and Stratum's `StratumEntityBehaviorTimings` is
+not readable from another mod, so it is not the V2 route this survey imagined.
+
 Survey of Vintage Story 1.22.7 server internals, done before writing any mod code. Method: the public API sources at 1.22.7 (GitHub master, which matches the shipped build; the stable branch lags at 1.20.11), the shipped `VintagestoryAPI.xml`, and decompilation of the closed `VintagestoryLib.dll` where the engine hides the interesting parts. Line references below point at the 1.22.7 sources or at decompiled engine types. Raw survey notes live in `.survey/` (not committed).
 
 ## Verdict

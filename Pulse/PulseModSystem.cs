@@ -15,9 +15,15 @@ public sealed class PulseModSystem : ModSystem
     private const string ConfigFile = "pulse.json";
     private const double SnapshotIntervalSeconds = 1.0;
 
-    /// <summary>The engine rotates its statistics buckets every two seconds, so sampling them any
-    /// faster only re-reads the same window.</summary>
-    private const int EngineSampleIntervalMs = 2000;
+    /// <summary>The engine rotates its statistics ring every two seconds, a constant wired into
+    /// the tick loop, so a completed bucket nominally spans this long. A bucket cut short around a
+    /// suspend makes the rate read low for one window; the engine's own /stats has the same
+    /// approximation.</summary>
+    private const double EngineWindowSeconds = 2.0;
+
+    /// <summary>Sampling the ring any faster than it rotates only re-reads the same window, so the
+    /// engine listener runs at exactly that cadence.</summary>
+    private const int EngineSampleIntervalMs = (int)(EngineWindowSeconds * 1000);
 
     /// <summary>How many entity codes get a series of their own before the rest are lumped into
     /// one bucket. Ten covers the animals and the drifters on any world worth looking at.</summary>
@@ -576,12 +582,6 @@ public sealed class PulseModSystem : ModSystem
 
     /// <summary>Both windowed network families read the same sample once, so their two channels
     /// always describe the same two seconds.</summary>
-    /// <summary>The engine rotates its statistics ring every two seconds, a constant wired into
-    /// the tick loop, so a completed bucket nominally spans this long. A bucket cut short around a
-    /// suspend makes the rate read low for one window; the engine's own /stats has the same
-    /// approximation.</summary>
-    private const double EngineWindowSeconds = 2.0;
-
     private IEnumerable<Measurement<double>> PacketMeasurements()
     {
         EngineSample? sample = engine;

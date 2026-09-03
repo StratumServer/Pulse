@@ -23,7 +23,8 @@ internal static class Scrape
         return await response.Content.ReadAsStringAsync();
     }
 
-    /// <summary>Reads one unlabelled sample line out of an exposition body.</summary>
+    /// <summary>Reads one sample line out of an exposition body by its exact name, labels
+    /// included when the series has any.</summary>
     public static double Value(string exposition, string name)
     {
         foreach (string line in exposition.Split('\n'))

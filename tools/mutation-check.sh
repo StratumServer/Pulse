@@ -20,8 +20,12 @@ TOTAL=0
 # judged by the OTLP tests rather than by a suite that cannot see it.
 TEST_PROJECT="Pulse.Tests/Pulse.Tests.csproj"
 
+# One restore up front; every test run after it skips the restore, which is most of the idle
+# time in a loop that rebuilds the same projects dozens of times.
+dotnet restore Pulse.slnx --nologo -v q >/dev/null 2>&1
+
 run_tests() {
-    dotnet test "$TEST_PROJECT" -c Release --nologo -v q >/dev/null 2>&1
+    dotnet test "$TEST_PROJECT" -c Release --no-restore --nologo -v q >/dev/null 2>&1
     return $?
 }
 
