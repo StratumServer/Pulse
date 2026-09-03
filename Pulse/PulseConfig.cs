@@ -21,4 +21,24 @@ public sealed class PulseConfig
     /// whole loaded-chunk dictionary under the chunk lock. The gauge reads 0 until the first
     /// refresh.</summary>
     public int ChunksRefreshSeconds { get; set; } = 30;
+
+    /// <summary>Per-mod tick attribution. Off by default, and duty-cycled when on.</summary>
+    public AttributionConfig Attribution { get; set; } = new();
+}
+
+/// <summary>The <c>Attribution</c> block of ModConfig/pulse.json.</summary>
+/// <remarks>Off by default on purpose. Attribution runs the engine's own frame profiler, which
+/// stamps a mark after every listener and every main-thread entity behavior, and that costs a low
+/// single-digit percentage of the tick budget for as long as it runs. The duty cycle is what makes
+/// it affordable: a short burst, then nothing until the next interval.</remarks>
+public sealed class AttributionConfig
+{
+    public bool Enabled { get; set; }
+
+    /// <summary>Consecutive ticks profiled per burst. Tick composition is stable over seconds, so
+    /// a burst of a few dozen ticks describes the minute around it perfectly well.</summary>
+    public int BurstTicks { get; set; } = 30;
+
+    /// <summary>Seconds between the end of one burst and the start of the next.</summary>
+    public int IntervalSeconds { get; set; } = 10;
 }

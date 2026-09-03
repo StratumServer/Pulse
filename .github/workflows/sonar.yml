@@ -93,7 +93,7 @@ jobs:
             /d:sonar.token="$SONAR_TOKEN" \
             /d:sonar.host.url="https://sonarcloud.io" \
             /d:sonar.exclusions="**/bin/**,**/obj/**,docs/**" \
-            /d:sonar.coverage.exclusions="Pulse/PulseModSystem.cs,Pulse.Otlp/PulseOtlpModSystem.cs,Pulse/EngineProbe.cs,contrib/**,tools/**" \
+            /d:sonar.coverage.exclusions="Pulse/PulseModSystem.cs,Pulse.Otlp/PulseOtlpModSystem.cs,Pulse/EngineProbe.cs,Pulse/AttributionProbe.cs,contrib/**,tools/**" \
             /d:sonar.cs.opencover.reportsPaths="**/TestResults/**/coverage.opencover.xml"
 
       - name: Build
