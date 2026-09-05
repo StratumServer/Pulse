@@ -220,6 +220,14 @@ costs; lower it only if you know why. `Attribution` is the per-mod breakdown des
 because it costs tick time; with it off, nothing in that section is registered and the engine's
 profiler is never touched. Every one of these takes a server restart.
 
+Upgrading does not mean editing the file by hand. Each mod checks its config file at startup and
+writes back any key it knows about that the file is missing, with that key's default; the values
+you already set are kept exactly as they are, and the log lists what was added. A key neither mod
+recognises does not survive that rewrite, so it is reported as a warning instead of disappearing
+quietly: usually it is a typo, and the setting you meant has been running on its default. A file
+that already holds every key is not written at all, which matters if you mount `ModConfig`
+read-only or keep it under version control.
+
 ## Scraping it
 
 ```yaml

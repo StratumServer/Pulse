@@ -17,6 +17,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Shared as source, not as a reference: the two mods meet at a meter name and nothing else
+         (see the remarks on PulseOtlpModSystem), so each assembly compiles its own internal copy
+         of the config upgrade rather than one of them depending on the other's dll. -->
+    <Compile Include="../Pulse/ConfigUpgrade.cs" Link="ConfigUpgrade.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Include="modinfo.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

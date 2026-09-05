@@ -1,0 +1,8 @@
+{
+  "Enabled": true,
+  "Endpoint": "http://127.0.0.1:39473",
+  "Protocol": "http/protobuf",
+  "Headers": {},
+  "IntervalSeconds": 60,
+  "IncludeRuntimeMetrics": false
+}

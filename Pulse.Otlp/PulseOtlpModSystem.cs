@@ -29,7 +29,13 @@ public sealed class PulseOtlpModSystem : ModSystem
 
     public override void StartServerSide(ICoreServerAPI api)
     {
-        PulseOtlpConfig config = api.LoadModConfig<PulseOtlpConfig>(ConfigFile) ?? StoreDefaults(api);
+        PulseOtlpConfig? existing = api.LoadModConfig<PulseOtlpConfig>(ConfigFile);
+        PulseOtlpConfig config = existing ?? StoreDefaults(api);
+        if (existing != null)
+        {
+            ConfigUpgrade.Upgrade(api, config, ConfigFile, "Pulse OTLP");
+        }
+
         if (!config.Enabled)
         {
             api.Logger.Notification("Pulse OTLP is disabled in " + ConfigFile + ", nothing registered.");
