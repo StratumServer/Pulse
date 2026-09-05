@@ -103,7 +103,13 @@ public sealed class PulseModSystem : ModSystem
     {
         sapi = api;
 
-        PulseConfig config = api.LoadModConfig<PulseConfig>(ConfigFile) ?? StoreDefaults(api);
+        PulseConfig? existing = api.LoadModConfig<PulseConfig>(ConfigFile);
+        PulseConfig config = existing ?? StoreDefaults(api);
+        if (existing != null)
+        {
+            ConfigUpgrade.Upgrade(api, config, ConfigFile, "Pulse");
+        }
+
         if (!config.Enabled)
         {
             api.Logger.Notification("Pulse is disabled in " + ConfigFile + ", nothing registered.");

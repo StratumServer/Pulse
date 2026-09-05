@@ -1,0 +1,12 @@
+{
+  "Enabled": false,
+  "Bind": "127.0.0.1",
+  "Port": 39473,
+  "RuntimeMetrics": false,
+  "ChunksRefreshSeconds": 30,
+  "Attribution": {
+    "Enabled": false,
+    "BurstTicks": 30,
+    "IntervalSeconds": 10
+  }
+}

@@ -10,6 +10,12 @@ first.
 
 ### Added
 
+- Config files are brought up to date at startup instead of only on first boot. Each mod compares
+  the file on disk against the keys it knows and writes the missing ones back with their defaults,
+  keeping every value already in the file, so a server upgrading from 0.1.0 gets the `Attribution`
+  block in `pulse.json` and `ServiceName` in `pulse-otlp.json` without anyone editing them by hand.
+  Keys neither mod recognises are named in a warning, since the rewrite drops them. A file that
+  already holds every key is left alone, modification time included.
 - Per-mod tick attribution, behind a new `Attribution` block in `pulse.json` and off by default.
   `pulse_mod_tick_share{modid}` is the fraction of profiled main-thread busy time one mod took over
   the last burst, `pulse_mod_tick_seconds_total{modid}` the sampled seconds behind it,

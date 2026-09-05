@@ -47,7 +47,7 @@ mutate() { # <file> <sed -E expression> <label>
     git checkout -- "$file"
 }
 
-MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse/EngineSample.cs Pulse/PingSummary.cs Pulse/EntityBreakdown.cs Pulse/SuspendBookkeeper.cs Pulse/TickAttribution.cs Pulse/ModOwners.cs Pulse.Otlp/OtlpOptions.cs"
+MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse/EngineSample.cs Pulse/PingSummary.cs Pulse/EntityBreakdown.cs Pulse/SuspendBookkeeper.cs Pulse/TickAttribution.cs Pulse/ModOwners.cs Pulse/ConfigUpgrade.cs Pulse.Otlp/OtlpOptions.cs"
 
 if ! git diff --quiet -- $MUTATED; then
     echo "One of $MUTATED has uncommitted changes; refusing to mutate over them."
@@ -189,6 +189,20 @@ mutate Pulse/TickAttribution.cs \
 mutate Pulse/ModOwners.cs \
     's/byName\[name\] = resolved;//' \
     "mod owners: a class registry miss is asked again on every profiled tick"
+
+# The config upgrade decides whether a live server rewrites a file an admin owns, so the two ways
+# it can be wrong are both here: not writing what it should, and writing over what it cannot read.
+mutate Pulse/ConfigUpgrade.cs \
+    's/Walk\(nestedFile, nested, prefix \+ entry\.Key \+ "\.", /Walk(nestedFile, nested, prefix, /' \
+    "config upgrade: a key inside a block is reported without the block it lives in"
+
+mutate Pulse/ConfigUpgrade.cs \
+    's/if \(!config\.ContainsKey\(entry\.Key\)\)/if (false)/' \
+    "config upgrade: a key the config does not know goes unreported and is dropped in silence"
+
+mutate Pulse/ConfigUpgrade.cs \
+    's/return null;/return new JsonObject();/' \
+    "config upgrade: a file that does not parse is treated as an empty one and rewritten over"
 
 # The OTLP mod is thin wiring apart from this one file, where every line is something that fails
 # silently when it is wrong: a wrong endpoint path 404s on every export and a header encoded the
