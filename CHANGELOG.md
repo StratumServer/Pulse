@@ -10,6 +10,17 @@ first.
 
 ### Added
 
+- `/pulse`, a server command behind the `controlserver` privilege, so per-mod tick attribution no
+  longer needs a restart to switch. `/pulse attribution on` and `off` drive the duty cycle on the
+  running server without writing `pulse.json`, `/pulse attribution status` reports the cycle in use
+  and the ticks it has profiled, and `/pulse reload` re-reads the config file and applies the
+  `Attribution` block live, naming any other key whose value in the file has drifted from what the
+  server is running. A file that fails to parse leaves everything as it was and the reply carries
+  the parse error. This is the shape a profiler wants: the moment you need attribution is while the
+  server is struggling, and a restart erases what you wanted to look at. The four families and the
+  frame profiler priming are now registered whether or not `Attribution.Enabled` is set, which is
+  what makes a later switch-on safe rather than merely likely to work; an instrument nothing has
+  recorded into is not a series, so an idle server serves the exposition it always did.
 - Config files are brought up to date at startup instead of only on first boot. Each mod compares
   the file on disk against the keys it knows and writes the missing ones back with their defaults,
   keeping every value already in the file, so a server upgrading from 0.1.0 gets the `Attribution`

@@ -47,7 +47,7 @@ mutate() { # <file> <sed -E expression> <label>
     git checkout -- "$file"
 }
 
-MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse/EngineSample.cs Pulse/PingSummary.cs Pulse/EntityBreakdown.cs Pulse/SuspendBookkeeper.cs Pulse/TickAttribution.cs Pulse/ModOwners.cs Pulse/ConfigUpgrade.cs Pulse.Otlp/OtlpOptions.cs"
+MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse/EngineSample.cs Pulse/PingSummary.cs Pulse/EntityBreakdown.cs Pulse/SuspendBookkeeper.cs Pulse/TickAttribution.cs Pulse/ModOwners.cs Pulse/ConfigUpgrade.cs Pulse/PulseCommands.cs Pulse.Otlp/OtlpOptions.cs"
 
 if ! git diff --quiet -- $MUTATED; then
     echo "One of $MUTATED has uncommitted changes; refusing to mutate over them."
@@ -203,6 +203,21 @@ mutate Pulse/ConfigUpgrade.cs \
 mutate Pulse/ConfigUpgrade.cs \
     's/return null;/return new JsonObject();/' \
     "config upgrade: a file that does not parse is treated as an empty one and rewritten over"
+
+# Switching attribution from a command is a promise about a live server: that a server which never
+# asked for it is not paying for it, that a reload names only what it could not apply, and that a
+# ten minute look does not quietly become permanent. All three fail silently when they are wrong.
+mutate Pulse/TickAttribution.cs \
+    's/if \(!Enabled\)/if (false)/' \
+    "attribution: the duty cycle runs on a server that never switched it on"
+
+mutate Pulse/PulseCommands.cs \
+    's/\.Where\(key => key\.Changed\)/.Where(key => true)/' \
+    "commands: a reload names every startup-only key as needing a restart, whether or not it moved"
+
+mutate Pulse/PulseCommands.cs \
+    's/"pulse\.json was not changed, so the file decides again after a restart\."/""/' \
+    "commands: a switch stops saying it left the config file alone"
 
 # The OTLP mod is thin wiring apart from this one file, where every line is something that fails
 # silently when it is wrong: a wrong endpoint path 404s on every export and a header encoded the

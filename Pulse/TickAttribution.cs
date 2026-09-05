@@ -56,24 +56,45 @@ internal sealed class TickAttribution
     private long dropped;
     private bool warm;
 
-    public TickAttribution(int burstTicks, int intervalSeconds)
-    {
-        BurstTicks = Math.Clamp(burstTicks, 1, MaximumBurstTicks);
-        IntervalSeconds = Math.Max(MinimumIntervalSeconds, intervalSeconds);
-    }
+    public TickAttribution(int burstTicks, int intervalSeconds, bool enabled = true)
+        => Apply(enabled, burstTicks, intervalSeconds);
 
-    public int BurstTicks { get; }
+    /// <summary>Whether the duty cycle runs at all.</summary>
+    public bool Enabled { get; private set; }
 
-    public int IntervalSeconds { get; }
+    public int BurstTicks { get; private set; }
+
+    public int IntervalSeconds { get; private set; }
 
     /// <summary>Whether the engine's frame profiler has to be enabled when the current tick ends.</summary>
     public bool Profiling { get; private set; }
+
+    /// <summary>Ticks folded into a completed burst since the server booted, which is the number
+    /// <c>pulse_attribution_ticks_total</c> reports.</summary>
+    public long TicksProfiled { get; private set; }
+
+    /// <summary>Takes a duty cycle, clamped the way the config file's is, and starts it over.</summary>
+    /// <remarks>Restarting rather than adjusting in place is what makes switching this off
+    /// mid-burst safe: the half-folded sample is dropped instead of published, the profiler goes
+    /// back off on the next tick, and a later switch-on begins from a clean burst.</remarks>
+    public void Apply(bool enabled, int burstTicks, int intervalSeconds)
+    {
+        Enabled = enabled;
+        BurstTicks = Math.Clamp(burstTicks, 1, MaximumBurstTicks);
+        IntervalSeconds = Math.Max(MinimumIntervalSeconds, intervalSeconds);
+        Restart();
+    }
 
     /// <summary>Advances the duty cycle by one tick, folding <paramref name="previousTick"/> when
     /// it is a sample this burst wants. Returns the finished burst on the tick that completes
     /// one.</summary>
     public AttributionBurst? OnTick(double elapsedSeconds, ProfileEntryRange? previousTick, OwnerLookup owner)
     {
+        if (!Enabled)
+        {
+            return null;
+        }
+
         if (!Profiling)
         {
             idleSeconds += elapsedSeconds;
@@ -110,7 +131,6 @@ internal sealed class TickAttribution
             return null;
         }
 
-        Profiling = false;
         return Take();
     }
 
@@ -210,11 +230,25 @@ internal sealed class TickAttribution
         }
 
         AttributionBurst burst = new(seconds, busyTicks / frequency, sampled, dropped);
+        TicksProfiled += sampled;
+        Restart();
+        return burst;
+    }
+
+    /// <summary>Back to idle with nothing accumulated, and the profiler off from the next tick.</summary>
+    /// <remarks>Everything a burst gathers is dropped here, but <c>seenMods</c> is not: a mod that
+    /// has been measured once keeps publishing a zero rather than freezing its gauge, whether the
+    /// burst ended on its own or an operator cut it short.</remarks>
+    private void Restart()
+    {
+        Profiling = false;
+        idleSeconds = 0;
+        burstTicksElapsed = 0;
+        warm = false;
         ticksByMod.Clear();
         busyTicks = 0;
         sampled = 0;
         dropped = 0;
-        return burst;
     }
 }
 

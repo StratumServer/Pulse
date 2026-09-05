@@ -69,6 +69,11 @@ public sealed class PulseModSystem : ModSystem
     private volatile EngineSample? engine;
 
     private ICoreServerAPI? sapi;
+
+    /// <summary>The config the server booted on, kept so a reload can say which keys the file has
+    /// moved away from and a restart is now the only way to pick up.</summary>
+    private PulseConfig? booted;
+
     private Meter? meter;
     private MetricsAggregator? aggregator;
     private MetricsHttpServer? http;
@@ -116,6 +121,7 @@ public sealed class PulseModSystem : ModSystem
             return;
         }
 
+        booted = config;
         meter = new Meter(MeterName);
         tickBookkeeper = new TickBookkeeper(
             meter.CreateCounter<long>(
@@ -173,7 +179,8 @@ public sealed class PulseModSystem : ModSystem
         // healthy server with no traffic.
         StartEngineProbe(api, meter);
 
-        // Only if the operator asked for it: this one costs tick time while it runs.
+        // Armed whether or not the operator asked for it, so /pulse attribution on has something
+        // to switch. Nothing is measured until it is switched on.
         StartAttribution(api, meter, config.Attribution ?? new AttributionConfig());
 
         // The runtime publishes System.Runtime itself, so listening to it is the whole of the
@@ -211,6 +218,7 @@ public sealed class PulseModSystem : ModSystem
         api.Event.ServerSuspend += OnServerSuspend;
         api.Event.ServerResume += OnServerResume;
 
+        RegisterCommands(api);
         StartEndpoint(api, config);
     }
 
@@ -368,18 +376,16 @@ public sealed class PulseModSystem : ModSystem
         }
     }
 
-    /// <summary>Publishes the attribution families and arms the duty cycle, when the config asks
-    /// for it.</summary>
-    /// <remarks>Nothing here is registered when <c>Attribution.Enabled</c> is false, priming
-    /// included, so a server that has not asked for attribution never touches the engine's frame
-    /// profiler at all.</remarks>
+    /// <summary>Publishes the attribution families and arms the duty cycle.</summary>
+    /// <remarks>All of it runs whether or not <c>Attribution.Enabled</c> is set, priming included,
+    /// because that is what makes switching attribution on later structurally safe rather than
+    /// merely likely to work: see PrimeFrameProfiler for what happens to a server whose profiler is
+    /// enabled part-way through a tick having never completed one. The cost of arming an operator
+    /// never uses is two profiled ticks at startup and four instruments nothing records into, and
+    /// an instrument with no measurement is not a series: an idle server serves the same exposition
+    /// it did before.</remarks>
     private void StartAttribution(ICoreServerAPI api, Meter attributionMeter, AttributionConfig config)
     {
-        if (!config.Enabled)
-        {
-            return;
-        }
-
         owners = new ModOwners(api.ClassRegistry.GetEntityBehaviorClass);
         foreach (Mod mod in api.ModLoader.Mods)
         {
@@ -399,7 +405,7 @@ public sealed class PulseModSystem : ModSystem
             api.Logger.Warning(ListenerWalkWarning, e.Message);
         }
 
-        attribution = new TickAttribution(config.BurstTicks, config.IntervalSeconds);
+        attribution = new TickAttribution(config.BurstTicks, config.IntervalSeconds, config.Enabled);
         modTickShare = attributionMeter.CreateGauge<double>(
             "pulse_mod_tick_share", "1",
             "Fraction of the profiled main-thread busy time attributed to one mod over the last completed burst.");
@@ -415,9 +421,107 @@ public sealed class PulseModSystem : ModSystem
 
         // Before the tick loop exists, and not one moment later. See PrimeFrameProfiler.
         api.Event.ServerRunPhase(EnumServerRunPhase.RunGame, PrimeFrameProfiler);
-        api.Logger.Notification(
-            "Pulse attributes the tick per mod: bursts of {0} ticks every {1}s.",
-            attribution.BurstTicks, attribution.IntervalSeconds);
+        if (config.Enabled)
+        {
+            api.Logger.Notification(
+                "Pulse attributes the tick per mod: bursts of {0} ticks every {1}s.",
+                attribution.BurstTicks, attribution.IntervalSeconds);
+        }
+        else
+        {
+            api.Logger.Notification(
+                "Pulse is ready to attribute the tick per mod but is not measuring: /pulse attribution on starts it.");
+        }
+    }
+
+    /// <summary>Registers <c>/pulse</c>, which is how attribution gets switched on while the
+    /// server is the thing you wanted to look at.</summary>
+    /// <remarks><c>controlserver</c> rather than a privilege of its own, so the admins and the
+    /// hosting panel console that already run <c>/stats</c> can run this too. Every handler here
+    /// reaches the runtime state on the main thread: chat commands are dispatched while the server
+    /// is handling packets, and the console reader enqueues its line as a main thread task.</remarks>
+    private void RegisterCommands(ICoreServerAPI api)
+    {
+        api.ChatCommands.Create("pulse")
+            .WithDescription("Per-mod tick attribution and config reload, without restarting the server.")
+            .RequiresPrivilege(Privilege.controlserver)
+            .BeginSubCommand("attribution")
+                .WithDescription("Per-mod tick attribution on the running server.")
+                .BeginSubCommand("on")
+                    .WithDescription("Start the attribution duty cycle now. Does not write pulse.json.")
+                    .HandleWith(_ => SwitchAttribution(true))
+                .EndSubCommand()
+                .BeginSubCommand("off")
+                    .WithDescription("Stop it, and switch the engine's frame profiler back off.")
+                    .HandleWith(_ => SwitchAttribution(false))
+                .EndSubCommand()
+                .BeginSubCommand("status")
+                    .WithDescription("Say whether attribution is running, and what it has measured.")
+                    .HandleWith(_ => AttributionStatus())
+                .EndSubCommand()
+            .EndSubCommand()
+            .BeginSubCommand("reload")
+                .WithDescription("Re-read pulse.json and apply what can change without a restart.")
+                .HandleWith(_ => Reload(api))
+            .EndSubCommand();
+    }
+
+    private TextCommandResult SwitchAttribution(bool on)
+    {
+        if (attribution == null)
+        {
+            return TextCommandResult.Error(PulseCommands.Unavailable);
+        }
+
+        attribution.Apply(on, attribution.BurstTicks, attribution.IntervalSeconds);
+        SeedAttribution();
+        return TextCommandResult.Success(
+            PulseCommands.Switched(on, attribution.BurstTicks, attribution.IntervalSeconds));
+    }
+
+    private TextCommandResult AttributionStatus()
+        => attribution == null
+            ? TextCommandResult.Error(PulseCommands.Unavailable)
+            : TextCommandResult.Success(PulseCommands.Status(
+                attribution.Enabled,
+                attribution.BurstTicks,
+                attribution.IntervalSeconds,
+                attribution.TicksProfiled,
+                attribution.Profiling));
+
+    /// <summary>Re-reads the config file and applies the part of it a running server can take.</summary>
+    /// <remarks>The same load and upgrade path startup uses, so a file that gained keys since it
+    /// was written is completed here as well. A file that does not parse leaves everything exactly
+    /// as it was: the reply carries the parse error and the server keeps running on what it
+    /// booted with.</remarks>
+    private TextCommandResult Reload(ICoreServerAPI api)
+    {
+        PulseConfig loaded;
+        try
+        {
+            loaded = api.LoadModConfig<PulseConfig>(ConfigFile)
+                ?? throw new FileNotFoundException(ConfigFile + " is not in ModConfig");
+            ConfigUpgrade.Upgrade(api, loaded, ConfigFile, "Pulse");
+        }
+        catch (Exception e)
+        {
+            return new TextCommandResult
+            {
+                Status = EnumCommandStatus.Error,
+                StatusMessage = PulseCommands.ReloadFailed,
+                MessageParams = [e.Message],
+            };
+        }
+
+        AttributionConfig cycle = loaded.Attribution ?? new AttributionConfig();
+        attribution?.Apply(cycle.Enabled, cycle.BurstTicks, cycle.IntervalSeconds);
+        SeedAttribution();
+
+        return TextCommandResult.Success(PulseCommands.Reloaded(
+            attribution?.Enabled ?? false,
+            attribution?.BurstTicks ?? cycle.BurstTicks,
+            attribution?.IntervalSeconds ?? cycle.IntervalSeconds,
+            PulseCommands.RestartKeys(booted!, loaded)));
     }
 
     /// <summary>Turns the engine's frame profiler on once, before the server starts ticking.</summary>
@@ -467,6 +571,7 @@ public sealed class PulseModSystem : ModSystem
             if (++unprimedTicks > UnprimedTickLimit)
             {
                 attribution = null;
+                profiler.Enabled = false;
                 sapi.Logger.Warning(AttributionWarning, "the engine's profiler never completed a primed tick");
             }
 
@@ -530,10 +635,13 @@ public sealed class PulseModSystem : ModSystem
     /// time a burst completes.</summary>
     /// <remarks>The two labelled families are seeded on the buckets that always exist. A mod's own
     /// series still appears the first time it is measured, which is unavoidable: nothing knows
-    /// which mods eat tick time until one has been profiled.</remarks>
+    /// which mods eat tick time until one has been profiled.
+    /// <para>Only once attribution is actually running, which is also what keeps a server that
+    /// never switches it on free of four families that would never move. Called again by the
+    /// command that switches it on, so the families reach the wire there too.</para></remarks>
     private void SeedAttribution()
     {
-        if (attribution == null)
+        if (attribution is not { Enabled: true })
         {
             return;
         }
