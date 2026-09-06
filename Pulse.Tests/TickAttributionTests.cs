@@ -222,6 +222,100 @@ public class TickAttributionTests
     }
 
     [Fact]
+    public void Constructor_Starts_Disabled_WhenTheConfigSaysSo()
+    {
+        TickAttribution attribution = new(1, 1, enabled: false);
+
+        for (int tick = 0; tick < 100; tick++)
+        {
+            Assert.Null(attribution.OnTick(1.0, Tick(), Owners));
+        }
+
+        Assert.False(attribution.Enabled);
+        Assert.False(attribution.Profiling);
+        Assert.Equal(0, attribution.TicksProfiled);
+    }
+
+    /// <summary>The whole point of arming attribution on a server that did not ask for it: it can
+    /// be switched on later, and then it works exactly as if the config had said so.</summary>
+    [Fact]
+    public void Apply_Starts_TheCycle_OnAServerThatBootedWithItOff()
+    {
+        TickAttribution attribution = new(2, 1, enabled: false);
+        attribution.OnTick(1.0, Tick(), Owners);
+
+        attribution.Apply(true, 2, 1);
+        AttributionBurst burst = Cycle(attribution, Tick(), Owners);
+
+        Assert.Equal(2, burst.Ticks);
+        Assert.Equal(200.0 / 600.0, Share(burst, "mymod"), 6);
+    }
+
+    /// <summary>Switching it off part-way through a burst must not publish the half of a sample it
+    /// had: the profiler goes off, the accumulators go back to zero, and the tick count stays at
+    /// what completed bursts actually measured.</summary>
+    [Fact]
+    public void Apply_Drops_ABurstInProgress_WhenItIsSwitchedOff()
+    {
+        TickAttribution attribution = new(30, 1);
+        for (int tick = 0; tick < 5; tick++)
+        {
+            Assert.Null(attribution.OnTick(1.0, Tick(), Owners));
+        }
+
+        Assert.True(attribution.Profiling);
+
+        attribution.Apply(false, 30, 1);
+
+        Assert.False(attribution.Profiling);
+        Assert.Equal(0, attribution.TicksProfiled);
+        Assert.Null(attribution.OnTick(1.0, Tick(), Owners));
+        Assert.False(attribution.Profiling);
+    }
+
+    /// <summary>Re-enabling starts a fresh cycle, so the stale tree the profiler left behind while
+    /// it was off is discarded rather than folded into the first burst.</summary>
+    [Fact]
+    public void Apply_Discards_TheStaleSample_WhenItIsSwitchedBackOn()
+    {
+        TickAttribution attribution = new(1, 1);
+        Cycle(attribution, Tick(), Owners);
+        attribution.Apply(false, 1, 1);
+
+        attribution.Apply(true, 1, 1);
+        Assert.Null(attribution.OnTick(1.0, Tick(), Owners));   // the interval passes, profiler on
+        Assert.Null(attribution.OnTick(1.0, Tick(), Owners));   // stale sample, discarded
+        AttributionBurst burst = attribution.OnTick(1.0, Tick(), Owners)!;
+
+        Assert.Equal(1, burst.Ticks);
+    }
+
+    [Fact]
+    public void Apply_Takes_ANewDutyCycle_AndClampsItTheSameWay()
+    {
+        TickAttribution attribution = new(30, 10);
+
+        attribution.Apply(true, 100000, 0);
+
+        Assert.Equal(TickAttribution.MaximumBurstTicks, attribution.BurstTicks);
+        Assert.Equal(TickAttribution.MinimumIntervalSeconds, attribution.IntervalSeconds);
+    }
+
+    /// <summary>What <c>/pulse attribution status</c> reports, and it has to match the tick counter
+    /// on the wire: both count the ticks completed bursts folded.</summary>
+    [Fact]
+    public void TicksProfiled_Accumulates_AcrossBursts()
+    {
+        TickAttribution attribution = new(3, 1);
+
+        Cycle(attribution, Tick(), Owners);
+        Assert.Equal(3, attribution.TicksProfiled);
+
+        Cycle(attribution, Tick(), Owners);
+        Assert.Equal(6, attribution.TicksProfiled);
+    }
+
+    [Fact]
     public void Take_Orders_TheBucketsStably()
     {
         AttributionBurst burst = Cycle(new TickAttribution(1, 1), Tick(), Owners);

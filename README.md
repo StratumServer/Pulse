@@ -128,6 +128,33 @@ It is off by default, because it is not free. Add an `Attribution` block to `Mod
 server runs unmeasured between two of them. The defaults measure about one tick in twelve. Both are
 clamped on read: at least a second between bursts, at most 300 ticks in one.
 
+### Turning it on without a restart
+
+The moment you want attribution is usually while the server is struggling, and restarting it throws
+away the thing you wanted to look at. So the config file is not the only way in. Four commands, all
+behind the `controlserver` privilege, so admins and a panel console can run them:
+
+- `/pulse attribution on` starts the duty cycle straight away, on whatever `BurstTicks` and
+  `IntervalSeconds` are in force. The first burst lands one interval later.
+- `/pulse attribution off` stops it and puts the engine's frame profiler back down. A burst in
+  progress is dropped rather than published half-measured.
+- `/pulse attribution status` reports whether it is running, the cycle it is using, how many ticks
+  it has profiled and whether it is inside a burst right now.
+- `/pulse reload` re-reads `pulse.json` and applies the `Attribution` block live. The reply names
+  any other key whose value in the file has drifted from what the server is running, since those
+  still need a restart, and a file that does not parse changes nothing at all.
+
+`on` and `off` act on the running server and never write `pulse.json`, which is deliberate: a ten
+minute look should not become permanent because somebody forgot to turn it off. Restart the server
+and the file decides again. To make a change stick, edit the file and either restart or run
+`/pulse reload`.
+
+This works even on a server that booted with `Attribution.Enabled` false. Pulse registers the four
+families and primes the engine's profiler at startup either way, because a profiler switched on
+part-way through a tick that has never completed one takes the server down with it (there is more
+on that below). Priming costs two profiled ticks at boot and nothing after; an instrument nothing
+has recorded into is not a series, so an idle server serves exactly the exposition it did before.
+
 Four families appear once it is on:
 
 - `pulse_mod_tick_share{modid}` (gauge): the fraction of profiled main-thread busy time that went
@@ -217,8 +244,11 @@ socket, no meter. `RuntimeMetrics` false drops the `dotnet_*` families and keeps
 is what you want if something else already collects them on that host. `ChunksRefreshSeconds`
 is how often the loaded-chunk gauge is refreshed, and 30 is already fast for what that read
 costs; lower it only if you know why. `Attribution` is the per-mod breakdown described above, off
-because it costs tick time; with it off, nothing in that section is registered and the engine's
-profiler is never touched. Every one of these takes a server restart.
+because it costs tick time.
+
+Everything outside the `Attribution` block takes a server restart. The block itself does not:
+`/pulse reload` applies it live, and `/pulse attribution on` and `off` switch it without touching
+the file at all.
 
 Upgrading does not mean editing the file by hand. Each mod checks its config file at startup and
 writes back any key it knows about that the file is missing, with that key's default; the values
