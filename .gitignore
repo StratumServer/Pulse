@@ -13,3 +13,6 @@ StrykerOutput/
 
 # Packaged mod zips built locally.
 *.zip
+
+# Agent worktrees live under the checkout; nothing in there is source.
+.claude/
