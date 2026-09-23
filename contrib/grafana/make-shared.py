@@ -31,6 +31,7 @@ PANEL_NAMES = {
     "stat": "Stat",
     "table": "Table",
     "timeseries": "Time series",
+    "bargauge": "Bar gauge",
 }
 
 # The oldest Grafana that reads schemaVersion 39 and the panel options used

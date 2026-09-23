@@ -1,10 +1,10 @@
 # Alerting rules
 
-A Prometheus alerting rules file for Pulse, `pulse-alerts.yml`. Ten rules across tick health,
-engine warnings, log errors, endpoint availability and the worldgen queue, each carrying a
-`severity` label (`warning` or `critical`) and an annotation that says what to check, not just
-what happened. The thresholds are calibrated against the engine's own numbers: 30 TPS is the
-game's nominal tick rate, 500 ms is the engine's own overload cutoff, 90%/100% of
+A Prometheus alerting rules file for Pulse, `pulse-alerts.yml`. Eleven rules across tick health,
+engine warnings, log errors, endpoint availability, the worldgen queue and per-mod attribution,
+each carrying a `severity` label (`warning` or `critical`) and an annotation that says what to
+check, not just what happened. The thresholds are calibrated against the engine's own numbers: 30
+TPS is the game's nominal tick rate, 500 ms is the engine's own overload cutoff, 90%/100% of
 `DieAboveMemoryUsageMb` are the engine's own memory thresholds. The comments in the file say
 where each one comes from.
 
@@ -51,6 +51,10 @@ Two things worth knowing before you rely on these:
   fails on a game update, those two families disappear from `/metrics` and these two rules simply
   have no data to evaluate; they go quiet, not green. The tick rate and log/worldgen rules are
   unaffected either way.
+- `PulseModHoggingTick` needs both of those two families and attribution switched on (see the main
+  README's "Attribution" section), since it reads `pulse_mod_tick_share` for the offending mod and
+  the busy-over-budget ratio for the load gate. Missing either one means the rule silently has
+  nothing to evaluate rather than firing or clearing.
 
 Validate the file after editing it with the same promtool container used to write it:
 

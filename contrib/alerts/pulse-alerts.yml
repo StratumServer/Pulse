@@ -141,3 +141,27 @@ groups:
         annotations:
           summary: "Worldgen queue over 500 columns for 15m."
           description: "The worldgen queue has held more than 500 pending columns for 15 minutes without draining; check the worldgen thread isn't stalled and that disk I/O for chunk writes isn't backed up."
+
+  - name: pulse-attribution
+    rules:
+      # Needs attribution switched on (README.md's Attribution section: the config block or
+      # `/pulse attribution on`); if it is off, pulse_mod_tick_share never appears in /metrics and
+      # this rule has nothing to evaluate, the same silent-not-firing behaviour as
+      # PulseTickSaturationHigh above when the engine probe is unavailable.
+      #
+      # Two conditions, both required: pulse_mod_tick_share sums to 1 across every modid including
+      # engine and unattributed, so one mod clearing 0.5 already outweighs everything else on the
+      # server combined, and the load gate reuses PulseTickSaturationHigh's own 80% busy-over-budget
+      # threshold, on the same reasoning, a mod owning half the tick is not worth paging on while
+      # the server is coasting at 20% of budget. 10m is several burst refreshes at the default duty
+      # cycle (30 BurstTicks / 10s IntervalSeconds samples roughly once every 11 seconds), long
+      # enough that this is a sustained hog and not one unlucky sample landing mid-spike, which the
+      # README's "What it cannot see" warns can happen on a spiky server.
+      - alert: PulseModHoggingTick
+        expr: pulse_mod_tick_share{modid!~"engine|unattributed"} > 0.5 and pulse_server_tick_busy_seconds / pulse_server_tick_budget_seconds > 0.8
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Mod {{ $labels.modid }} holding over half the tick for 10m while the server is loaded."
+          description: "{{ $labels.modid }} has held more than 50% of the profiled main-thread tick for 10 minutes while tick busy time stayed over 80% of budget; open the dashboard's attribution row for the full breakdown and look at that mod first. Attribution is sampled (about one tick in twelve at the default duty cycle) and only sees listeners and behaviours, not broadcast event handlers, so treat this as where to look first, not a full accounting."

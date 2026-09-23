@@ -120,13 +120,63 @@
       ]
     },
     {
-      "type": "row", "title": "Players", "id": 120, "collapsed": false,
+      "type": "row", "title": "Attribution, only when turned on", "id": 115, "collapsed": false,
       "gridPos": { "x": 0, "y": 14, "w": 24, "h": 1 },
       "panels": []
     },
     {
+      "type": "timeseries", "title": "Tick share by mod", "id": 34,
+      "description": "Per-mod share of profiled main-thread tick time over the last completed burst; shares sum to 1 across every modid, including engine for core systems and unmarked time, and unattributed for marked work no loaded mod claims. Empty until attribution is on: set Attribution.Enabled in ModConfig/pulse.json, or run /pulse attribution on for an immediate look with no restart. It is a sampled main-thread share, blind to broadcast event handlers, thread-safe behaviours and side-library listeners; read the README's Attribution section before acting on one mod's number.",
+      "gridPos": { "x": 0, "y": 15, "w": 16, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "pulse-prom" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "custom": { "lineWidth": 1, "fillOpacity": 40, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "refId": "A", "expr": "pulse_mod_tick_share", "legendFormat": "{{modid}}" }
+      ]
+    },
+    {
+      "type": "bargauge", "title": "Current share by mod", "id": 35,
+      "description": "The same shares as a snapshot instead of a trend: which mod is heaviest right now. Same sampling and blind spots as the panel to the left; empty with attribution off.",
+      "gridPos": { "x": 16, "y": 15, "w": 8, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "pulse-prom" },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1, "color": { "mode": "thresholds" }, "thresholds": { "mode": "absolute", "steps": [{ "color": "green", "value": null }, { "color": "yellow", "value": 0.3 }, { "color": "red", "value": 0.5 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }, "orientation": "horizontal", "displayMode": "gradient", "showUnfilled": true },
+      "targets": [
+        { "refId": "A", "expr": "pulse_mod_tick_share", "legendFormat": "{{modid}}" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Attributed tick time by mod", "id": 36,
+      "description": "Attributed main-thread time per profiled tick, by mod: rate(pulse_mod_tick_seconds_total) divided by rate(pulse_attribution_ticks_total), the README's own recipe for comparing this across servers or tick rates. Sampled from inside the profiling bursts only, so read it like the share panel above, not like wall-clock time.",
+      "gridPos": { "x": 0, "y": 23, "w": 16, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "pulse-prom" },
+      "fieldConfig": { "defaults": { "unit": "s", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "refId": "A", "expr": "rate(pulse_mod_tick_seconds_total[$__rate_interval]) / rate(pulse_attribution_ticks_total[$__rate_interval])", "legendFormat": "{{modid}}" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Profiling health", "id": 37,
+      "description": "How much of the tick attribution is actually seeing, and whether to trust it. Profiled ticks per second should track the duty cycle configured in ModConfig/pulse.json (BurstTicks and IntervalSeconds); dropped samples is a profiler reading that overflowed inside a single tick and should stay flat zero, since anything else means a marker ran for over two seconds.",
+      "gridPos": { "x": 16, "y": 23, "w": 8, "h": 8 },
+      "datasource": { "type": "prometheus", "uid": "pulse-prom" },
+      "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" } }, "overrides": [] },
+      "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
+      "targets": [
+        { "refId": "A", "expr": "rate(pulse_attribution_ticks_total[$__rate_interval])", "legendFormat": "profiled ticks/s" },
+        { "refId": "B", "expr": "rate(pulse_attribution_dropped_samples_total[$__rate_interval])", "legendFormat": "dropped samples/s" }
+      ]
+    },
+    {
+      "type": "row", "title": "Players", "id": 120, "collapsed": false,
+      "gridPos": { "x": 0, "y": 31, "w": 24, "h": 1 },
+      "panels": []
+    },
+    {
       "type": "timeseries", "title": "Players online", "id": 10,
-      "gridPos": { "x": 0, "y": 15, "w": 8, "h": 8 },
+      "gridPos": { "x": 0, "y": 32, "w": 8, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 15, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -137,7 +187,7 @@
     {
       "type": "timeseries", "title": "Ping", "id": 11,
       "description": "Round trip time to the players online. Both series sit at zero with nobody connected, which is not a zero-latency server.",
-      "gridPos": { "x": 8, "y": 15, "w": 8, "h": 8 },
+      "gridPos": { "x": 8, "y": 32, "w": 8, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "s", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -147,7 +197,7 @@
     },
     {
       "type": "timeseries", "title": "Player deaths, 5 minute window", "id": 12,
-      "gridPos": { "x": 16, "y": 15, "w": 8, "h": 8 },
+      "gridPos": { "x": 16, "y": 32, "w": 8, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 15, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -157,13 +207,13 @@
     },
     {
       "type": "row", "title": "World", "id": 130, "collapsed": false,
-      "gridPos": { "x": 0, "y": 23, "w": 24, "h": 1 },
+      "gridPos": { "x": 0, "y": 40, "w": 24, "h": 1 },
       "panels": []
     },
     {
       "type": "timeseries", "title": "Chunks loaded", "id": 13,
       "description": "Refreshed on its own slow cadence, ChunksRefreshSeconds, 30 seconds by default. It steps rather than curves, and reads zero until the first refresh after startup.",
-      "gridPos": { "x": 0, "y": 24, "w": 8, "h": 8 },
+      "gridPos": { "x": 0, "y": 41, "w": 8, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -173,7 +223,7 @@
     },
     {
       "type": "timeseries", "title": "Entities loaded", "id": 14,
-      "gridPos": { "x": 8, "y": 24, "w": 8, "h": 8 },
+      "gridPos": { "x": 8, "y": 41, "w": 8, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -184,7 +234,7 @@
     {
       "type": "timeseries", "title": "Entities by code", "id": 15,
       "description": "The ten most numerous entity codes, everything else summed into other. Same slow cadence as the chunk count. A stack climbing on one code is usually a breeding pen or a drifter horde.",
-      "gridPos": { "x": 16, "y": 24, "w": 8, "h": 8 },
+      "gridPos": { "x": 16, "y": 41, "w": 8, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 1, "fillOpacity": 40, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } } }, "overrides": [] },
       "options": { "legend": { "displayMode": "table", "placement": "right", "showLegend": true, "calcs": ["lastNotNull"] }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -194,13 +244,13 @@
     },
     {
       "type": "row", "title": "Worldgen", "id": 140, "collapsed": false,
-      "gridPos": { "x": 0, "y": 32, "w": 24, "h": 1 },
+      "gridPos": { "x": 0, "y": 49, "w": 24, "h": 1 },
       "panels": []
     },
     {
       "type": "timeseries", "title": "Worldgen queue", "id": 16,
       "description": "Chunk columns waiting to be generated. A backlog that keeps growing means players are outrunning worldgen, usually behind someone on a fast mount.",
-      "gridPos": { "x": 0, "y": 33, "w": 12, "h": 8 },
+      "gridPos": { "x": 0, "y": 50, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 15, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -210,7 +260,7 @@
     },
     {
       "type": "timeseries", "title": "Columns generated", "id": 17,
-      "gridPos": { "x": 12, "y": 33, "w": 12, "h": 8 },
+      "gridPos": { "x": 12, "y": 50, "w": 12, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -220,13 +270,13 @@
     },
     {
       "type": "row", "title": "Network", "id": 150, "collapsed": false,
-      "gridPos": { "x": 0, "y": 41, "w": 24, "h": 1 },
+      "gridPos": { "x": 0, "y": 58, "w": 24, "h": 1 },
       "panels": []
     },
     {
       "type": "timeseries", "title": "Bytes per second by channel", "id": 18,
       "description": "The engine's own traffic rate over its last completed two second window, split TCP and UDP. Needs the engine probe. A window cut short by a suspend reads low for one sample.",
-      "gridPos": { "x": 0, "y": 42, "w": 6, "h": 8 },
+      "gridPos": { "x": 0, "y": 59, "w": 6, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "Bps", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -237,7 +287,7 @@
     {
       "type": "timeseries", "title": "Packets per second by channel", "id": 19,
       "description": "Packet rate over the same engine window. Needs the engine probe.",
-      "gridPos": { "x": 6, "y": 42, "w": 6, "h": 8 },
+      "gridPos": { "x": 6, "y": 59, "w": 6, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "pps", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -248,7 +298,7 @@
     {
       "type": "timeseries", "title": "Traffic from the byte totals", "id": 20,
       "description": "The same traffic derived from the cumulative counters instead of the engine window. The TCP pair comes from the public API and survives degraded mode; the UDP pair does not.",
-      "gridPos": { "x": 12, "y": 42, "w": 6, "h": 8 },
+      "gridPos": { "x": 12, "y": 59, "w": 6, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "Bps", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -262,7 +312,7 @@
     {
       "type": "timeseries", "title": "Connection queue", "id": 21,
       "description": "Clients held in the queue because the server is full. Anything above zero is someone staring at a loading screen. Needs the engine probe.",
-      "gridPos": { "x": 18, "y": 42, "w": 6, "h": 8 },
+      "gridPos": { "x": 18, "y": 59, "w": 6, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 15, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -272,13 +322,13 @@
     },
     {
       "type": "row", "title": "Pauses, warnings and logs", "id": 160, "collapsed": false,
-      "gridPos": { "x": 0, "y": 50, "w": 24, "h": 1 },
+      "gridPos": { "x": 0, "y": 67, "w": 24, "h": 1 },
       "panels": []
     },
     {
       "type": "timeseries", "title": "Suspends, 5 minute window", "id": 22,
       "description": "Times the server stopped ticking. Every autosave is one of these, so a steady beat here is normal and a burst is not.",
-      "gridPos": { "x": 0, "y": 51, "w": 6, "h": 8 },
+      "gridPos": { "x": 0, "y": 68, "w": 6, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 15, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -289,7 +339,7 @@
     {
       "type": "timeseries", "title": "Seconds suspended, 5 minute window", "id": 23,
       "description": "Wall clock the world stood still. This is the freeze players actually feel during an autosave, and the number to bring to a complaint about lag spikes.",
-      "gridPos": { "x": 6, "y": 51, "w": 6, "h": 8 },
+      "gridPos": { "x": 6, "y": 68, "w": 6, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "s", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 15, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -300,7 +350,7 @@
     {
       "type": "timeseries", "title": "Engine warnings, 5 minute window", "id": 24,
       "description": "The engine's own health warnings, recognised from the text it logs. overload is a tick past 500 ms, memory is crossing 90% of DieAboveMemoryUsageMb, suspend_timeout is a suspend that gave up waiting for a thread, autosave_io is an autosave arriving while the previous one is still writing.",
-      "gridPos": { "x": 12, "y": 51, "w": 6, "h": 8 },
+      "gridPos": { "x": 12, "y": 68, "w": 6, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -311,7 +361,7 @@
     {
       "type": "timeseries", "title": "Log entries, 5 minute window", "id": 25,
       "description": "Lines the server logged, by severity. Fatal entries count toward the engine's DieAboveErrorCount self-shutdown, so they are worth an alert of their own.",
-      "gridPos": { "x": 18, "y": 51, "w": 6, "h": 8 },
+      "gridPos": { "x": 18, "y": 68, "w": 6, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -321,13 +371,13 @@
     },
     {
       "type": "row", "title": "Runtime, only with RuntimeMetrics on", "id": 170, "collapsed": false,
-      "gridPos": { "x": 0, "y": 59, "w": 24, "h": 1 },
+      "gridPos": { "x": 0, "y": 76, "w": 24, "h": 1 },
       "panels": []
     },
     {
       "type": "timeseries", "title": "GC pause time", "id": 26,
       "description": "Seconds of garbage collector pause per second of wall clock, so 1% is one hundredth of the server's time spent not running the world.",
-      "gridPos": { "x": 0, "y": 60, "w": 6, "h": 8 },
+      "gridPos": { "x": 0, "y": 77, "w": 6, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 15, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -337,7 +387,7 @@
     },
     {
       "type": "timeseries", "title": "GC collections per minute", "id": 27,
-      "gridPos": { "x": 6, "y": 60, "w": 6, "h": 8 },
+      "gridPos": { "x": 6, "y": 77, "w": 6, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -348,7 +398,7 @@
     {
       "type": "timeseries", "title": "Allocation rate", "id": 28,
       "description": "Bytes the server hands to the garbage collector every second. This is what sets the pace of the gen0 collections next door.",
-      "gridPos": { "x": 12, "y": 60, "w": 6, "h": 8 },
+      "gridPos": { "x": 12, "y": 77, "w": 6, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "Bps", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -359,7 +409,7 @@
     {
       "type": "timeseries", "title": "Managed heap after last collection", "id": 29,
       "description": "Heap size and the part of it lost to fragmentation, by generation, as measured at the end of the last collection. It updates in steps, not continuously.",
-      "gridPos": { "x": 18, "y": 60, "w": 6, "h": 8 },
+      "gridPos": { "x": 18, "y": 77, "w": 6, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "bytes", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -371,7 +421,7 @@
     {
       "type": "timeseries", "title": "Process memory", "id": 30,
       "description": "Working set is what the operating system sees the server holding, which is the number to compare against DieAboveMemoryUsageMb.",
-      "gridPos": { "x": 0, "y": 68, "w": 6, "h": 8 },
+      "gridPos": { "x": 0, "y": 85, "w": 6, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "bytes", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -383,7 +433,7 @@
     {
       "type": "timeseries", "title": "CPU time", "id": 31,
       "description": "Seconds of CPU burned per second of wall clock, so 1 is one core fully busy. Vintage Story does most of its work on one thread, so the useful comparison is against 1, not against your core count.",
-      "gridPos": { "x": 6, "y": 68, "w": 6, "h": 8 },
+      "gridPos": { "x": 6, "y": 85, "w": 6, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0, "decimals": 2, "custom": { "lineWidth": 2, "fillOpacity": 8, "showPoints": "never", "stacking": { "mode": "normal", "group": "A" } } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -394,7 +444,7 @@
     {
       "type": "timeseries", "title": "Thread pool", "id": 32,
       "description": "Worker threads and the work waiting for them. A queue that does not drain is the pool being starved, often by blocking work on a pool thread. Both are published by the runtime as counters even though they go down as often as up, and Pulse renders the shape the runtime declares.",
-      "gridPos": { "x": 12, "y": 68, "w": 6, "h": 8 },
+      "gridPos": { "x": 12, "y": 85, "w": 6, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
@@ -406,7 +456,7 @@
     {
       "type": "timeseries", "title": "Exceptions and lock contention per minute", "id": 33,
       "description": "Thrown exceptions and contended monitor locks. Both are cheap one at a time and expensive in a loop, and a mod misbehaving usually shows up here before it shows up in tick time.",
-      "gridPos": { "x": 18, "y": 68, "w": 6, "h": 8 },
+      "gridPos": { "x": 18, "y": 85, "w": 6, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" } }, "overrides": [] },
       "options": { "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true }, "tooltip": { "mode": "multi", "sort": "desc" } },
