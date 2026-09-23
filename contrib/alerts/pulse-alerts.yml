@@ -157,8 +157,14 @@ groups:
       # cycle (30 BurstTicks / 10s IntervalSeconds samples roughly once every 11 seconds), long
       # enough that this is a sustained hog and not one unlucky sample landing mid-spike, which the
       # README's "What it cannot see" warns can happen on a spiky server.
+      #
+      # "and" defaults to matching on the full label set, and the left side carries modid while
+      # the load gate does not, so without "ignoring(modid)" the two sides never match anything and
+      # this alert can never fire. Ignoring modid instead of naming "on(instance, job)" keeps this
+      # correct if an operator's Prometheus adds its own external labels later; either side of an
+      # "and" already has to come from the same scrape target for the labels to line up at all.
       - alert: PulseModHoggingTick
-        expr: pulse_mod_tick_share{modid!~"engine|unattributed"} > 0.5 and pulse_server_tick_busy_seconds / pulse_server_tick_budget_seconds > 0.8
+        expr: (pulse_mod_tick_share{modid!~"engine|unattributed"} > 0.5) and ignoring(modid) (pulse_server_tick_busy_seconds / pulse_server_tick_budget_seconds > 0.8)
         for: 10m
         labels:
           severity: warning

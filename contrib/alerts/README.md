@@ -61,3 +61,15 @@ Validate the file after editing it with the same promtool container used to writ
 ```sh
 docker run --rm -v "$PWD/contrib/alerts:/a" --entrypoint promtool prom/prometheus check rules /a/pulse-alerts.yml
 ```
+
+That only parses the PromQL; it does not run it, so a rule can pass `check rules` and still never
+fire, for instance an `and` or an arithmetic operator whose two sides carry different labels and
+so never match anything. `pulse-alerts.test.yml` catches that class of mistake by running every
+rule against synthetic data, one case where it should fire and one where it should stay quiet:
+
+```sh
+docker run --rm -v "$PWD/contrib/alerts:/a" --entrypoint promtool prom/prometheus test rules /a/pulse-alerts.test.yml
+```
+
+Run both after touching this file. Adding a rule without adding its two cases here is how the
+next silent one gets through.

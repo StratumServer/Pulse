@@ -708,7 +708,7 @@
       "targets": [
         {
           "refId": "A",
-          "expr": "rate(pulse_mod_tick_seconds_total[$__rate_interval]) / rate(pulse_attribution_ticks_total[$__rate_interval])",
+          "expr": "rate(pulse_mod_tick_seconds_total[$__rate_interval]) / ignoring(modid) group_left() rate(pulse_attribution_ticks_total[$__rate_interval])",
           "legendFormat": "{{modid}}"
         }
       ]
