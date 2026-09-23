@@ -13,23 +13,54 @@ name: game-watch
 # This workflow changes nothing in the repo. It only reports: a version mismatch that still
 # builds and passes exits green with a notice; a version mismatch that fails to build or test
 # fails the job, which GitHub surfaces per the repo's own notification settings. Bumping
-# VS_VERSION in ci.yml (and release.yml) once that happens is a separate, deliberate change.
+# VS_VERSION in ci.yml, sonar.yml and release.yml once that happens is a separate, deliberate
+# change.
 #
-# Runs every Monday at 06:00 UTC, plus on demand via workflow_dispatch.
+# GitHub only schedules a workflow that exists on the repository's default branch (main); a copy
+# living only on dev never fires on its own, which is why this file has to be on main. main and
+# dev can carry different VS_VERSION pins once dev moves ahead of a release, so the job runs as
+# a matrix over both refs: each leg checks out its own ref and reads that ref's own ci.yml, so
+# main is watched against the version it actually ships and dev against the version it is
+# currently building toward.
+#
+# Runs every Monday at 06:00 UTC against both main and dev, plus on demand via workflow_dispatch
+# (set force: true to run the download/build/unit/scenario path even when nothing differs, to
+# prove that path still works).
 
 on:
   schedule:
     - cron: "0 6 * * 1"
   workflow_dispatch:
+    inputs:
+      force:
+        description: "Run the download/build/unit/scenario path even if already pinned to the newest stable"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# One run at a time is enough for a weekly tripwire; a second scheduled or dispatched run
+# waiting behind it beats two overlapping matrices downloading the same server twice.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   check-newest-stable:
-    name: Build & test against newest stable
+    name: Build & test against newest stable (${{ matrix.ref }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        ref: [main, dev]
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ matrix.ref }}
 
       # ci.yml's VS_VERSION is the one place Pulse's pinned game version lives; read it from
       # there instead of keeping a second copy here that could quietly drift out of sync.
@@ -47,14 +78,23 @@ jobs:
       # runner class before writing this). mods.vintagestory.at/api/gameversions, the mod
       # database's own API, does answer reliably: it lists every game version tag in release
       # order, and stays current because mod authors need the tag the moment a new game version
-      # ships. Prerelease tags (-rc.N, -pre.N, -dev.N) always carry a hyphen; dropping those and
-      # taking the highest of what's left is "the newest stable version".
+      # ships.
+      #
+      # The extraction keeps only a dotted run of digits that reaches all the way to the closing
+      # quote, so a prerelease tag (-rc.N, -pre.N, -dev.N) never matches at all: taking the
+      # highest of what is left is "the newest stable version" with no separate hyphen filter
+      # needed. This is a third-party API's response, read straight into a shell variable that
+      # later feeds a curl URL and a build; a name field that is anything other than digits and
+      # dots, hyphen or not, now simply produces no match instead of reaching that variable.
+      # Tested against a crafted "9.9.9$(id)" entry: the old hyphen filter let it through
+      # (nothing to drop, there is no hyphen), this pattern drops it (nothing before the closing
+      # quote is only digits and dots).
       - name: Query the newest stable server version
         id: newest
         run: |
           set -e
           NEWEST="$(curl -sSL --proto '=https' --max-time 30 "https://mods.vintagestory.at/api/gameversions" \
-            | grep -oP '"name":"\K[^"]+' | grep -v -- '-' | sort -V | tail -1)"
+            | grep -oP '"name":"\K[0-9]+(\.[0-9]+)*(?=")' | sort -V | tail -1)"
           [ -n "$NEWEST" ] || { echo "::error::could not determine the newest stable version from mods.vintagestory.at"; exit 1; }
           echo "version=$NEWEST" >> "$GITHUB_OUTPUT"
           echo "Newest stable: $NEWEST"
@@ -69,20 +109,21 @@ jobs:
           fi
 
       - name: Already current
-        if: steps.compare.outputs.differs == 'false'
+        if: steps.compare.outputs.differs == 'false' && !inputs.force
         run: echo "::notice::ci.yml is already pinned to the newest stable version (${{ steps.pinned.outputs.version }}). Nothing to do."
 
       - name: Setup .NET 10
-        if: steps.compare.outputs.differs == 'true'
+        if: steps.compare.outputs.differs == 'true' || inputs.force
         uses: actions/setup-dotnet@v6
         with:
           dotnet-version: 10.0.x
 
       # No actions/cache here on purpose: unlike ci.yml, which downloads the same pinned version
-      # on every push, this step only runs on the rare week the newest stable moved, so there is
-      # nothing to reuse. See contrib/alerts if you're looking for the operations kit instead.
-      - name: Download the newer Vintage Story server
-        if: steps.compare.outputs.differs == 'true'
+      # on every push, this step only runs when the newest stable differs from the pin, or on a
+      # forced dispatch, so most weeks there is nothing to reuse. See contrib/alerts if you're
+      # looking for the operations kit instead.
+      - name: Download the target Vintage Story server
+        if: steps.compare.outputs.differs == 'true' || inputs.force
         run: |
           set -e
           VS_VERSION="${{ steps.newest.outputs.version }}"
@@ -91,7 +132,7 @@ jobs:
           tar -xzf vs_server.tar.gz -C "$HOME/vs"
 
       - name: Export VINTAGE_STORY
-        if: steps.compare.outputs.differs == 'true'
+        if: steps.compare.outputs.differs == 'true' || inputs.force
         run: |
           set -e
           DLL_DIR="$(dirname "$(find "$HOME/vs" -name VintagestoryAPI.dll | head -1)")"
@@ -99,11 +140,11 @@ jobs:
           echo "Resolved VINTAGE_STORY=$DLL_DIR"
 
       - name: Build
-        if: steps.compare.outputs.differs == 'true'
+        if: steps.compare.outputs.differs == 'true' || inputs.force
         run: dotnet build Pulse.slnx -c Release
 
       - name: Unit tests
-        if: steps.compare.outputs.differs == 'true'
+        if: steps.compare.outputs.differs == 'true' || inputs.force
         run: |
           dotnet test Pulse.Tests/Pulse.Tests.csproj -c Release --no-build
           dotnet test Pulse.Otlp.Tests/Pulse.Otlp.Tests.csproj -c Release --no-build
@@ -111,11 +152,15 @@ jobs:
       # Same two suites ci.yml runs, boot a real headless server through Atlas and prove the
       # build works against the new game version end to end, not just that it compiles.
       - name: Atlas scenarios
-        if: steps.compare.outputs.differs == 'true'
+        if: steps.compare.outputs.differs == 'true' || inputs.force
         run: |
           dotnet test Pulse.Scenarios/Pulse.Scenarios.csproj -c Release --no-build
           dotnet test Pulse.Otlp.Scenarios/Pulse.Otlp.Scenarios.csproj -c Release --no-build
 
       - name: Newer stable found
         if: steps.compare.outputs.differs == 'true'
-        run: echo "::notice::Vintage Story ${{ steps.newest.outputs.version }} is out (ci.yml is pinned to ${{ steps.pinned.outputs.version }}) and Pulse builds and passes against it. Bump VS_VERSION in ci.yml and release.yml when convenient."
+        run: echo "::notice::Vintage Story ${{ steps.newest.outputs.version }} is out (ci.yml is pinned to ${{ steps.pinned.outputs.version }}) and Pulse builds and passes against it. Bump VS_VERSION in ci.yml, sonar.yml and release.yml when convenient."
+
+      - name: Forced run complete
+        if: steps.compare.outputs.differs == 'false' && inputs.force
+        run: echo "::notice::force=true ran the build/test path even though ci.yml is already pinned to the newest stable version (${{ steps.pinned.outputs.version }}). Nothing to bump."
