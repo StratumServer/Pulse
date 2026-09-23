@@ -13,7 +13,8 @@ name: game-watch
 # This workflow changes nothing in the repo. It only reports: a version mismatch that still
 # builds and passes exits green with a notice; a version mismatch that fails to build or test
 # fails the job, which GitHub surfaces per the repo's own notification settings. Bumping
-# VS_VERSION in ci.yml (and release.yml) once that happens is a separate, deliberate change.
+# VS_VERSION in ci.yml, sonar.yml and release.yml once that happens is a separate, deliberate
+# change.
 #
 # GitHub only schedules a workflow that exists on the repository's default branch (main); a copy
 # living only on dev never fires on its own, which is why this file has to be on main. main and
@@ -77,14 +78,23 @@ jobs:
       # runner class before writing this). mods.vintagestory.at/api/gameversions, the mod
       # database's own API, does answer reliably: it lists every game version tag in release
       # order, and stays current because mod authors need the tag the moment a new game version
-      # ships. Prerelease tags (-rc.N, -pre.N, -dev.N) always carry a hyphen; dropping those and
-      # taking the highest of what's left is "the newest stable version".
+      # ships.
+      #
+      # The extraction keeps only a dotted run of digits that reaches all the way to the closing
+      # quote, so a prerelease tag (-rc.N, -pre.N, -dev.N) never matches at all: taking the
+      # highest of what is left is "the newest stable version" with no separate hyphen filter
+      # needed. This is a third-party API's response, read straight into a shell variable that
+      # later feeds a curl URL and a build; a name field that is anything other than digits and
+      # dots, hyphen or not, now simply produces no match instead of reaching that variable.
+      # Tested against a crafted "9.9.9$(id)" entry: the old hyphen filter let it through
+      # (nothing to drop, there is no hyphen), this pattern drops it (nothing before the closing
+      # quote is only digits and dots).
       - name: Query the newest stable server version
         id: newest
         run: |
           set -e
           NEWEST="$(curl -sSL --proto '=https' --max-time 30 "https://mods.vintagestory.at/api/gameversions" \
-            | grep -oP '"name":"\K[^"]+' | grep -v -- '-' | sort -V | tail -1)"
+            | grep -oP '"name":"\K[0-9]+(\.[0-9]+)*(?=")' | sort -V | tail -1)"
           [ -n "$NEWEST" ] || { echo "::error::could not determine the newest stable version from mods.vintagestory.at"; exit 1; }
           echo "version=$NEWEST" >> "$GITHUB_OUTPUT"
           echo "Newest stable: $NEWEST"
@@ -149,7 +159,7 @@ jobs:
 
       - name: Newer stable found
         if: steps.compare.outputs.differs == 'true'
-        run: echo "::notice::Vintage Story ${{ steps.newest.outputs.version }} is out (ci.yml is pinned to ${{ steps.pinned.outputs.version }}) and Pulse builds and passes against it. Bump VS_VERSION in ci.yml and release.yml when convenient."
+        run: echo "::notice::Vintage Story ${{ steps.newest.outputs.version }} is out (ci.yml is pinned to ${{ steps.pinned.outputs.version }}) and Pulse builds and passes against it. Bump VS_VERSION in ci.yml, sonar.yml and release.yml when convenient."
 
       - name: Forced run complete
         if: steps.compare.outputs.differs == 'false' && inputs.force
