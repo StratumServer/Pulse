@@ -183,12 +183,20 @@ the behaviour's registered code. Pulse turns the profiler on for a burst, reads 
 left behind, maps each key back to a mod through the mod loader, and turns it off again. No
 Harmony, no engine patch, no bundled dependency.
 
-The cost is why it bursts. Each marker is a dictionary write and a clock read, and the number of
-markers scales with loaded entities times their behaviours, not with how many mods you run. On a
-twenty-player server holding four thousand entities, a profiled tick costs roughly 2.8% of the
-33 ms budget. At the default duty cycle that averages out to about 0.3%, and on an idle server it
-is nothing at all. Raising `BurstTicks` or lowering `IntervalSeconds` moves that number in the
-obvious direction.
+The cost is measured, not estimated from a mark count. `Pulse.Scenarios/AttributionCostScenarios.cs`
+joins a test player and packs four thousand chickens into a dense cluster around it, heavier than
+a real server would spread across its map but enough to clear the millisecond floor
+`World.MeasureTicks` reads at, then reads tick busy time before attribution runs and again during
+a forced burst. Across four runs on a shared development machine, attribution's own share of a
+profiled tick ran 9 to 14 ms, roughly 20 to 40% of the 33 ms budget (median around 28%); at the
+default duty cycle that blends down to 0.7 to 1.4 ms, 2 to 4% of the budget (median around 2.6%).
+Both figures replace the mark-count estimate this section used to carry (2.8% burst, 0.3%
+amortised) and land roughly an order of magnitude above it. Markers scale with loaded entities
+times their behaviours, not with how many mods you run, so raising `BurstTicks` or lowering
+`IntervalSeconds` moves the burst share in the obvious direction, and on an idle server it is
+nothing at all. Run it yourself, with `VINTAGE_STORY` set: `PULSE_MEASURE_ATTRIBUTION_COST=1
+dotnet test Pulse.Scenarios --filter "Category=Cost"`; it stays out of the default suite because
+spawning that many entities is slow.
 
 One visible side effect: the engine logs "Over 400ms tick. Skipping N physics ticks" only when its
 profiler is on. If your server is already overloaded you will see that warning appear during
