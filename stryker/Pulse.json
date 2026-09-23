@@ -1,0 +1,20 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker-net/master/src/Stryker.Core/Stryker.Core/Schemas/stryker-config.json",
+  "stryker-config": {
+    "solution": "Pulse.slnx",
+    "project": "Pulse.csproj",
+    "test-projects": [
+      "Pulse.Tests.csproj"
+    ],
+    "configuration": "Release",
+    "reporters": [
+      "progress",
+      "json"
+    ],
+    "thresholds": {
+      "high": 53,
+      "low": 48,
+      "break": 48
+    }
+  }
+}

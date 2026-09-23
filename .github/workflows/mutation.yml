@@ -1,0 +1,112 @@
+name: mutation
+
+# Line coverage says the unit suites execute the code; it cannot say whether anything is
+# checked. Stryker answers that: it changes the code and asks whether a test notices. The lane
+# is a ratchet, not a target. Each project breaks just under the score measured when this file
+# landed, so tests cannot quietly get weaker; raising a threshold is a deliberate commit.
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - "Pulse/**"
+      - "Pulse.Otlp/**"
+      - "Pulse.Tests/**"
+      - "Pulse.Otlp.Tests/**"
+      # Stryker builds the whole solution, so anything that can break that build has to be
+      # able to trigger this lane.
+      - "Pulse.slnx"
+      - "Directory.Build.props"
+      - ".config/dotnet-tools.json"
+      - "stryker/**"
+      - ".github/workflows/mutation.yml"
+
+# Least privilege: nothing here writes to the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VS_VERSION: "1.22.7"
+
+jobs:
+  stryker:
+    name: Mutation (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      # A weak spot in one project should not hide the other.
+      fail-fast: false
+      matrix:
+        # One job per project rather than both in one, so the lane's wall clock is the slower
+        # project rather than their sum. Measured locally at the commit that added this file,
+        # each run including its own solution build:
+        #
+        #   Pulse        51.00 %   326 killed,  23 survived, 6 timeouts, 296 uncovered
+        #   Pulse.Otlp   96.63 %    86 killed,   3 survived, 0 timeouts,   0 uncovered
+        #
+        # giving break 48 and 93, a handful of mutants under each measured score so a couple
+        # trading places between killed and timeout from one run to the next does not flake the
+        # gate. Pulse's score looks low next to Pulse.Otlp because most of Pulse/*.cs
+        # (PulseModSystem, the engine probes, the command handlers) has no pure unit coverage by
+        # design: it only runs under a booted server, which is what the Atlas scenarios in
+        # ci.yml are for. Raising a threshold is a deliberate commit, not a side effect of
+        # adding tests elsewhere.
+        project: [Pulse, Pulse.Otlp]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache Vintage Story server
+        id: cache-vs
+        uses: actions/cache@v6
+        with:
+          path: ~/vs
+          key: vs-server-linux-x64-${{ env.VS_VERSION }}
+
+      - name: Download Vintage Story server
+        if: steps.cache-vs.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          curl -sSL --proto '=https' --proto-redir '=https' -o vs_server.tar.gz "https://cdn.vintagestory.at/gamefiles/stable/vs_server_linux-x64_${VS_VERSION}.tar.gz"
+          mkdir -p "$HOME/vs"
+          tar -xzf vs_server.tar.gz -C "$HOME/vs"
+
+      # The csproj files resolve VintagestoryAPI.dll straight from $VINTAGE_STORY. Stryker builds
+      # the whole solution, which includes the Atlas scenario projects, so this has to run even
+      # though the mutation run itself never boots a server.
+      - name: Export VINTAGE_STORY
+        run: |
+          set -e
+          DLL_DIR="$(dirname "$(find "$HOME/vs" -name VintagestoryAPI.dll | head -1)")"
+          echo "VINTAGE_STORY=$DLL_DIR" >> "$GITHUB_ENV"
+          echo "Resolved VINTAGE_STORY=$DLL_DIR"
+
+      # dotnet-stryker is pinned in .config/dotnet-tools.json, so the lane cannot change its
+      # verdict because a new Stryker shipped new mutators overnight.
+      - name: Restore dotnet tools
+        run: dotnet tool restore
+
+      # Not --since. A pull request that only deletes a contract test would leave every mutant
+      # filtered out under --since and pass, which is exactly the case this lane exists to catch.
+      # The full run is a stable number, and one job per project keeps it short enough.
+      - name: Mutation test ${{ matrix.project }}
+        run: dotnet dotnet-stryker -f stryker/${{ matrix.project }}.json --skip-version-check --output StrykerOutput/${{ matrix.project }}
+
+      # The surviving mutants are the finding; without the report a red job only says a number
+      # moved.
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report-${{ matrix.project }}
+          path: StrykerOutput/${{ matrix.project }}/reports/mutation-report.json
+          if-no-files-found: warn
