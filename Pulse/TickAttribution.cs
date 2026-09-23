@@ -183,12 +183,9 @@ internal sealed class TickAttribution
 
     private static string Bucket(string mark, OwnerLookup owner)
     {
-        foreach (string prefix in OwnedPrefixes)
+        foreach (string prefix in OwnedPrefixes.Where(prefix => mark.StartsWith(prefix, StringComparison.Ordinal)))
         {
-            if (mark.StartsWith(prefix, StringComparison.Ordinal))
-            {
-                return owner(mark[prefix.Length..]) ?? Unattributed;
-            }
+            return owner(mark[prefix.Length..]) ?? Unattributed;
         }
 
         return Engine;

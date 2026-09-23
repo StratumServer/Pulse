@@ -174,7 +174,7 @@ internal sealed class FakeGrpcCollector : IDisposable
         }
     }
 
-    private async Task Respond(NetworkStream stream, int streamId, CancellationToken token)
+    private static async Task Respond(NetworkStream stream, int streamId, CancellationToken token)
     {
         byte[] response =
         [

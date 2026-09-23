@@ -197,7 +197,7 @@ mutate Pulse/ConfigUpgrade.cs \
     "config upgrade: a key inside a block is reported without the block it lives in"
 
 mutate Pulse/ConfigUpgrade.cs \
-    's/if \(!config\.ContainsKey\(entry\.Key\)\)/if (false)/' \
+    's/entry => !config\.ContainsKey\(entry\.Key\)/entry => false/' \
     "config upgrade: a key the config does not know goes unreported and is dropped in silence"
 
 mutate Pulse/ConfigUpgrade.cs \
