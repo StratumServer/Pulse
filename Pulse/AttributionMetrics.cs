@@ -39,6 +39,8 @@ internal sealed partial class AttributionMetrics
     /// concluding that priming never took. Roughly half a minute at the default tick rate.</summary>
     private const int UnprimedTickLimit = 1000;
 
+    private const string Modid = "modid";
+
     private readonly Func<FrameProfilerUtil?> resolveProfiler;
     private readonly Action<string, string> warn;
 
@@ -205,7 +207,7 @@ internal sealed partial class AttributionMetrics
         List<KeyValuePair<string, double>> shares = new(burst.Seconds.Count);
         foreach (KeyValuePair<string, double> entry in burst.Seconds)
         {
-            modTickSeconds.Add(entry.Value, new KeyValuePair<string, object?>("modid", entry.Key));
+            modTickSeconds.Add(entry.Value, new KeyValuePair<string, object?>(Modid, entry.Key));
             shares.Add(new KeyValuePair<string, double>(
                 entry.Key, burst.BusySeconds > 0 ? entry.Value / burst.BusySeconds : 0));
         }
@@ -231,14 +233,14 @@ internal sealed partial class AttributionMetrics
 
         if (lastShares.Count == 0)
         {
-            yield return new Measurement<double>(0, new KeyValuePair<string, object?>("modid", TickAttribution.Engine));
-            yield return new Measurement<double>(0, new KeyValuePair<string, object?>("modid", TickAttribution.Unattributed));
+            yield return new Measurement<double>(0, new KeyValuePair<string, object?>(Modid, TickAttribution.Engine));
+            yield return new Measurement<double>(0, new KeyValuePair<string, object?>(Modid, TickAttribution.Unattributed));
             yield break;
         }
 
         foreach (KeyValuePair<string, double> share in lastShares)
         {
-            yield return new Measurement<double>(share.Value, new KeyValuePair<string, object?>("modid", share.Key));
+            yield return new Measurement<double>(share.Value, new KeyValuePair<string, object?>(Modid, share.Key));
         }
     }
 
@@ -263,7 +265,7 @@ internal sealed partial class AttributionMetrics
         attributionDropped.Add(0);
         foreach (string modid in new[] { TickAttribution.Engine, TickAttribution.Unattributed })
         {
-            modTickSeconds.Add(0, new KeyValuePair<string, object?>("modid", modid));
+            modTickSeconds.Add(0, new KeyValuePair<string, object?>(Modid, modid));
         }
     }
 
