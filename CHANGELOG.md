@@ -10,6 +10,14 @@ first.
 
 ### Added
 
+- A dashboard row, `Attribution, only when turned on`, placed right after tick health: a stacked
+  time series of `pulse_mod_tick_share` by mod, a bar gauge for the current share, attributed tick
+  time per mod using the main README's own seconds-per-profiled-tick recipe, and a small panel for
+  the profiled ticks rate and dropped samples. `contrib/alerts/pulse-alerts.yml` gains
+  `PulseModHoggingTick`, which only fires when a single mod other than `engine` or `unattributed`
+  holds more than 50% of the profiled tick for 10 minutes while `pulse_server_tick_busy_seconds` is
+  also over 80% of budget, the same load threshold `PulseTickSaturationHigh` already uses, so a mod
+  that is merely heavy on an idle server does not page anyone.
 - `/pulse`, a server command behind the `controlserver` privilege, so per-mod tick attribution no
   longer needs a restart to switch. `/pulse attribution on` and `off` drive the duty cycle on the
   running server without writing `pulse.json`, `/pulse attribution status` reports the cycle in use
