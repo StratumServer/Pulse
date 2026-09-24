@@ -1,10 +1,10 @@
 # Alerting rules
 
-A Prometheus alerting rules file for Pulse, `pulse-alerts.yml`. Ten rules across tick health,
-engine warnings, log errors, endpoint availability and the worldgen queue, each carrying a
-`severity` label (`warning` or `critical`) and an annotation that says what to check, not just
-what happened. The thresholds are calibrated against the engine's own numbers: 30 TPS is the
-game's nominal tick rate, 500 ms is the engine's own overload cutoff, 90%/100% of
+A Prometheus alerting rules file for Pulse, `pulse-alerts.yml`. Eleven rules across tick health,
+engine warnings, log errors, endpoint availability, the worldgen queue and per-mod attribution,
+each carrying a `severity` label (`warning` or `critical`) and an annotation that says what to
+check, not just what happened. The thresholds are calibrated against the engine's own numbers: 30
+TPS is the game's nominal tick rate, 500 ms is the engine's own overload cutoff, 90%/100% of
 `DieAboveMemoryUsageMb` are the engine's own memory thresholds. The comments in the file say
 where each one comes from.
 
@@ -41,19 +41,41 @@ notify anyone, point the `alerting:` block in `prometheus.yml` at an Alertmanage
 routing there; that setup is entirely yours; nothing here assumes a particular chat tool or
 paging service.
 
-Two things worth knowing before you rely on these:
+Three things worth knowing before you rely on these:
 
 - `PulseEndpointDown` matches `up{job="vintagestory"}`, the job name `contrib/grafana`'s own
   `prometheus.yml` uses. If your scrape job is named differently, change that one label.
-- `PulseTickSaturationHigh` and `PulseTickOverrunsHigh` read `pulse_server_tick_busy_seconds` and
-  `pulse_server_tick_budget_seconds`, two of the families that only exist when Pulse's engine
-  probe resolved successfully (see the main README's "Degraded mode" section). If that cast ever
-  fails on a game update, those two families disappear from `/metrics` and these two rules simply
-  have no data to evaluate; they go quiet, not green. The tick rate and log/worldgen rules are
-  unaffected either way.
+- `PulseTickSaturationHigh` reads `pulse_server_tick_busy_seconds`, one of the families that only
+  exists when Pulse's engine probe resolved successfully (see the main README's "Degraded mode"
+  section). If that cast ever fails on a game update, the family disappears from `/metrics` and
+  this rule simply has no data to evaluate; it goes quiet, not green. `PulseTickOverrunsHigh` looks
+  like it belongs in the same boat but does not: it only reads the tick histogram and
+  `pulse_server_tick_budget_seconds`, both public API metrics, so it keeps working in degraded mode
+  the same as the tick rate and log/worldgen rules.
+- `PulseModHoggingTick` reads `pulse_server_tick_busy_seconds` too, so it is quiet in degraded mode
+  for the same reason. It also needs attribution switched on (see the main README's "Attribution"
+  section) for `pulse_mod_tick_share`, but attribution going off does not make that family
+  disappear the way a failed engine probe does: the share is a plain gauge and the last burst's
+  values stay on `/metrics`, frozen, until the server restarts. That is why the rule also checks
+  `increase(pulse_attribution_ticks_total[5m]) > 0`: once the duty cycle stops advancing that
+  counter, whether from `/pulse attribution off`, a reload with `Enabled` false, or the duty cycle
+  giving up on its own, the guard goes quiet even though the stale share is still sitting there
+  looking like a real number.
 
 Validate the file after editing it with the same promtool container used to write it:
 
 ```sh
 docker run --rm -v "$PWD/contrib/alerts:/a" --entrypoint promtool prom/prometheus check rules /a/pulse-alerts.yml
 ```
+
+That only parses the PromQL; it does not run it, so a rule can pass `check rules` and still never
+fire, for instance an `and` or an arithmetic operator whose two sides carry different labels and
+so never match anything. `pulse-alerts.test.yml` catches that class of mistake by running every
+rule against synthetic data, one case where it should fire and one where it should stay quiet:
+
+```sh
+docker run --rm -v "$PWD/contrib/alerts:/a" --entrypoint promtool prom/prometheus test rules /a/pulse-alerts.test.yml
+```
+
+Run both after touching this file. Adding a rule without adding its two cases here is how the
+next silent one gets through.
