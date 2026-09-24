@@ -59,6 +59,14 @@ first.
   collector and reads the export off the socket, so both protocols `pulse-otlp.json` accepts are
   now proven end to end, not just http/protobuf.
 
+### Changed
+
+- Bumped `OpenTelemetry` and `OpenTelemetry.Exporter.OpenTelemetryProtocol` from 1.18.0 to 1.19.1
+  in the OTLP mod. Nothing Pulse depends on in the endpoint, header or service name handling
+  changed between the two releases, but the resources the SDK builds by default now carry a schema
+  URL, `https://opentelemetry.io/schemas/1.44.0`, where 1.18.0 sent none; OTLP exports gain that
+  field on the wire. The collision precedence the `ServiceName` guard depends on is unaffected.
+
 ## [0.1.0] - 2026-09-01
 
 The first stable release, identical in content to v0.1.0-indev.5. Field-tested on a hosting

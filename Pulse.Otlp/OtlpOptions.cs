@@ -55,7 +55,7 @@ public static class OtlpOptions
     /// AppendSignalPathToEndpoint flag, so an endpoint set from code is used verbatim for
     /// http/protobuf and a bare "http://host:4318" would POST to the collector's root. grpc is the
     /// other way round: the exporter appends its service path unconditionally, so the base
-    /// endpoint has to stay bare. Verified in OtlpExportClient's constructor, 1.18.0.</remarks>
+    /// endpoint has to stay bare. Verified in OtlpExportClient's constructor, 1.19.1.</remarks>
     public static bool TryResolveEndpoint(
         string? endpoint, OtlpExportProtocol protocol, [NotNullWhen(true)] out Uri? uri)
     {

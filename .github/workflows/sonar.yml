@@ -107,18 +107,21 @@ jobs:
           # straight into a run block ends up in the generated script.
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          # The two ModSystems and the engine probe are excluded from coverage the way Nimbus excludes
-          # its ServerMod: the Atlas scenarios exercise them against a live embedded server, but the game's loader
-          # loads the staged dll outside coverlet's instrumentation, so that execution can never
-          # reach a coverage report. Everything with coverable logic lives in the classes the
-          # unit suite drives directly, and those stay under the 80% gate.
+          # The two ModSystems, the engine probe, and the live-server half of AttributionMetrics are
+          # excluded from coverage the way Nimbus excludes its ServerMod: the Atlas scenarios exercise
+          # them against a live embedded server, but the game's loader loads the staged dll outside
+          # coverlet's instrumentation, so that execution can never reach a coverage report.
+          # AttributionMetrics.Server.cs is only the construction, the /pulse command and the reload
+          # path; AttributionMetrics.cs itself is not excluded, since a unit test drives it directly.
+          # Everything else with coverable logic lives in the classes the unit suite drives directly,
+          # and those stay under the 80% gate.
           dotnet sonarscanner begin \
             /k:"StratumServer_Pulse" \
             /o:"stratumserver" \
             /d:sonar.token="$SONAR_TOKEN" \
             /d:sonar.host.url="https://sonarcloud.io" \
             /d:sonar.exclusions="**/bin/**,**/obj/**,docs/**" \
-            /d:sonar.coverage.exclusions="Pulse/PulseModSystem.cs,Pulse.Otlp/PulseOtlpModSystem.cs,Pulse/EngineProbe.cs,Pulse/AttributionProbe.cs,contrib/**,tools/**" \
+            /d:sonar.coverage.exclusions="Pulse/PulseModSystem.cs,Pulse.Otlp/PulseOtlpModSystem.cs,Pulse/EngineProbe.cs,Pulse/AttributionProbe.cs,Pulse/AttributionMetrics.Server.cs,contrib/**,tools/**" \
             /d:sonar.cs.opencover.reportsPaths="**/TestResults/**/coverage.opencover.xml"
 
       - name: Build

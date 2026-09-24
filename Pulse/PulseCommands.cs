@@ -47,7 +47,7 @@ internal static class PulseCommands
     public static string Status(bool on, int burstTicks, int intervalSeconds, long ticksProfiled, bool inBurst) =>
         on
             ? $"Attribution is on: {Cycle(burstTicks, intervalSeconds)}, {ticksProfiled} ticks profiled so far, "
-                + (inBurst ? "profiling right now." : "waiting for the next burst.")
+                + Phase(inBurst)
             : $"Attribution is off. It would run {Cycle(burstTicks, intervalSeconds)}; "
                 + $"{ticksProfiled} ticks profiled so far.";
 
@@ -66,4 +66,6 @@ internal static class PulseCommands
 
     private static string Cycle(int burstTicks, int intervalSeconds)
         => $"bursts of {burstTicks} ticks every {intervalSeconds}s";
+
+    private static string Phase(bool inBurst) => inBurst ? "profiling right now." : "waiting for the next burst.";
 }
