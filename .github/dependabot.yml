@@ -13,11 +13,13 @@ updates:
     target-branch: dev
     schedule:
       interval: monthly
-    # Three groups, checked in this order, first match wins: the test stack and OpenTelemetry
-    # each get their own monthly pull request, and everything else lands in one more. Splitting
-    # them keeps one bad bump from turning every package's update red as part of the same PR;
-    # a single ungrouped nuget entry means one bad test-stack release blocks the OpenTelemetry
-    # bump sitting right next to it in the same branch.
+    # Two groups: the test stack and OpenTelemetry each get their own monthly pull request, so a
+    # bad bump in one does not turn the other's update red as part of the same PR. No catch-all
+    # group: GitHub's docs say a dependency lands in the first group it matches, but in practice a
+    # third "other" group with a "*" pattern still caught test-stack and OpenTelemetry packages
+    # (PRs #66 and #67). Every NuGet dependency here already falls under test-stack, opentelemetry,
+    # or the Pixnop.Atlas.* harness ignored below, so the catch-all had nothing of its own to
+    # justify that risk.
     groups:
       test-stack:
         patterns:
@@ -27,9 +29,6 @@ updates:
       opentelemetry:
         patterns:
           - "OpenTelemetry*"
-      other:
-        patterns:
-          - "*"
     ignore:
       # Our own test harness; bumped by hand together with the scenario changes a new version
       # needs, not on Dependabot's schedule.
