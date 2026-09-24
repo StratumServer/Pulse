@@ -7,7 +7,8 @@
       "Pulse.Otlp.Tests.csproj"
     ],
     "mutate": [
-      "!**/PulseOtlpModSystem.cs"
+      "!**/PulseOtlpModSystem.cs",
+      "!**/ConfigUpgrade.cs"
     ],
     "configuration": "Release",
     "reporters": [

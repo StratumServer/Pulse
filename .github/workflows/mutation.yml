@@ -66,24 +66,28 @@ jobs:
         # the newest file in the project. Its own test file did not kill anywhere near what it
         # should have.
         #
-        # Pulse.Otlp did not stabilise. Comparing the two runs' survivor lists directly: only 2
-        # mutants survived both times, while 5 survived only the first run and 7 only the second,
-        # on identical code. Coverage-based analysis still fails outright ("It looks like the
-        # test coverage capture failed") in both runs, at nearly the same point in the log with
-        # nearly the same phase timings, so Stryker still falls back to running the whole test
-        # suite per mutant; the exclusion only shrank how much that fallback has to cover (89
-        # tested mutants down to 47), it did not fix the fallback's reliability, which is exactly
-        # what the run-to-run disagreement on 10-12 individual mutants shows. Traced locally with
-        # -V trace -L: every fallback test host for Pulse.Otlp launches against
-        # Pulse.Otlp.Scenarios's runtimeconfig, depsfile and testhost.dll rather than
-        # Pulse.Otlp.Tests's own. Of the 2 mutants that did survive both runs, one is explained
-        # and is not a gap: Pulse.Otlp.csproj compiles a linked copy of Pulse/ConfigUpgrade.cs,
-        # which Pulse.Otlp.Tests never calls (Pulse.Tests's own ConfigUpgradeTests.cs is what
-        # covers it), so mutants in that copy read as uncovered from this project's suite no
-        # matter how reliable the run is; several of the non-repeating survivors are the same
-        # file for the same reason. The other, OtlpOptions.cs:100 (RenderHeaders defaulting a
-        # null header value with `??`), is a real gap: no existing test passes a header with a
-        # null value. Neither a trimmed solution that drops the Scenarios projects (which instead
+        # Pulse.Otlp did not stabilise on that pair of runs. Comparing their survivor lists
+        # directly: only 2 mutants survived both times, while 5 survived only the first run and 7
+        # only the second, on identical code. Coverage-based analysis still fails outright ("It
+        # looks like the test coverage capture failed") in every run measured, at nearly the same
+        # point in the log with nearly the same phase timings, so Stryker still falls back to
+        # running the whole test suite per mutant; the mutate exclusions shrink how much that
+        # fallback has to cover, they do not fix its reliability, which is what the run-to-run
+        # disagreement on 10-12 individual mutants showed. Traced locally with -V trace -L: every
+        # fallback test host for Pulse.Otlp launches against Pulse.Otlp.Scenarios's runtimeconfig,
+        # depsfile and testhost.dll rather than Pulse.Otlp.Tests's own.
+        #
+        # Of the 2 mutants that survived both of that pair of runs, one was explained and not a
+        # gap: Pulse.Otlp.csproj compiles a linked copy of Pulse/ConfigUpgrade.cs (see the Compile
+        # Include in Pulse.Otlp.csproj), which Pulse.Otlp.Tests never calls; Pulse.Tests's own
+        # ConfigUpgradeTests.cs is what actually covers that source, and kills the same mutants
+        # there under the Pulse lane. Same principle as the wiring files above, one lane mutating
+        # code only a different lane's tests can reach, so stryker/Pulse.Otlp.json now excludes
+        # ConfigUpgrade.cs too (68 of its mutants removed by the filter locally, tested count 47
+        # down to 37). The other repeat survivor, OtlpOptions.cs:100 (RenderHeaders defaulting a
+        # null header value with `??`), is left in: it is a real gap, no existing test passes a
+        # header with a null value, and it is not this lane's job to fix it (see the punch list
+        # below). Neither a trimmed solution that drops the Scenarios projects (which instead
         # reproduces the original all-mutants-survived failure from issue #2, restorable from
         # dcc17ad if this needs re-proving) nor Microsoft.NET.Test.Sdk 17.11.1 or 18.10.1 in
         # place of 17.14.1 changes any of this; it looks like a Stryker/VSTest test host
@@ -91,6 +95,9 @@ jobs:
         # setting. tools/mutation-check.sh's 44 hand-mutations, run separately in ci.yml, are
         # unaffected: it drives dotnet test directly and never goes through Stryker's coverage
         # capture or host reuse.
+        #
+        # Punch list for a future PR, not this one: the seventeen repeat survivors in
+        # Pulse/AttributionMetrics.cs (lines 84-94, 201-228) and OtlpOptions.cs:100 above.
         #
         # Runtime: the pull-request run took 46m9s for Pulse against 14m14s for Pulse.Otlp; the
         # workflow_dispatch run minutes later took 24m14s and 14m54s. Both runs' coverage-capture
