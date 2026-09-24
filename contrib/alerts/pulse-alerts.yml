@@ -158,8 +158,8 @@ groups:
       # everything else on the server combined, and the load gate reuses PulseTickSaturationHigh's
       # own 80% busy-over-budget threshold, on the same reasoning, a mod owning half the tick is not
       # worth paging on while the server is coasting at 20% of budget. 10m is several burst
-      # refreshes at the default duty cycle (30 BurstTicks / 10s IntervalSeconds samples roughly
-      # once every 11 seconds), long enough that this is a sustained hog and not one unlucky sample
+      # refreshes at the default duty cycle (10 BurstTicks / 10s IntervalSeconds samples roughly
+      # once every 10 seconds), long enough that this is a sustained hog and not one unlucky sample
       # landing mid-spike, which the README's "What it cannot see" warns can happen on a spiky
       # server. The excluded modid is not always a third-party mod either: the base game itself
       # ships as several mods (survival, essentials, game among them), so on an entity-heavy
@@ -178,4 +178,4 @@ groups:
           severity: warning
         annotations:
           summary: "Mod {{ $labels.modid }} holding over half the tick for 10m while the server is loaded."
-          description: "{{ $labels.modid }} has held more than 50% of the profiled main-thread tick for 10 minutes while tick busy time stayed over 80% of budget; open the dashboard's attribution row for the full breakdown and look at that mod first. Attribution is sampled (about one tick in twelve at the default duty cycle) and only sees listeners and behaviours, not broadcast event handlers, so treat this as where to look first, not a full accounting."
+          description: "{{ $labels.modid }} has held more than 50% of the profiled main-thread tick for 10 minutes while tick busy time stayed over 80% of budget; open the dashboard's attribution row for the full breakdown and look at that mod first. Attribution is sampled (about one tick in thirty at the default duty cycle) and only sees listeners and behaviours, not broadcast event handlers, so treat this as where to look first, not a full accounting."

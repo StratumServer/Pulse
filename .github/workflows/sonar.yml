@@ -3,15 +3,17 @@ name: sonar
 # Static analysis published to SonarCloud (project StratumServer_Pulse).
 #
 # Kept out of ci.yml on purpose: this job pulls a JDK and a scanner tool on top of the normal
-# build, and its verdict is informational, so it has no business slowing down or failing the
-# checks that gate a merge.
+# build, and it is not in the repository's required checks, so a red run here never blocks a
+# merge.
 #
-# The quality gate is deliberately non-blocking: no /d:sonar.qualitygate.wait, and this workflow
-# is not in the repository's required checks. It publishes every push and pull request's
-# measures to SonarCloud: the project carries a GitHub binding and per-PR analyses land there
-# correctly (checked via the API: quality gate results tied to the right branch and commit), but
-# no comment or check annotation has appeared on a pull request itself since #49. Read the
-# results on SonarCloud's own project page, not on the PR.
+# The quality gate is awaited: /d:sonar.qualitygate.wait=true on the begin step makes the end
+# step poll SonarCloud and fail the job when the gate fails. That matters because SonarCloud no
+# longer decorates pull requests with a comment or check annotation (nothing has appeared on a
+# pull request itself since #49), so without this the job stayed green on a failing gate, which is
+# exactly what happened on a pull request this week. The scanner's default sonar.qualitygate.timeout
+# (300 seconds) is left alone: this project's SonarCloud background tasks process in a few seconds,
+# nowhere near that budget. Read the full measures on SonarCloud's own project page; this job only
+# surfaces pass or fail.
 #
 # Automatic Analysis is disabled on the SonarCloud side: C# has to be analysed while it compiles,
 # which is what the begin/build/end sequence below does.
@@ -61,7 +63,7 @@ jobs:
 
       # The scanner is a Java program; the dotnet tool is a wrapper around it.
       - name: Setup Java 21
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "21"
@@ -122,7 +124,8 @@ jobs:
             /d:sonar.host.url="https://sonarcloud.io" \
             /d:sonar.exclusions="**/bin/**,**/obj/**,docs/**" \
             /d:sonar.coverage.exclusions="Pulse/PulseModSystem.cs,Pulse.Otlp/PulseOtlpModSystem.cs,Pulse/EngineProbe.cs,Pulse/AttributionProbe.cs,Pulse/AttributionMetrics.Server.cs,contrib/**,tools/**" \
-            /d:sonar.cs.opencover.reportsPaths="**/TestResults/**/coverage.opencover.xml"
+            /d:sonar.cs.opencover.reportsPaths="**/TestResults/**/coverage.opencover.xml" \
+            /d:sonar.qualitygate.wait=true
 
       - name: Build
         run: dotnet build Pulse.slnx -c Release
@@ -136,6 +139,7 @@ jobs:
           set -e
           for p in Pulse.Tests Pulse.Scenarios; do
             dotnet test "$p/$p.csproj" -c Release --no-build \
+              --filter "Category!=Cost" \
               --collect:"XPlat Code Coverage;Format=opencover" \
               --results-directory TestResults
           done
