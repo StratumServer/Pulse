@@ -7,8 +7,11 @@ name: sonar
 # checks that gate a merge.
 #
 # The quality gate is deliberately non-blocking: no /d:sonar.qualitygate.wait, and this workflow
-# is not in the repository's required checks. It decorates pull requests and publishes measures,
-# nothing more.
+# is not in the repository's required checks. It publishes every push and pull request's
+# measures to SonarCloud: the project carries a GitHub binding and per-PR analyses land there
+# correctly (checked via the API: quality gate results tied to the right branch and commit), but
+# no comment or check annotation has appeared on a pull request itself since #49. Read the
+# results on SonarCloud's own project page, not on the PR.
 #
 # Automatic Analysis is disabled on the SonarCloud side: C# has to be analysed while it compiles,
 # which is what the begin/build/end sequence below does.
@@ -18,12 +21,34 @@ on:
     branches: [main, dev]
   pull_request:
 
+# Least privilege: nothing here writes to the repository. The job only reads the checkout and
+# publishes analysis to SonarCloud over the API, authenticated with SONAR_TOKEN rather than any
+# repository permission.
+permissions:
+  contents: read
+
+# One analysis per branch and workflow, unlike ci.yml's per-run grouping: here the newest push
+# or pull request commit is the only result worth keeping, so letting it supersede whatever was
+# still queued ahead of it is correct, not a gap.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   VS_VERSION: "1.22.7"
 
 jobs:
   sonar:
     name: SonarCloud analysis
+    # Two cases where SONAR_TOKEN is not there to be had, and the scanner cannot authenticate
+    # without it: a fork pull request runs without repository secrets, and a Dependabot pull
+    # request gets the separate Dependabot secret store instead, even though the branch lives in
+    # this repository. Both tests apply to pull_request only; a push is always from this
+    # repository with the repository's own secrets.
+    if: >-
+      github.event_name != 'pull_request'
+      || (github.actor != 'dependabot[bot]'
+      && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
