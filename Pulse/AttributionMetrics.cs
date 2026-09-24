@@ -219,11 +219,17 @@ internal sealed partial class AttributionMetrics
     /// <remarks>Nothing at all once attribution has stopped, which is what makes the family
     /// disappear from a scrape rather than serve the last burst forever: MetricsAggregator retires
     /// an observable series the moment its callback stops reporting the tag set, and the OTLP SDK
-    /// treats an observation cycle with no measurement for a series the same way, exporting no
-    /// point for it. While armed but still waiting for a first burst, the two buckets that always
-    /// exist are reported at zero, the same seed a fresh boot with attribution already on would
-    /// show; <see cref="Seed"/> no longer pushes that itself, since there is nothing to push it to
-    /// any more.</remarks>
+    /// does the same for an export cycle with no measurement for a series (confirmed against the
+    /// 1.19.1 SDK source, <c>AggregatorStore.SnapshotCumulative</c>; the behaviour needs
+    /// OpenTelemetry 1.15.1 or later, opentelemetry-dotnet issue #5950, so pinning an older SDK
+    /// would silently bring stale OTLP shares back even though the mod's own logic is correct).
+    /// While attribution is running, <c>engine</c> and <c>unattributed</c> are always reported,
+    /// either from the last burst or at zero when that burst never produced them:
+    /// <c>TickAttribution.Take</c> only carries a modid forward once something has been folded
+    /// into it, so a run where nothing has ever gone unattributed would otherwise drop that bucket
+    /// the moment any real burst completed, exactly the assumption <see cref="Seed"/> also
+    /// depends on. <see cref="lastShares"/> is read once into a local rather than twice, so a
+    /// Switch or Reload landing mid-callback cannot blank the family for that one scrape.</remarks>
     private IEnumerable<Measurement<double>> ShareMeasurements()
     {
         if (attribution is not { Enabled: true })
@@ -231,16 +237,24 @@ internal sealed partial class AttributionMetrics
             yield break;
         }
 
-        if (lastShares.Count == 0)
+        List<KeyValuePair<string, double>> shares = lastShares;
+        bool sawEngine = false;
+        bool sawUnattributed = false;
+        foreach (KeyValuePair<string, double> share in shares)
         {
-            yield return new Measurement<double>(0, new KeyValuePair<string, object?>(Modid, TickAttribution.Engine));
-            yield return new Measurement<double>(0, new KeyValuePair<string, object?>(Modid, TickAttribution.Unattributed));
-            yield break;
+            sawEngine |= share.Key == TickAttribution.Engine;
+            sawUnattributed |= share.Key == TickAttribution.Unattributed;
+            yield return new Measurement<double>(share.Value, new KeyValuePair<string, object?>(Modid, share.Key));
         }
 
-        foreach (KeyValuePair<string, double> share in lastShares)
+        if (!sawEngine)
         {
-            yield return new Measurement<double>(share.Value, new KeyValuePair<string, object?>(Modid, share.Key));
+            yield return new Measurement<double>(0, new KeyValuePair<string, object?>(Modid, TickAttribution.Engine));
+        }
+
+        if (!sawUnattributed)
+        {
+            yield return new Measurement<double>(0, new KeyValuePair<string, object?>(Modid, TickAttribution.Unattributed));
         }
     }
 

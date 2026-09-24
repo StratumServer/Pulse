@@ -17,6 +17,14 @@ public class AttributionScenarios : AtlasScenarioBase
 {
     private const int Port = 39465;
 
+    private static readonly string[] Families =
+    [
+        "pulse_mod_tick_share",
+        "pulse_mod_tick_seconds_total",
+        "pulse_attribution_ticks_total",
+        "pulse_attribution_dropped_samples_total",
+    ];
+
     /// <summary>Ticks until a burst has completed, or gives up and fails with the body it last
     /// saw. A burst needs its interval, then a discarded sample, then five profiled ticks.</summary>
     private static async Task<string> Burst(IWorldSession world)
@@ -39,6 +47,28 @@ public class AttributionScenarios : AtlasScenarioBase
     /// <summary>One mod's share line, of which there is exactly one per mod.</summary>
     private static double Share(string exposition, string modid)
         => Scrape.Value(exposition, $"pulse_mod_tick_share{{modid=\"{modid}\"}}");
+
+    /// <summary>What attribution serves the moment it is armed, before any burst has run. Now
+    /// order-independent within the class: engine and unattributed are always both reported while
+    /// attribution runs (see AttributionMetrics.ShareMeasurements), zero when a burst has not
+    /// produced them yet, so this holds whichever of the scenarios below happens to run first.</summary>
+    [AtlasScenario]
+    public async Task Attribution_Serves_ItsFamilies_FromBoot()
+    {
+        await World.Ticks(5);
+
+        string body = await Scrape.Metrics(Port);
+
+        // Seeded at zero, so the families are on the wire before the first burst rather than
+        // appearing minutes into a dashboard's life.
+        foreach (string family in Families)
+        {
+            Assert.Contains("# TYPE " + family + " ", body);
+        }
+
+        Assert.Contains("pulse_mod_tick_share{modid=\"engine\"} ", body);
+        Assert.Contains("pulse_mod_tick_share{modid=\"unattributed\"} ", body);
+    }
 
     /// <summary>The whole feature end to end: the profiler was primed without killing the server,
     /// a burst ran, the marks parsed, and Pulse found itself in its own numbers. Pulse registers

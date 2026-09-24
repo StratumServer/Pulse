@@ -59,6 +59,10 @@ public class AttributionMetricsTests
         List<(string Template, string Message)> warnings = [];
         AttributionMetrics metrics = Metrics(meter, profiler, warnings);
 
+        // Established while attribution is still live, so the assertion below proves the family
+        // was retired, not merely that it was never there against a fresh aggregator.
+        Assert.Contains(aggregator.Collect(), s => s.Name == "pulse_mod_tick_share");
+
         for (int tick = 0; tick < 1001; tick++)
         {
             metrics.Tick(1.0);
@@ -116,6 +120,16 @@ public class AttributionMetricsTests
 
         // The cumulative families are untouched by the switch: they simply stop moving.
         Assert.Equal(ticksBefore, stopped.Single(s => s.Name == "pulse_attribution_ticks_total").Value);
+
+        // Switching back on must not flash the burst measured before it was switched off: the
+        // remembered shares are cleared, so this is exactly the zero seed, not stale non-zero
+        // values and not an empty family either.
+        metrics.Switch(true);
+        IReadOnlyList<MetricSample> restarted = aggregator.Collect().Where(s => s.Name == "pulse_mod_tick_share").ToList();
+        Assert.Equal(2, restarted.Count);
+        Assert.All(restarted, s => Assert.Equal(0, s.Value));
+        Assert.Contains(restarted, s => s.Labels.Any(l => l.Value == "engine"));
+        Assert.Contains(restarted, s => s.Labels.Any(l => l.Value == "unattributed"));
     }
 
     /// <summary>A failed listener walk is not the same failure as an unreadable profiler: it logs

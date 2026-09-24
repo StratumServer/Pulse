@@ -73,18 +73,21 @@ public sealed class MetricsAggregator : IDisposable
 
     /// <summary>Takes a scrape: observable instruments are polled, then every series is copied out.</summary>
     /// <remarks>The observable callbacks run on THIS thread, which in the mod is the HTTP thread.
-    /// They must therefore read only data the main thread has already published.</remarks>
+    /// They must therefore read only data the main thread has already published.
+    /// <para>One lock for the whole method, generation bump through the final copy: a second
+    /// concurrent Collect could otherwise bump <see cref="generation"/> again between this call's
+    /// own stamps and its own <c>RemoveAll</c>, retiring series this very call just touched. The
+    /// callbacks <c>RecordObservableInstruments</c> runs land back on <see cref="Record"/> on this
+    /// same thread, which re-enters this same lock; .NET's <c>lock</c> is reentrant for the thread
+    /// already holding it, so that nests without deadlocking. There is only one caller today (the
+    /// HTTP scrape thread), but the type should not depend on that staying true.</para></remarks>
     public IReadOnlyList<MetricSample> Collect()
     {
         lock (gate)
         {
             generation++;
-        }
+            listener.RecordObservableInstruments();
 
-        listener.RecordObservableInstruments();
-
-        lock (gate)
-        {
             // An observable series this pass never touched did not report that tag set this time,
             // which for an observable instrument means it is gone, not merely unchanged: this is
             // what lets a family like a per-mod share retire a modid instead of serving it forever

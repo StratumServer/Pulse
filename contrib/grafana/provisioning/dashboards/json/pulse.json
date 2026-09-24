@@ -160,7 +160,7 @@
     },
     {
       "type": "timeseries", "title": "Profiling health", "id": 37,
-      "description": "How much of the tick attribution is actually seeing, and whether to trust it. Profiled ticks per second should track the duty cycle configured in ModConfig/pulse.json (BurstTicks and IntervalSeconds); it is also the panel to check when the shares elsewhere look suspiciously constant, since unlike those gauges this one is a rate and correctly drops to zero once attribution stops, rather than freezing on the last burst. Dropped samples is a profiler reading that overflowed inside a single tick and should stay flat zero, since anything else means a marker ran for over two seconds.",
+      "description": "How much of the tick attribution is actually seeing, and whether to trust it. Profiled ticks per second should track the duty cycle configured in ModConfig/pulse.json (BurstTicks and IntervalSeconds); it only moves when a burst actually completes, which makes it the panel to check when the shares elsewhere look suspiciously constant between bursts, or empty because attribution is off. Dropped samples is a profiler reading that overflowed inside a single tick and should stay flat zero, since anything else means a marker ran for over two seconds.",
       "gridPos": { "x": 16, "y": 23, "w": 8, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "interval": "1m",
