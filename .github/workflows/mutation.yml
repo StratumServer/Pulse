@@ -36,7 +36,7 @@ jobs:
   stryker:
     name: Mutation (${{ matrix.project }})
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 45
     strategy:
       # A weak spot in one project should not hide the other.
       fail-fast: false
@@ -97,7 +97,9 @@ jobs:
 
       # Not --since. A pull request that only deletes a contract test would leave every mutant
       # filtered out under --since and pass, which is exactly the case this lane exists to catch.
-      # The full run is a stable number, and one job per project keeps it short enough.
+      # The full run is a stable number. Each mutant run restarts a test host, and that startup
+      # cost dominates on a shared runner: the timeout is generous because the score itself is
+      # the fast part, the fixed per-mutant overhead is what takes the wall clock past local.
       - name: Mutation test ${{ matrix.project }}
         run: dotnet dotnet-stryker -f stryker/${{ matrix.project }}.json --skip-version-check --output StrykerOutput/${{ matrix.project }}
 
