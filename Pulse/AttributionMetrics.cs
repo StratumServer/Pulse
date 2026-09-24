@@ -57,7 +57,7 @@ internal sealed partial class AttributionMetrics
     /// callback rather than pushed to it: an absent modid there is what lets
     /// <c>pulse_mod_tick_share</c> retire a series instead of freezing it once attribution stops,
     /// which a synchronous <c>Gauge</c> cannot do (see MetricsAggregator.Collect).</summary>
-    private IReadOnlyList<KeyValuePair<string, double>> lastShares = [];
+    private List<KeyValuePair<string, double>> lastShares = [];
 
     private TickAttribution? attribution;
     private ModOwners? owners;
