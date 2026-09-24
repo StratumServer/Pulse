@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using Vintagestory.API.Common;
 
 // The game's API declares a Func delegate of its own in Vintagestory.API.Common, so the one this
@@ -181,11 +182,17 @@ internal sealed class TickAttribution
         return total;
     }
 
+    [SuppressMessage(
+        "Minor Code Smell", "S3267:Loops should be simplified with \"LINQ\" expressions",
+        Justification = "Runs for every mark of every profiled tick; Where would allocate a closure, a delegate and an iterator per call.")]
     private static string Bucket(string mark, OwnerLookup owner)
     {
-        foreach (string prefix in OwnedPrefixes.Where(prefix => mark.StartsWith(prefix, StringComparison.Ordinal)))
+        foreach (string prefix in OwnedPrefixes)
         {
-            return owner(mark[prefix.Length..]) ?? Unattributed;
+            if (mark.StartsWith(prefix, StringComparison.Ordinal))
+            {
+                return owner(mark[prefix.Length..]) ?? Unattributed;
+            }
         }
 
         return Engine;

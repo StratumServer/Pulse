@@ -79,7 +79,7 @@ internal sealed class AttributionProbe
 
     [SuppressMessage(
         "Security", "S3011:Reflection should not be used to increase accessibility of classes, methods, or fields",
-        Justification = "Read-only walk of assembly-scoped engine fields, documented on the class; TryResolve degrades cleanly if the field is gone.")]
+        Justification = "Read-only walk of assembly-scoped engine fields, documented on the class; a missing field resolves to null and Refresh skips it.")]
     private static FieldInfo? ListField(string name)
         => typeof(EventManager).GetField(name, BindingFlags.NonPublic | BindingFlags.Instance);
 
