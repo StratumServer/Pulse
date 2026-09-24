@@ -15,6 +15,12 @@
 # returning nothing, since the default vector matching for both requires the two sides' label
 # sets to be identical, and pulse_mod_tick_share carries a modid label the load gate does not.
 # Only running the expressions against data caught that; these tests keep it caught.
+#
+# PulseModHoggingTick gets more than the usual one-firing-one-silent pair: two scrape targets to
+# prove the match stays per-instance, unattributed hogging alongside the already-covered engine,
+# a pending case short of the for: window, and a reproduction of a live bug where the last burst's
+# share stays on /metrics, frozen, after attribution stops, which the rule's own ticks-increase
+# guard has to catch since the share's mere presence proves nothing by itself.
 
 rule_files:
   - pulse-alerts.yml
@@ -238,26 +244,30 @@ tests:
   # of firing at all.
   - interval: 1m
     input_series:
-      - series: 'pulse_mod_tick_share{modid="heavymod"}'
+      - series: 'pulse_mod_tick_share{instance="127.0.0.1:9464",job="vintagestory",modid="heavymod"}'
         values: '0.7x24'
-      - series: 'pulse_mod_tick_share{modid="engine"}'
+      - series: 'pulse_mod_tick_share{instance="127.0.0.1:9464",job="vintagestory",modid="engine"}'
         values: '0.15x24'
-      - series: 'pulse_mod_tick_share{modid="unattributed"}'
+      - series: 'pulse_mod_tick_share{instance="127.0.0.1:9464",job="vintagestory",modid="unattributed"}'
         values: '0.15x24'
-      - series: 'pulse_server_tick_busy_seconds'
+      - series: 'pulse_attribution_ticks_total{instance="127.0.0.1:9464",job="vintagestory"}'
+        values: '0+150x24'
+      - series: 'pulse_server_tick_busy_seconds{instance="127.0.0.1:9464",job="vintagestory"}'
         values: '0.01x12 0.03x12'
-      - series: 'pulse_server_tick_budget_seconds'
+      - series: 'pulse_server_tick_budget_seconds{instance="127.0.0.1:9464",job="vintagestory"}'
         values: '0.033x24'
     alert_rule_test:
-      - eval_time: 10m
+      - eval_time: 12m
         alertname: PulseModHoggingTick
         exp_alerts: []
-      - eval_time: 23m
+      - eval_time: 24m
         alertname: PulseModHoggingTick
         exp_alerts:
           - exp_labels:
               severity: warning
               modid: heavymod
+              instance: "127.0.0.1:9464"
+              job: vintagestory
             exp_annotations:
               summary: "Mod heavymod holding over half the tick for 10m while the server is loaded."
               description: "heavymod has held more than 50% of the profiled main-thread tick for 10 minutes while tick busy time stayed over 80% of budget; open the dashboard's attribution row for the full breakdown and look at that mod first. Attribution is sampled (about one tick in twelve at the default duty cycle) and only sees listeners and behaviours, not broadcast event handlers, so treat this as where to look first, not a full accounting."
@@ -268,17 +278,113 @@ tests:
   # the same regex term and is not re-tested separately.
   - interval: 1m
     input_series:
-      - series: 'pulse_mod_tick_share{modid="engine"}'
+      - series: 'pulse_mod_tick_share{instance="127.0.0.1:9464",job="vintagestory",modid="engine"}'
         values: '0.8x16'
-      - series: 'pulse_mod_tick_share{modid="heavymod"}'
+      - series: 'pulse_mod_tick_share{instance="127.0.0.1:9464",job="vintagestory",modid="heavymod"}'
         values: '0.1x16'
-      - series: 'pulse_mod_tick_share{modid="unattributed"}'
+      - series: 'pulse_mod_tick_share{instance="127.0.0.1:9464",job="vintagestory",modid="unattributed"}'
         values: '0.1x16'
-      - series: 'pulse_server_tick_busy_seconds'
+      - series: 'pulse_attribution_ticks_total{instance="127.0.0.1:9464",job="vintagestory"}'
+        values: '0+150x16'
+      - series: 'pulse_server_tick_busy_seconds{instance="127.0.0.1:9464",job="vintagestory"}'
         values: '0.03x16'
-      - series: 'pulse_server_tick_budget_seconds'
+      - series: 'pulse_server_tick_budget_seconds{instance="127.0.0.1:9464",job="vintagestory"}'
         values: '0.033x16'
     alert_rule_test:
       - eval_time: 15m
         alertname: PulseModHoggingTick
+        exp_alerts: []
+
+  # Two scrape targets, labelled the way a real scrape labels them. heavymod hogs both, but only
+  # b is loaded: exactly one alert, carrying b's instance and job. Kills "and on()".
+  - interval: 1m
+    input_series:
+      - series: 'pulse_mod_tick_share{instance="a:9464",job="vintagestory",modid="heavymod"}'
+        values: '0.7x20'
+      - series: 'pulse_mod_tick_share{instance="b:9464",job="vintagestory",modid="heavymod"}'
+        values: '0.7x20'
+      - series: 'pulse_attribution_ticks_total{instance="a:9464",job="vintagestory"}'
+        values: '0+150x20'
+      - series: 'pulse_attribution_ticks_total{instance="b:9464",job="vintagestory"}'
+        values: '0+150x20'
+      - series: 'pulse_server_tick_busy_seconds{instance="a:9464",job="vintagestory"}'
+        values: '0.01x20'
+      - series: 'pulse_server_tick_busy_seconds{instance="b:9464",job="vintagestory"}'
+        values: '0.03x20'
+      - series: 'pulse_server_tick_budget_seconds{instance="a:9464",job="vintagestory"}'
+        values: '0.033x20'
+      - series: 'pulse_server_tick_budget_seconds{instance="b:9464",job="vintagestory"}'
+        values: '0.033x20'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: PulseModHoggingTick
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              modid: heavymod
+              instance: "b:9464"
+              job: vintagestory
+            exp_annotations:
+              summary: "Mod heavymod holding over half the tick for 10m while the server is loaded."
+              description: "heavymod has held more than 50% of the profiled main-thread tick for 10 minutes while tick busy time stayed over 80% of budget; open the dashboard's attribution row for the full breakdown and look at that mod first. Attribution is sampled (about one tick in twelve at the default duty cycle) and only sees listeners and behaviours, not broadcast event handlers, so treat this as where to look first, not a full accounting."
+
+  # unattributed hogging a loaded server: silent. Kills 'modid!="engine"'.
+  - interval: 1m
+    input_series:
+      - series: 'pulse_mod_tick_share{instance="a:9464",job="vintagestory",modid="unattributed"}'
+        values: '0.8x16'
+      - series: 'pulse_attribution_ticks_total{instance="a:9464",job="vintagestory"}'
+        values: '0+150x16'
+      - series: 'pulse_server_tick_busy_seconds{instance="a:9464",job="vintagestory"}'
+        values: '0.03x16'
+      - series: 'pulse_server_tick_budget_seconds{instance="a:9464",job="vintagestory"}'
+        values: '0.033x16'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: PulseModHoggingTick
+        exp_alerts: []
+
+  # /pulse attribution off at minute 5: the gauge keeps its last burst's 0.7 on the wire (a
+  # synchronous Gauge the aggregator never drops), the ticks counter goes flat, the server stays
+  # loaded. Must stay silent, since nothing is being measured any more.
+  - interval: 1m
+    input_series:
+      - series: 'pulse_mod_tick_share{instance="a:9464",job="vintagestory",modid="heavymod"}'
+        values: '0.7x40'
+      - series: 'pulse_attribution_ticks_total{instance="a:9464",job="vintagestory"}'
+        values: '0+150x5 750x35'
+      - series: 'pulse_server_tick_busy_seconds{instance="a:9464",job="vintagestory"}'
+        values: '0.03x40'
+      - series: 'pulse_server_tick_budget_seconds{instance="a:9464",job="vintagestory"}'
+        values: '0.033x40'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: PulseModHoggingTick
+        exp_alerts: []
+
+  # Share crosses 0.5 at minute 4, server loaded throughout: by the 13m check that condition has
+  # held for 9 minutes, short of the 10m for:, so this is pending, not yet firing. Kills "for: 0m".
+  - interval: 1m
+    input_series:
+      - series: 'pulse_mod_tick_share{instance="a:9464",job="vintagestory",modid="heavymod"}'
+        values: '0.1x4 0.7x12'
+      - series: 'pulse_attribution_ticks_total{instance="a:9464",job="vintagestory"}'
+        values: '0+150x16'
+      - series: 'pulse_server_tick_busy_seconds{instance="a:9464",job="vintagestory"}'
+        values: '0.03x16'
+      - series: 'pulse_server_tick_budget_seconds{instance="a:9464",job="vintagestory"}'
+        values: '0.033x16'
+    alert_rule_test:
+      - eval_time: 13m
+        alertname: PulseModHoggingTick
+        exp_alerts: []
+
+  # Three errors in ten minutes is noise, not a burst. Kills "> 0" in place of "> 5".
+  - interval: 1m
+    input_series:
+      - series: 'pulse_log_entries_total{instance="a:9464",job="vintagestory",level="error"}'
+        values: '0x5 3x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: PulseLogErrorBurst
         exp_alerts: []

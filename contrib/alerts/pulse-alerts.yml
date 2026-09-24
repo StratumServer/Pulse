@@ -145,26 +145,34 @@ groups:
   - name: pulse-attribution
     rules:
       # Needs attribution switched on (README.md's Attribution section: the config block or
-      # `/pulse attribution on`); if it is off, pulse_mod_tick_share never appears in /metrics and
-      # this rule has nothing to evaluate, the same silent-not-firing behaviour as
-      # PulseTickSaturationHigh above when the engine probe is unavailable.
+      # `/pulse attribution on`). pulse_mod_tick_share is a plain synchronous gauge and the
+      # aggregator never retracts a series, so switching attribution off, reloading with Enabled
+      # false, or the duty cycle giving up on its own does not remove it from /metrics: the last
+      # burst's shares stay published, frozen, until the process restarts. The
+      # increase(pulse_attribution_ticks_total) term below is what actually goes quiet when that
+      # happens, since a stopped duty cycle stops advancing that counter; the share alone cannot
+      # tell a live 70% from a 70% nobody has measured in the last half hour.
       #
-      # Two conditions, both required: pulse_mod_tick_share sums to 1 across every modid including
-      # engine and unattributed, so one mod clearing 0.5 already outweighs everything else on the
-      # server combined, and the load gate reuses PulseTickSaturationHigh's own 80% busy-over-budget
-      # threshold, on the same reasoning, a mod owning half the tick is not worth paging on while
-      # the server is coasting at 20% of budget. 10m is several burst refreshes at the default duty
-      # cycle (30 BurstTicks / 10s IntervalSeconds samples roughly once every 11 seconds), long
-      # enough that this is a sustained hog and not one unlucky sample landing mid-spike, which the
-      # README's "What it cannot see" warns can happen on a spiky server.
+      # Two conditions on top of that, both required: pulse_mod_tick_share sums to 1 across every
+      # modid including engine and unattributed, so one mod clearing 0.5 already outweighs
+      # everything else on the server combined, and the load gate reuses PulseTickSaturationHigh's
+      # own 80% busy-over-budget threshold, on the same reasoning, a mod owning half the tick is not
+      # worth paging on while the server is coasting at 20% of budget. 10m is several burst
+      # refreshes at the default duty cycle (30 BurstTicks / 10s IntervalSeconds samples roughly
+      # once every 11 seconds), long enough that this is a sustained hog and not one unlucky sample
+      # landing mid-spike, which the README's "What it cannot see" warns can happen on a spiky
+      # server. The excluded modid is not always a third-party mod either: the base game itself
+      # ships as several mods (survival, essentials, game among them), so on an entity-heavy
+      # vanilla server with nothing else installed this can still name one of those.
       #
       # "and" defaults to matching on the full label set, and the left side carries modid while
-      # the load gate does not, so without "ignoring(modid)" the two sides never match anything and
-      # this alert can never fire. Ignoring modid instead of naming "on(instance, job)" keeps this
-      # correct if an operator's Prometheus adds its own external labels later; either side of an
-      # "and" already has to come from the same scrape target for the labels to line up at all.
+      # neither the load gate nor the ticks guard does, so without "ignoring(modid)" on both no
+      # side ever matches anything and this alert can never fire. Ignoring modid rather than naming
+      # "on(instance, job)" keeps whatever else a target carries part of the match too, for example
+      # a label a scrape job's relabel_configs adds, instead of silently discarding it the way
+      # naming just instance and job would.
       - alert: PulseModHoggingTick
-        expr: (pulse_mod_tick_share{modid!~"engine|unattributed"} > 0.5) and ignoring(modid) (pulse_server_tick_busy_seconds / pulse_server_tick_budget_seconds > 0.8)
+        expr: (pulse_mod_tick_share{modid!~"engine|unattributed"} > 0.5) and ignoring(modid) (pulse_server_tick_busy_seconds / pulse_server_tick_budget_seconds > 0.8) and ignoring(modid) (increase(pulse_attribution_ticks_total[5m]) > 0)
         for: 10m
         labels:
           severity: warning

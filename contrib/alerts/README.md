@@ -41,20 +41,26 @@ notify anyone, point the `alerting:` block in `prometheus.yml` at an Alertmanage
 routing there; that setup is entirely yours; nothing here assumes a particular chat tool or
 paging service.
 
-Two things worth knowing before you rely on these:
+Three things worth knowing before you rely on these:
 
 - `PulseEndpointDown` matches `up{job="vintagestory"}`, the job name `contrib/grafana`'s own
   `prometheus.yml` uses. If your scrape job is named differently, change that one label.
-- `PulseTickSaturationHigh` and `PulseTickOverrunsHigh` read `pulse_server_tick_busy_seconds` and
-  `pulse_server_tick_budget_seconds`, two of the families that only exist when Pulse's engine
-  probe resolved successfully (see the main README's "Degraded mode" section). If that cast ever
-  fails on a game update, those two families disappear from `/metrics` and these two rules simply
-  have no data to evaluate; they go quiet, not green. The tick rate and log/worldgen rules are
-  unaffected either way.
-- `PulseModHoggingTick` needs both of those two families and attribution switched on (see the main
-  README's "Attribution" section), since it reads `pulse_mod_tick_share` for the offending mod and
-  the busy-over-budget ratio for the load gate. Missing either one means the rule silently has
-  nothing to evaluate rather than firing or clearing.
+- `PulseTickSaturationHigh` reads `pulse_server_tick_busy_seconds`, one of the families that only
+  exists when Pulse's engine probe resolved successfully (see the main README's "Degraded mode"
+  section). If that cast ever fails on a game update, the family disappears from `/metrics` and
+  this rule simply has no data to evaluate; it goes quiet, not green. `PulseTickOverrunsHigh` looks
+  like it belongs in the same boat but does not: it only reads the tick histogram and
+  `pulse_server_tick_budget_seconds`, both public API metrics, so it keeps working in degraded mode
+  the same as the tick rate and log/worldgen rules.
+- `PulseModHoggingTick` reads `pulse_server_tick_busy_seconds` too, so it is quiet in degraded mode
+  for the same reason. It also needs attribution switched on (see the main README's "Attribution"
+  section) for `pulse_mod_tick_share`, but attribution going off does not make that family
+  disappear the way a failed engine probe does: the share is a plain gauge and the last burst's
+  values stay on `/metrics`, frozen, until the server restarts. That is why the rule also checks
+  `increase(pulse_attribution_ticks_total[5m]) > 0`: once the duty cycle stops advancing that
+  counter, whether from `/pulse attribution off`, a reload with `Enabled` false, or the duty cycle
+  giving up on its own, the guard goes quiet even though the stale share is still sitting there
+  looking like a real number.
 
 Validate the file after editing it with the same promtool container used to write it:
 

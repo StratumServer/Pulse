@@ -551,7 +551,7 @@
       "type": "timeseries",
       "title": "Tick share by mod",
       "id": 34,
-      "description": "Per-mod share of profiled main-thread tick time over the last completed burst; shares sum to 1 across every modid, including engine for core systems and unmarked time, and unattributed for marked work no loaded mod claims. Empty until attribution is on: set Attribution.Enabled in ModConfig/pulse.json, or run /pulse attribution on for an immediate look with no restart. It is a sampled main-thread share, blind to broadcast event handlers, thread-safe behaviours and side-library listeners; read the README's Attribution section before acting on one mod's number.",
+      "description": "Per-mod share of profiled main-thread tick time over the last completed burst; shares sum to 1 across every modid, including engine for core systems and unmarked time, and unattributed for marked work no loaded mod claims. Nothing to show until attribution has run at least once: set Attribution.Enabled in ModConfig/pulse.json, or run /pulse attribution on for an immediate look with no restart. Turning it off again does not clear the panel, the last burst's shares stay published and frozen until the server restarts, so a flat line here is not proof attribution is still on; check the profiled ticks rate panel for that. It is blind to broadcast event handlers, which carry no markers at all. A thread-safe behaviour is not blind, it reads low, since only its main-thread slice gets marked; a side-library listener is not blind either, it lands in unattributed, since mapping is by assembly. Read the README's Attribution section before acting on one mod's number.",
       "gridPos": {
         "x": 0,
         "y": 15,
@@ -605,7 +605,7 @@
       "type": "bargauge",
       "title": "Current share by mod",
       "id": 35,
-      "description": "The same shares as a snapshot instead of a trend: which mod is heaviest right now. Same sampling and blind spots as the panel to the left; empty with attribution off.",
+      "description": "The same shares as a snapshot instead of a trend: which mod is heaviest right now. Same sampling and blind spots as the panel to the left, and the same staleness: once attribution is off this freezes on the last burst rather than clearing, so pair it with the profiled ticks rate panel before trusting a number here.",
       "gridPos": {
         "x": 16,
         "y": 15,
@@ -642,7 +642,23 @@
             ]
           }
         },
-        "overrides": []
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byRegexp",
+              "options": "^(engine|unattributed)$"
+            },
+            "properties": [
+              {
+                "id": "color",
+                "value": {
+                  "mode": "fixed",
+                  "fixedColor": "text"
+                }
+              }
+            ]
+          }
+        ]
       },
       "options": {
         "reduceOptions": {
@@ -679,6 +695,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
+      "interval": "1m",
       "fieldConfig": {
         "defaults": {
           "unit": "s",
@@ -717,7 +734,7 @@
       "type": "timeseries",
       "title": "Profiling health",
       "id": 37,
-      "description": "How much of the tick attribution is actually seeing, and whether to trust it. Profiled ticks per second should track the duty cycle configured in ModConfig/pulse.json (BurstTicks and IntervalSeconds); dropped samples is a profiler reading that overflowed inside a single tick and should stay flat zero, since anything else means a marker ran for over two seconds.",
+      "description": "How much of the tick attribution is actually seeing, and whether to trust it. Profiled ticks per second should track the duty cycle configured in ModConfig/pulse.json (BurstTicks and IntervalSeconds); it is also the panel to check when the shares elsewhere look suspiciously constant, since unlike those gauges this one is a rate and correctly drops to zero once attribution stops, rather than freezing on the last burst. Dropped samples is a profiler reading that overflowed inside a single tick and should stay flat zero, since anything else means a marker ran for over two seconds.",
       "gridPos": {
         "x": 16,
         "y": 23,
@@ -728,6 +745,7 @@
         "type": "prometheus",
         "uid": "${DS_PROMETHEUS}"
       },
+      "interval": "1m",
       "fieldConfig": {
         "defaults": {
           "unit": "short",
