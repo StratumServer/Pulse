@@ -2,12 +2,14 @@
 
 A ready-to-run Prometheus and Grafana pair for Pulse, the exact setup used to produce the
 project's dashboard screenshots. The dashboard covers every metric family the mod serves,
-grouped into rows: a glance strip of the numbers you check first, then tick health, players,
-world, worldgen, network, pauses and warnings, and a runtime row at the bottom. Panels that
-depend on something optional say so in their description, so an empty graph tells you why it
-is empty instead of leaving you to guess. The runtime row needs `RuntimeMetrics` left on, and
+grouped into rows: a glance strip of the numbers you check first, then tick health, attribution,
+players, world, worldgen, network, pauses and warnings, and a runtime row at the bottom. Panels
+that depend on something optional say so in their description, so an empty graph tells you why
+it is empty instead of leaving you to guess. The runtime row needs `RuntimeMetrics` left on, and
 busy time, the per-second network families and the connection queue all come from the engine
-probe, which means they are blank on a server running in degraded mode.
+probe, which means they are blank on a server running in degraded mode. The attribution row is
+the same kind of empty by default: it needs attribution switched on, either the config block or
+`/pulse attribution on`, and stays blank until then (see the main README's Attribution section).
 
 With a Pulse-equipped server running on the same host (default bind, port 9464):
 
