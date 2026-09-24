@@ -13,31 +13,33 @@ namespace Pulse.Scenarios;
 /// <item><see cref="Attribution_Cost_Interleaved_DenseCluster"/> and
 /// <see cref="Attribution_Cost_Interleaved_SpreadAcrossTheLoadedArea"/> each spawn 4000 chickens
 /// (dense versus spread across the loaded area, same count, to tell density from entity count
-/// apart), then read tick busy time with <c>World.MeasureTicks</c> across three interleaved
-/// off/on pairs. Interleaving, rather than one off window followed by one on window, is what
-/// makes the result trustworthy on a load that keeps settling: a straight before/after split
-/// cannot tell attribution's own cost from the world drifting heavier while it runs, but a paired
-/// delta (the same pair's on minus its own off, right next to it in time) mostly cancels drift
-/// that moves smoothly across the run.</item>
+/// apart), then read tick busy time with <c>World.MeasureTicks</c> across off, on, off, on, off,
+/// on, off: four off windows bracketing three on windows rather than one off window per on. Each
+/// on is compared against the mean of the two off windows next to it in time, not just the one
+/// before it, so a baseline that drifts smoothly across the run (a settling load, or this shared
+/// machine's own noise) is cancelled rather than folded one-sidedly into every delta.</item>
 /// <item><see cref="Attribution_Cost_Splits_EngineMarking_FromPulseFold"/> separates the engine's
-/// own cost of writing profiler marks from Pulse's own cost of folding them into a per-mod
-/// breakdown once a tick. Pulse's tick listener sets the engine's profiler flag to
-/// <c>attribution.Profiling</c> every tick regardless of the duty cycle's own state, which means
-/// simply flipping the flag from here would be undone within the same tick. Registering a second,
-/// plain tick listener from this scenario forces it back on immediately afterward: Atlas boots
-/// the host and stages the mod before any scenario runs, so a listener this scenario registers
-/// lands after Pulse's own in the engine's list and its write is the one still standing when the
-/// next tick's entity simulation reads the flag. Pulse's own duty cycle stays off throughout
-/// (<c>Attribution.Enabled: false</c> in the fixture), so nothing here ever calls Pulse's fold.
-/// The scenario checks the resulting profiler tree for real per-entity-behaviour marks rather
-/// than assuming the ordering held.</item>
+/// own cost of writing profiler marks from Pulse's own cost of reading them back. Pulse's tick
+/// listener sets the engine's profiler flag to <c>attribution.Profiling</c> every tick regardless
+/// of the duty cycle's own state, which means simply flipping the flag from here would be undone
+/// within the same tick. Registering a second, plain tick listener from this scenario and setting
+/// the flag back to true from it usually wins the last write for the tick, since Pulse's listener
+/// was registered first and the engine's list is normally appended to in order, but
+/// <c>AddGameTickListener</c> reuses the first empty slot a prior remove left behind, so that
+/// ordering is never guaranteed. What actually makes this sound is the runtime check: the scenario
+/// reads the resulting profiler tree back and asserts it holds real per-entity-behaviour marks,
+/// and fails outright rather than reporting a split it cannot back up when it does not. Pulse's
+/// own share of the same burst is read from its own attribution (<c>modid="pulse"</c>), at the
+/// stopwatch resolution that is measured at, rather than from a millisecond-rounded
+/// <c>MeasureTicks</c> difference too small for that resolution to see.</item>
 /// </list>
 /// <para>Spawning 4000 entities and holding a burst open across several measurement windows is
 /// slow, and the numbers are meant to be read by hand and copied into the README and CHANGELOG,
 /// not gated on every push, so all three stay a no-op unless
 /// <c>PULSE_MEASURE_ATTRIBUTION_COST=1</c> is set: the default CI run (and a plain local
 /// <c>dotnet test</c>) still boots each class, at the same cost as any other scenario class, but
-/// returns immediately. Run them for real, with VINTAGE_STORY set:
+/// returns immediately; the CI workflows additionally filter this trait out, so they never pay
+/// even that. Run them for real, with VINTAGE_STORY set:
 /// <c>PULSE_MEASURE_ATTRIBUTION_COST=1 dotnet test Pulse.Scenarios --filter "Category=Cost"</c>.
 /// Each scenario writes its own numbers to a JSON file next to the test binaries and prints them
 /// to the test's own output.</para></summary>
@@ -50,6 +52,11 @@ public class AttributionCostScenarios : AtlasScenarioBase
     private const int MeasuredTicks = 100;
     private const double TickBudgetMs = 33.333;
     private const int Pairs = 3;
+    private const int Port = 39475;
+
+    // Matches data/attributioncost/pulse.json's Attribution.BurstTicks: wide open, so a clean
+    // "on" MeasureTicks window fits inside one continuous profiled burst regardless of pacing.
+    private const int FixtureBurstTicks = 300;
 
     // A dense cluster packs one chicken per block; the spread shape uses the same entity count
     // over four times the area (one per 2x2 blocks), the widest spacing that still keeps the
@@ -69,12 +76,11 @@ public class AttributionCostScenarios : AtlasScenarioBase
     // The shipped default (PulseConfig.AttributionConfig.BurstTicks/IntervalSeconds), what the
     // README and CHANGELOG document; keep this pair in sync with that class, since the two
     // cannot share the literal across the assembly boundary (Pulse.Scenarios deliberately does
-    // not reference Pulse's types, see this project's csproj). Not changed here: the fixture's
-    // own burst is much wider so a clean "on" reading fits inside one continuous profiled
-    // window, and the amortised figure is computed at these defaults from that reading, same as
-    // the alternative duty cycles in the PR report.
+    // not reference Pulse's types, see this project's csproj).
     private const int DefaultBurstTicks = 10;
     private const int DefaultIntervalSeconds = 10;
+
+    private static readonly JsonSerializerOptions ReportFormat = new() { WriteIndented = true };
 
     private static bool OptedIn => Environment.GetEnvironmentVariable(OptInVariable) == "1";
 
@@ -114,6 +120,7 @@ public class AttributionCostScenarios : AtlasScenarioBase
         ITestPlayer anchor = await World.JoinPlayer("load-anchor");
         int spawned = SpawnCluster(anchor.Position, TargetEntities, DenseSpacingBlocks);
         await World.Ticks(InitialSettleTicks);
+        AssertLoadIsLive(spawned);
 
         TickMeasurement off = await World.MeasureTicks(MeasuredTicks);
 
@@ -132,17 +139,37 @@ public class AttributionCostScenarios : AtlasScenarioBase
             World.Api.Event.UnregisterGameTickListener(listenerId);
         }
 
-        // Give Pulse's own tick listener a few ticks to reassert control before the next phase;
-        // it always runs, it was just outvoted while the extra listener above was registered.
+        Assert.True(
+            marksSeen,
+            "the engine-only window recorded no per-entity-behaviour marks; the listener-ordering "
+                + "trick did not win the race this run, so the engine/Pulse split cannot be trusted "
+                + "and this scenario refuses to report it rather than publish a guess");
+
+        // Give Pulse's own tick listener a few ticks to reassert control before the next phase; it
+        // always runs, it was just outvoted while the extra listener above was registered.
         await World.Ticks(SettleOffTicks);
 
-        await World.ExecuteCommand("/pulse attribution on");
+        CommandResult on = await World.ExecuteCommand("/pulse attribution on");
+        Assert.True(on.Ok, on.Message);
         await World.Ticks(SettleOnTicks);
         TickMeasurement onFull = await World.MeasureTicks(MeasuredTicks);
-        await World.ExecuteCommand("/pulse attribution off");
+
+        // Pulse's own share of this same burst, read from its own attribution at the stopwatch
+        // resolution that is measured at: the ms figures above are whole-millisecond-rounded and
+        // cannot resolve Pulse's own tick listener (bookkeeping and the attribution fold together)
+        // against a rounding step that size. Wait for the wide fixture burst to actually finish
+        // (it is still running: SettleOnTicks + MeasuredTicks ticks into a FixtureBurstTicks + 1
+        // tick burst) before scraping, so the published counters reflect this burst.
+        await World.Ticks(FixtureBurstTicks + 1 - SettleOnTicks - MeasuredTicks + 40);
+        string exposition = await Scrape.Metrics(Port);
+        double pulseSeconds = Scrape.Value(exposition, "pulse_mod_tick_seconds_total{modid=\"pulse\"}");
+        double profiledTicks = Scrape.Value(exposition, "pulse_attribution_ticks_total");
+        double pulseOwnMsPerTick = profiledTicks > 0 ? pulseSeconds / profiledTicks * 1000 : 0;
+
+        CommandResult offAgain = await World.ExecuteCommand("/pulse attribution off");
+        Assert.True(offAgain.Ok, offAgain.Message);
 
         double engineMs = engineOnly.BusyTime.MedianMs - off.BusyTime.MedianMs;
-        double pulseFoldMs = onFull.BusyTime.MedianMs - engineOnly.BusyTime.MedianMs;
 
         var result = new
         {
@@ -154,12 +181,11 @@ public class AttributionCostScenarios : AtlasScenarioBase
             onFull = Summarise(onFull),
             engineMarkingMs = engineMs,
             engineMarkingPctOfBudget = engineMs / TickBudgetMs * 100,
-            pulseFoldMs,
-            pulseFoldPctOfBudget = pulseFoldMs / TickBudgetMs * 100,
-            note = marksSeen
-                ? "the engine-only window recorded real per-entity-behaviour marks; the split above is meaningful"
-                : "no per-entity-behaviour marks were seen on the engine-only window; the listener-ordering trick "
-                    + "did not win the race this run, and engineMarkingMs/pulseFoldMs should not be trusted",
+            pulseOwnMsPerProfiledTick = pulseOwnMsPerTick,
+            pulseOwnPctOfBudget = pulseOwnMsPerTick / TickBudgetMs * 100,
+            pulseOwnNote = "Pulse's own tick listener share (bookkeeping and the attribution fold "
+                + "together), from its own attribution at stopwatch resolution, not a difference of "
+                + "whole-millisecond MeasureTicks readings",
         };
 
         await WriteReport("attribution-cost-engine-split.json", result);
@@ -167,13 +193,14 @@ public class AttributionCostScenarios : AtlasScenarioBase
         Assert.True(spawned > 0, "no load was spawned to measure against");
     }
 
-    /// <summary>Runs the three-pair interleaved off/on measurement for one entity arrangement and
-    /// writes its own report.</summary>
+    /// <summary>Runs the off/on/off/on/off/on/off interleaved measurement for one entity
+    /// arrangement and writes its own report.</summary>
     private async Task MeasureLoadShape(string shapeLabel, int spacingBlocks)
     {
         ITestPlayer anchor = await World.JoinPlayer("load-anchor");
         int spawned = SpawnCluster(anchor.Position, TargetEntities, spacingBlocks);
         await World.Ticks(InitialSettleTicks);
+        AssertLoadIsLive(spawned);
 
         List<TickMeasurement> offs = [];
         List<TickMeasurement> ons = [];
@@ -181,23 +208,43 @@ public class AttributionCostScenarios : AtlasScenarioBase
         {
             if (pair > 0)
             {
-                await World.ExecuteCommand("/pulse attribution off");
+                CommandResult offCmd = await World.ExecuteCommand("/pulse attribution off");
+                Assert.True(offCmd.Ok, offCmd.Message);
             }
 
             await World.Ticks(SettleOffTicks);
             offs.Add(await World.MeasureTicks(MeasuredTicks));
 
-            await World.ExecuteCommand("/pulse attribution on");
+            CommandResult onCmd = await World.ExecuteCommand("/pulse attribution on");
+            Assert.True(onCmd.Ok, onCmd.Message);
             await World.Ticks(SettleOnTicks);
             ons.Add(await World.MeasureTicks(MeasuredTicks));
         }
 
-        await World.ExecuteCommand("/pulse attribution off");
+        // The closing off window: without it, every on can only be compared against the off
+        // before it, so a baseline moving smoothly in one direction biases every delta the same
+        // way. Bracketing each on between two off readings and comparing it to their mean cancels
+        // that drift instead of assuming it away.
+        CommandResult closeCmd = await World.ExecuteCommand("/pulse attribution off");
+        Assert.True(closeCmd.Ok, closeCmd.Message);
+        await World.Ticks(SettleOffTicks);
+        offs.Add(await World.MeasureTicks(MeasuredTicks));
 
-        double[] deltasMs = [.. offs.Zip(ons, (off, on) => on.BusyTime.MedianMs - off.BusyTime.MedianMs)];
+        double[] deltasMs = new double[Pairs];
+        for (int i = 0; i < Pairs; i++)
+        {
+            double neighbourMeanMs = (offs[i].BusyTime.MedianMs + offs[i + 1].BusyTime.MedianMs) / 2.0;
+            deltasMs[i] = ons[i].BusyTime.MedianMs - neighbourMeanMs;
+        }
+
         double medianDeltaMs = Median(deltasMs);
         double ticksPerSecond = offs[0].Passes / offs[0].WallTime.TotalSeconds;
-        double dutyFraction = DefaultBurstTicks / (DefaultBurstTicks + (DefaultIntervalSeconds * ticksPerSecond));
+
+        // A burst profiles BurstTicks + 1 ticks, not BurstTicks: the first tick after the flag
+        // comes on is the discarded warm-up sample (its data is thrown away, but the profiler
+        // still ran and the engine still paid for it), and BurstTicks more are folded afterward.
+        double burstTicks = DefaultBurstTicks + 1;
+        double dutyFraction = burstTicks / (burstTicks + (DefaultIntervalSeconds * ticksPerSecond));
         double offMedianMs = Median([.. offs.Select(o => o.BusyTime.MedianMs)]);
         double amortisedMs = offMedianMs + (dutyFraction * medianDeltaMs);
 
@@ -259,14 +306,31 @@ public class AttributionCostScenarios : AtlasScenarioBase
         return sorted.Length % 2 == 0 ? (sorted[mid - 1] + sorted[mid]) / 2.0 : sorted[mid];
     }
 
-    private async Task WriteReport(string fileName, object result)
+    /// <summary>Asserts the spawned load is actually loaded and ticking, not just that
+    /// <c>SpawnEntity</c> was called: a despawn, an out-of-range placement or a chunk that never
+    /// loaded would leave the server measuring an idle world while still claiming a busy one.</summary>
+    private void AssertLoadIsLive(int spawned)
     {
-        string json = JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true });
-        await File.WriteAllTextAsync(fileName, json);
+        int loaded = World.Api.World.LoadedEntities.Count;
+        Assert.True(
+            loaded >= spawned,
+            $"only {loaded} entities are loaded, fewer than the {spawned} spawned; "
+                + "the load is not what this measurement thinks it is measuring against");
+    }
+
+    private static async Task WriteReport(string fileName, object result)
+    {
+        // Atlas sets the working directory to the VS install (VINTAGE_STORY) for the embedded
+        // server's own sake, so a relative path here would write into a live game install rather
+        // than next to the test output. This assembly's own directory is stable regardless.
+        string directory = Path.GetDirectoryName(typeof(AttributionCostScenarios).Assembly.Location)!;
+        string json = JsonSerializer.Serialize(result, ReportFormat);
+        await File.WriteAllTextAsync(Path.Combine(directory, fileName), json);
         Console.WriteLine(json);
     }
 
-    private void Skip() => Console.WriteLine($"Skipped: set {OptInVariable}=1 to run the real measurement (see class remarks).");
+    private static void Skip()
+        => Console.WriteLine($"Skipped: set {OptInVariable}=1 to run the real measurement (see class remarks).");
 
     private int SpawnCluster(BlockPos origin, int target, int spacingBlocks)
     {
