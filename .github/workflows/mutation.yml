@@ -37,16 +37,15 @@ jobs:
     name: Mutation (${{ matrix.project }})
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    # Pulse.Otlp only runs on request, not on pull requests; see the comment in the matrix below
-    # for why. Pulse is unaffected: this is true for it on both events, so it always runs.
-    if: matrix.project == 'Pulse' || github.event_name == 'workflow_dispatch'
     strategy:
       # A weak spot in one project should not hide the other.
       fail-fast: false
       matrix:
         # One job per project rather than both in one, so the lane's wall clock is the slower
-        # project rather than their sum. Pulse.Otlp only runs on workflow_dispatch (see the job's
-        # `if` above); this comment explains both thresholds and why Pulse.Otlp is manual.
+        # project rather than their sum. Pulse.Otlp only runs on workflow_dispatch: a job-level
+        # `if` cannot see `matrix.*` (the matrix has not expanded yet when it is evaluated), so
+        # the matrix itself is conditional on github.event_name below instead. This comment
+        # explains both thresholds and why Pulse.Otlp is manual.
         #
         # stryker/Pulse.json and stryker/Pulse.Otlp.json exclude the same files sonar.yml's
         # sonar.coverage.exclusions does (PulseModSystem.cs, EngineProbe.cs, AttributionProbe.cs,
@@ -90,7 +89,7 @@ jobs:
         # through Stryker's coverage capture or host reuse.
         #
         # Raising a threshold is a deliberate commit, not a side effect of adding tests elsewhere.
-        project: [Pulse, Pulse.Otlp]
+        project: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["Pulse","Pulse.Otlp"]') || fromJSON('["Pulse"]') }}
 
     steps:
       - uses: actions/checkout@v7
