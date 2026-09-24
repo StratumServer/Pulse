@@ -125,7 +125,7 @@ public class AttributionMetricsTests
         // remembered shares are cleared, so this is exactly the zero seed, not stale non-zero
         // values and not an empty family either.
         metrics.Switch(true);
-        IReadOnlyList<MetricSample> restarted = aggregator.Collect().Where(s => s.Name == "pulse_mod_tick_share").ToList();
+        List<MetricSample> restarted = aggregator.Collect().Where(s => s.Name == "pulse_mod_tick_share").ToList();
         Assert.Equal(2, restarted.Count);
         Assert.All(restarted, s => Assert.Equal(0, s.Value));
         Assert.Contains(restarted, s => s.Labels.Any(l => l.Value == "engine"));
