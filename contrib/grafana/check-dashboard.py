@@ -46,6 +46,50 @@ def describe(panel):
     return f"id {panel.get('id', '?')} ({panel.get('title', 'untitled')})"
 
 
+def _check_id(panel, seen_ids, problems):
+    """Report a missing or already-used panel id; record a fresh one."""
+    pid = panel.get("id")
+    if pid is None:
+        problems.append(f"{describe(panel)} has no id")
+    elif pid in seen_ids:
+        problems.append(f"panel id {pid} used twice: {seen_ids[pid]} and {panel.get('title')}")
+    else:
+        seen_ids[pid] = panel.get("title")
+
+
+def _check_grid_pos(panel, problems):
+    """Validate one panel's gridPos, reporting every range problem found.
+
+    Returns the (x, y, w, h) box for overlap checking, or None if gridPos is
+    missing or incomplete, mirroring the two skip cases below.
+    """
+    pos = panel.get("gridPos")
+    if not pos:
+        problems.append(f"{describe(panel)} has no gridPos")
+        return None
+    x, y, w, h = (pos.get(k) for k in ("x", "y", "w", "h"))
+    if None in (x, y, w, h):
+        problems.append(f"{describe(panel)} has an incomplete gridPos: {pos}")
+        return None
+    if w < 1 or h < 1:
+        problems.append(f"{describe(panel)} is {w}x{h}, both must be at least 1")
+    if x < 0 or y < 0:
+        problems.append(f"{describe(panel)} sits at {x},{y}, neither may be negative")
+    if x + w > COLUMNS:
+        problems.append(f"{describe(panel)} runs off the grid: x {x} + w {w} > {COLUMNS}")
+    return x, y, w, h
+
+
+def _find_overlaps(boxes):
+    """Every pair of same-grid boxes whose rectangles intersect."""
+    problems = []
+    for i, (a, ax, ay, aw, ah) in enumerate(boxes):
+        for b, bx, by, bw, bh in boxes[i + 1:]:
+            if ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah:
+                problems.append(f"{describe(a)} overlaps {describe(b)}")
+    return problems
+
+
 def check(path):
     problems = []
     with open(path, encoding="utf-8") as handle:
@@ -54,36 +98,12 @@ def check(path):
     seen_ids = {}
     boxes = []
     for panel, on_grid in panels(dashboard):
-        pid = panel.get("id")
-        if pid is None:
-            problems.append(f"{describe(panel)} has no id")
-        elif pid in seen_ids:
-            problems.append(f"panel id {pid} used twice: {seen_ids[pid]} and {panel.get('title')}")
-        else:
-            seen_ids[pid] = panel.get("title")
+        _check_id(panel, seen_ids, problems)
+        box = _check_grid_pos(panel, problems)
+        if box and on_grid:
+            boxes.append((panel, *box))
 
-        pos = panel.get("gridPos")
-        if not pos:
-            problems.append(f"{describe(panel)} has no gridPos")
-            continue
-        x, y, w, h = (pos.get(k) for k in ("x", "y", "w", "h"))
-        if None in (x, y, w, h):
-            problems.append(f"{describe(panel)} has an incomplete gridPos: {pos}")
-            continue
-        if w < 1 or h < 1:
-            problems.append(f"{describe(panel)} is {w}x{h}, both must be at least 1")
-        if x < 0 or y < 0:
-            problems.append(f"{describe(panel)} sits at {x},{y}, neither may be negative")
-        if x + w > COLUMNS:
-            problems.append(f"{describe(panel)} runs off the grid: x {x} + w {w} > {COLUMNS}")
-        if on_grid:
-            boxes.append((panel, x, y, w, h))
-
-    for i, (a, ax, ay, aw, ah) in enumerate(boxes):
-        for b, bx, by, bw, bh in boxes[i + 1:]:
-            if ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah:
-                problems.append(f"{describe(a)} overlaps {describe(b)}")
-
+    problems.extend(_find_overlaps(boxes))
     return problems
 
 

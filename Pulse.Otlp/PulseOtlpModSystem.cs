@@ -74,8 +74,8 @@ public sealed class PulseOtlpModSystem : ModSystem
         // one winning on a collision (Resource.Merge: "In case of a collision the other Resource
         // takes precedence"). An unconditional AddService would therefore always beat the
         // environment variable. Checked against MeterProviderBuilderSdk.ConfigureResource,
-        // ResourceBuilder.CreateDefault/Build and Resource.Merge in OpenTelemetry .NET 1.18.0
-        // (github.com/open-telemetry/opentelemetry-dotnet, tag core-1.18.0). Skipping the call
+        // ResourceBuilder.CreateDefault/Build and Resource.Merge in OpenTelemetry .NET 1.19.1
+        // (github.com/open-telemetry/opentelemetry-dotnet, tag core-1.19.1). Skipping the call
         // when the variable is set leaves the SDK's own default resource pipeline, which already
         // reads it, untouched.
         string? serviceNameFromEnvironment = Environment.GetEnvironmentVariable("OTEL_SERVICE_NAME");
@@ -89,7 +89,7 @@ public sealed class PulseOtlpModSystem : ModSystem
         // MetricReader.Collect wraps the collect-and-send in a catch that only writes to the SDK's
         // EventSource. A refused connection, a 401 from a SaaS backend or a DNS failure is
         // therefore invisible here by construction; adding our own guard around it would catch
-        // nothing. Checked against OpenTelemetry 1.18.0.
+        // nothing. Checked against OpenTelemetry 1.19.1.
         provider = Sdk.CreateMeterProviderBuilder()
             .AddMeter(meters)
             .ConfigureResource(r =>

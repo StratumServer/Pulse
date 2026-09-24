@@ -118,14 +118,14 @@ It is off by default, because it is not free. Add an `Attribution` block to `Mod
 {
   "Attribution": {
     "Enabled": true,
-    "BurstTicks": 30,
+    "BurstTicks": 10,
     "IntervalSeconds": 10
   }
 }
 ```
 
 `BurstTicks` is how many consecutive ticks each measurement covers, `IntervalSeconds` how long the
-server runs unmeasured between two of them. The defaults measure about one tick in twelve. Both are
+server runs unmeasured between two of them. The defaults measure about one tick in thirty. Both are
 clamped on read: at least a second between bursts, at most 300 ticks in one.
 
 ### Turning it on without a restart
@@ -183,12 +183,32 @@ the behaviour's registered code. Pulse turns the profiler on for a burst, reads 
 left behind, maps each key back to a mod through the mod loader, and turns it off again. No
 Harmony, no engine patch, no bundled dependency.
 
-The cost is why it bursts. Each marker is a dictionary write and a clock read, and the number of
-markers scales with loaded entities times their behaviours, not with how many mods you run. On a
-twenty-player server holding four thousand entities, a profiled tick costs roughly 2.8% of the
-33 ms budget. At the default duty cycle that averages out to about 0.3%, and on an idle server it
-is nothing at all. Raising `BurstTicks` or lowering `IntervalSeconds` moves that number in the
-obvious direction.
+The cost is measured, not estimated from a mark count. `Pulse.Scenarios/AttributionCostScenarios.cs`
+joins a test player, spawns four thousand chickens (dense cluster and, separately, spread across
+the loaded area, to tell density from entity count apart), and reads tick busy time with
+`World.MeasureTicks` across off, on, off, on, off, on, off: four off windows bracketing three on
+windows, each on compared against the mean of the two off windows next to it rather than just the
+one before it, so a baseline that drifts across the run cannot bias every delta the same direction.
+On a quiet run, both load shapes agreed: the off baseline wobbled by a couple of milliseconds with
+no clear drift, and a profiled tick's own share came out to about 8.75 ms, roughly 26% of the 33 ms
+budget. A second scenario splits that further, forcing the engine's frame profiler on without
+letting Pulse fold what it records: about 9 ms (27% of budget) is the engine's own cost of writing
+the marks. Pulse's own share, read from its own attribution at the stopwatch resolution that
+measures at rather than from a millisecond-rounded difference too small for that resolution to see,
+comes to about 0.02 ms, under a tenth of a percent of the budget: there is nothing here for Pulse
+itself to usefully optimise. At the shipped default (10 ticks every 10 seconds) the measured share
+blends down to about 0.9% of the budget, a slow window of roughly a third of a second every 10
+seconds. The previous default was 30 ticks; the same measurement puts that at about 2.5%
+amortised, and the shorter burst is what shipped once the real cost of the longer one was known.
+All of these replace the mark-count estimate this section used to carry (2.8% burst, 0.3%
+amortised at the old default), measured too low, likely because a dictionary write and a clock
+read cost more in practice than its per-operation guess. Markers scale with loaded entities times
+their behaviours, not with how many mods you run, so raising `BurstTicks` or lowering
+`IntervalSeconds` moves the amortised share in the obvious direction, and on an idle server it is
+nothing at all. Run it yourself, with `VINTAGE_STORY` set: `PULSE_MEASURE_ATTRIBUTION_COST=1
+dotnet test Pulse.Scenarios --filter "Category=Cost"`; CI filters the `Cost` trait out, and locally
+it is a no-op unless that variable is set, because spawning four thousand entities, three times
+over, is slow.
 
 One visible side effect: the engine logs "Over 400ms tick. Skipping N physics ticks" only when its
 profiler is on. If your server is already overloaded you will see that warning appear during
@@ -211,9 +231,9 @@ Mapping is by assembly. A mod that ships several dlls only has the one its `ModS
 claimed, so a listener registered from a side library reads as `unattributed`. So does a handler
 on a static method, which the engine marks with no identity at all.
 
-And it is a sample. Thirty ticks out of every twelve seconds describe a steady server well and a
-spiky one badly. The share is an average over the burst, so a mod that stalls for 200 ms once a
-minute may well be profiled during a quiet stretch and read as harmless.
+And it is a sample. Ten ticks every ten seconds describe a steady server well and a spiky one
+badly. The share is an average over the burst, so a mod that stalls for 200 ms once a minute may
+well be profiled during a quiet stretch and read as harmless.
 
 If the numbers matter enough to act on, this is a first pass that says which mod to look at, not
 a call tree. Lithos Probe's sampling profiler is the tool for the second pass.
@@ -233,7 +253,7 @@ the OTLP one does not. On first boot Pulse writes `ModConfig/pulse.json` with it
   "ChunksRefreshSeconds": 30,
   "Attribution": {
     "Enabled": false,
-    "BurstTicks": 30,
+    "BurstTicks": 10,
     "IntervalSeconds": 10
   }
 }

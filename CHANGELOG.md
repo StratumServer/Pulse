@@ -10,6 +10,14 @@ first.
 
 ### Added
 
+- A dashboard row, `Attribution, only when turned on`, placed right after tick health: a stacked
+  time series of `pulse_mod_tick_share` by mod, a bar gauge for the current share, attributed tick
+  time per mod using the main README's own seconds-per-profiled-tick recipe, and a small panel for
+  the profiled ticks rate and dropped samples. `contrib/alerts/pulse-alerts.yml` gains
+  `PulseModHoggingTick`, which only fires when a single mod other than `engine` or `unattributed`
+  holds more than 50% of the profiled tick for 10 minutes while `pulse_server_tick_busy_seconds` is
+  also over 80% of budget, the same load threshold `PulseTickSaturationHigh` already uses, so a mod
+  that is merely heavy on an idle server does not page anyone.
 - `/pulse`, a server command behind the `controlserver` privilege, so per-mod tick attribution no
   longer needs a restart to switch. `/pulse attribution on` and `off` drive the duty cycle on the
   running server without writing `pulse.json`, `/pulse attribution status` reports the cycle in use
@@ -32,11 +40,11 @@ first.
   the last burst, `pulse_mod_tick_seconds_total{modid}` the sampled seconds behind it,
   `pulse_attribution_ticks_total` the ticks those seconds were measured over, and
   `pulse_attribution_dropped_samples_total` the readings discarded because the engine's 32 bit
-  marker counter had wrapped. It drives the engine's own frame profiler in short bursts (30 ticks
-  every 10 seconds by default) rather than leaving it on, which costs about 0.3% of the tick
-  budget amortised against roughly 2.8% while a burst runs. The README section lists what it
-  cannot see: broadcast event handlers carry no markers, and thread-safe physics is measured for
-  the main thread only.
+  marker counter had wrapped. It drives the engine's own frame profiler in short bursts (10 ticks
+  every 10 seconds by default) rather than leaving it on, which costs about 0.9% of the tick
+  budget amortised against roughly 26% while a burst runs, measured on a 4000-entity server. The
+  README section lists what it cannot see: broadcast event handlers carry no markers, and
+  thread-safe physics is measured for the main thread only.
 - `contrib/alerts/pulse-alerts.yml`, a Prometheus alerting rules file covering tick rate, tick
   saturation, sustained tick overruns, engine warnings, log errors, endpoint availability and a
   stuck worldgen queue, calibrated against the engine's own thresholds. `contrib/alerts/README.md`
@@ -50,6 +58,14 @@ first.
 - A wire-level test for the grpc protocol: a scenario boots the server against a fake gRPC
   collector and reads the export off the socket, so both protocols `pulse-otlp.json` accepts are
   now proven end to end, not just http/protobuf.
+
+### Changed
+
+- Bumped `OpenTelemetry` and `OpenTelemetry.Exporter.OpenTelemetryProtocol` from 1.18.0 to 1.19.1
+  in the OTLP mod. Nothing Pulse depends on in the endpoint, header or service name handling
+  changed between the two releases, but the resources the SDK builds by default now carry a schema
+  URL, `https://opentelemetry.io/schemas/1.44.0`, where 1.18.0 sent none; OTLP exports gain that
+  field on the wire. The collision precedence the `ServiceName` guard depends on is unaffected.
 
 ## [0.1.0] - 2026-09-01
 

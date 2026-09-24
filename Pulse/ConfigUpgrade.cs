@@ -98,12 +98,9 @@ internal static class ConfigUpgrade
         JsonObject file, JsonObject config, string prefix, List<string> missing, List<string> unknown)
     {
         // This level before the blocks under it, so both lists read outermost key first.
-        foreach (KeyValuePair<string, JsonNode?> entry in file)
+        foreach (KeyValuePair<string, JsonNode?> entry in file.Where(entry => !config.ContainsKey(entry.Key)))
         {
-            if (!config.ContainsKey(entry.Key))
-            {
-                unknown.Add(prefix + entry.Key);
-            }
+            unknown.Add(prefix + entry.Key);
         }
 
         foreach (KeyValuePair<string, JsonNode?> entry in config)
