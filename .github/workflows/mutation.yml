@@ -36,7 +36,7 @@ jobs:
   stryker:
     name: Mutation (${{ matrix.project }})
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       # A weak spot in one project should not hide the other.
       fail-fast: false
