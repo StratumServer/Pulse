@@ -11,8 +11,8 @@
     <!-- The OTLP exporter and nothing else. It pulls the Microsoft.Extensions.* fan-out with it,
          which is the whole reason this is a separate zip: those dlls load into the same shared
          context as every other mod, so they stay confined to the server that asked for OTLP. -->
-    <PackageReference Include="OpenTelemetry" Version="1.18.0" />
-    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.18.0" />
+    <PackageReference Include="OpenTelemetry" Version="1.19.1" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.19.1" />
     <Reference Include="VintagestoryAPI" HintPath="$(VINTAGE_STORY)/VintagestoryAPI.dll" Private="false" />
   </ItemGroup>
 
