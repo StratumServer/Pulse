@@ -52,35 +52,59 @@ jobs:
         # mutants counted as NoCoverage, which drags the headline score down the same way a real
         # survivor does, for code no unit test was ever going to kill.
         #
-        # Local score after adding the exclusion, each run including its own solution build:
+        # Two CI runs on the commit that added the exclusion, one from the pull request and one
+        # from workflow_dispatch minutes apart on the same code:
         #
-        #   Pulse        88.86 %   344 killed,  39 survived, 7 timeouts,   5 uncovered
-        #   Pulse.Otlp   91.49 %    43 killed,   4 survived, 0 timeouts,   0 uncovered
+        #   Pulse        87.59 %, then 88.35 %   (342-344 killed, 41-44 survived, 4-5 timeouts)
+        #   Pulse.Otlp   85.11 %, then 80.85 %   (38-40 killed,    7-9 survived,  0 timeouts)
         #
-        # Pulse.Otlp's own coverage-based run still fails outright ("It looks like the test
-        # coverage capture failed") and Stryker still falls back to running the whole test suite
-        # per mutant; the exclusion above only shrinks how much that fallback has to cover (89
-        # tested mutants down to 47), it does not fix the fallback itself. Traced with -V trace
-        # -L: every fallback test host for Pulse.Otlp launches against Pulse.Otlp.Scenarios's
-        # runtimeconfig, depsfile and testhost.dll rather than Pulse.Otlp.Tests's own, and
-        # Stryker's injection step writes the mutated Pulse.Otlp.dll into that Scenarios
-        # project's staged copy as well as the real one. Measured scores before the exclusion:
-        # local a stable 96.63-97.75 % across repeated runs, CI 85.39 % and 91.01 % on two
-        # different commits; some individual survivors persisted across every one of those runs
-        # despite sitting under existing, direct, unconditional assertions (a fresh object's
-        # default property value, a boolean guard with dedicated tests on both branches), which
-        # does not read as a real gap so much as this same fallback mode failing to attribute a
-        # result correctly. Neither a trimmed solution that drops the Scenarios projects (which
-        # instead reproduces the original all-mutants-survived failure from issue #2, restorable
-        # from dcc17ad if this needs re-proving) nor Microsoft.NET.Test.Sdk 17.11.1 or 18.10.1 in
+        # Pulse's own two numbers are close together and its survivor list is nearly identical
+        # between the runs (43 of ~45 lines survived both times, only a couple trading with a
+        # timeout at the margin), the kind of spread Atlas documents too. That list is a real
+        # punch list, not noise, and it is heavily concentrated in one place: seventeen of the
+        # forty-three repeat survivors are in Pulse/AttributionMetrics.cs (lines 84-94, 201-228),
+        # the newest file in the project. Its own test file did not kill anywhere near what it
+        # should have.
+        #
+        # Pulse.Otlp did not stabilise. Comparing the two runs' survivor lists directly: only 2
+        # mutants survived both times, while 5 survived only the first run and 7 only the second,
+        # on identical code. Coverage-based analysis still fails outright ("It looks like the
+        # test coverage capture failed") in both runs, at nearly the same point in the log with
+        # nearly the same phase timings, so Stryker still falls back to running the whole test
+        # suite per mutant; the exclusion only shrank how much that fallback has to cover (89
+        # tested mutants down to 47), it did not fix the fallback's reliability, which is exactly
+        # what the run-to-run disagreement on 10-12 individual mutants shows. Traced locally with
+        # -V trace -L: every fallback test host for Pulse.Otlp launches against
+        # Pulse.Otlp.Scenarios's runtimeconfig, depsfile and testhost.dll rather than
+        # Pulse.Otlp.Tests's own. Of the 2 mutants that did survive both runs, one is explained
+        # and is not a gap: Pulse.Otlp.csproj compiles a linked copy of Pulse/ConfigUpgrade.cs,
+        # which Pulse.Otlp.Tests never calls (Pulse.Tests's own ConfigUpgradeTests.cs is what
+        # covers it), so mutants in that copy read as uncovered from this project's suite no
+        # matter how reliable the run is; several of the non-repeating survivors are the same
+        # file for the same reason. The other, OtlpOptions.cs:100 (RenderHeaders defaulting a
+        # null header value with `??`), is a real gap: no existing test passes a header with a
+        # null value. Neither a trimmed solution that drops the Scenarios projects (which instead
+        # reproduces the original all-mutants-survived failure from issue #2, restorable from
+        # dcc17ad if this needs re-proving) nor Microsoft.NET.Test.Sdk 17.11.1 or 18.10.1 in
         # place of 17.14.1 changes any of this; it looks like a Stryker/VSTest test host
         # resolution quirk triggered by a same-shaped sibling test project, not a Pulse-side
         # setting. tools/mutation-check.sh's 44 hand-mutations, run separately in ci.yml, are
         # unaffected: it drives dotnet test directly and never goes through Stryker's coverage
         # capture or host reuse.
         #
-        # giving break 80 and 65, comfortably under every measurement taken so far in either
-        # direction. Raising a threshold is a deliberate commit, not a side effect of adding
+        # Runtime: the pull-request run took 46m9s for Pulse against 14m14s for Pulse.Otlp; the
+        # workflow_dispatch run minutes later took 24m14s and 14m54s. Both runs' coverage-capture
+        # phase for Pulse took near-identical time (2m48s and 2m50s) and used the same successful
+        # 'CoverageBasedTest' mode with the same 4-5 timeouts; all 22 minutes of the difference
+        # sat in the per-mutant testing phase alone, for fewer tested mutants (390 against the
+        # earlier 396), which is a shared-runner having a slow stretch, not the exclusion or the
+        # config. Pulse.Otlp's own two runs, by contrast, landed within forty seconds of each
+        # other, so its fallback mode is slow but its wall clock, unlike its score, is stable.
+        #
+        # giving break 83 and 70. Pulse's margin is the usual few points under a stable number;
+        # Pulse.Otlp's is wide on purpose, under the worse of two runs that disagree with each
+        # other by ten points, to absorb the spread this comment documents rather than pretend it
+        # is not there. Raising a threshold is a deliberate commit, not a side effect of adding
         # tests elsewhere.
         project: [Pulse, Pulse.Otlp]
 
