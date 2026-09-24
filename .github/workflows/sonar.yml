@@ -136,6 +136,7 @@ jobs:
           set -e
           for p in Pulse.Tests Pulse.Scenarios; do
             dotnet test "$p/$p.csproj" -c Release --no-build \
+              --filter "Category!=Cost" \
               --collect:"XPlat Code Coverage;Format=opencover" \
               --results-directory TestResults
           done

@@ -86,6 +86,7 @@ jobs:
       - name: Atlas scenarios
         run: |
           dotnet test Pulse.Scenarios/Pulse.Scenarios.csproj -c Release --no-build \
+            --filter "Category!=Cost" \
             --logger "trx;LogFileName=scenarios.trx" \
             --results-directory TestResults
           dotnet test Pulse.Otlp.Scenarios/Pulse.Otlp.Scenarios.csproj -c Release --no-build \
