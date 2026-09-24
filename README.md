@@ -184,19 +184,25 @@ left behind, maps each key back to a mod through the mod loader, and turns it of
 Harmony, no engine patch, no bundled dependency.
 
 The cost is measured, not estimated from a mark count. `Pulse.Scenarios/AttributionCostScenarios.cs`
-joins a test player and packs four thousand chickens into a dense cluster around it, heavier than
-a real server would spread across its map but enough to clear the millisecond floor
-`World.MeasureTicks` reads at, then reads tick busy time before attribution runs and again during
-a forced burst. Across four runs on a shared development machine, attribution's own share of a
-profiled tick ran 9 to 14 ms, roughly 20 to 40% of the 33 ms budget (median around 28%); at the
-default duty cycle that blends down to 0.7 to 1.4 ms, 2 to 4% of the budget (median around 2.6%).
-Both figures replace the mark-count estimate this section used to carry (2.8% burst, 0.3%
-amortised) and land roughly an order of magnitude above it. Markers scale with loaded entities
-times their behaviours, not with how many mods you run, so raising `BurstTicks` or lowering
-`IntervalSeconds` moves the burst share in the obvious direction, and on an idle server it is
-nothing at all. Run it yourself, with `VINTAGE_STORY` set: `PULSE_MEASURE_ATTRIBUTION_COST=1
-dotnet test Pulse.Scenarios --filter "Category=Cost"`; it stays out of the default suite because
-spawning that many entities is slow.
+joins a test player, spawns four thousand chickens (dense cluster and, separately, spread across
+the loaded area, to tell density from entity count apart), and reads tick busy time with
+`World.MeasureTicks` across three interleaved off/on pairs rather than one before-and-after split,
+so a settling world cannot be mistaken for attribution's own cost: the paired delta (each window's
+on minus its own neighbouring off) cancels drift that a single before/after reading would not. On
+three repeated runs on a quiet machine, both load shapes agreed: a profiled tick's own share ran
+about 8 ms, roughly 24% of the 33 ms budget, with the off baseline flat across each run rather than
+climbing. A second scenario splits that 8 ms further, forcing the engine's frame profiler on
+without letting Pulse fold what it records: about 7 ms (21% of budget) is the engine's own cost of
+writing the marks, and about 2 ms (6%) is Pulse's own cost of reading them back once a tick, so
+there is little left here for Pulse itself to optimise. At the default duty cycle the 8 ms blends
+down to about 2.2% of the budget. These figures replace the mark-count estimate this section used
+to carry (2.8% burst, 0.3% amortised); the estimate undershot both, likely because a dictionary
+write and a clock read cost more in practice than the estimate's per-operation guess. Markers scale
+with loaded entities times their behaviours, not with how many mods you run, so raising
+`BurstTicks` or lowering `IntervalSeconds` moves the burst share in the obvious direction, and on an
+idle server it is nothing at all. Run it yourself, with `VINTAGE_STORY` set:
+`PULSE_MEASURE_ATTRIBUTION_COST=1 dotnet test Pulse.Scenarios --filter "Category=Cost"`; it stays
+out of the default suite because spawning that many entities, three times over, is slow.
 
 One visible side effect: the engine logs "Over 400ms tick. Skipping N physics ticks" only when its
 profiler is on. If your server is already overloaded you will see that warning appear during
