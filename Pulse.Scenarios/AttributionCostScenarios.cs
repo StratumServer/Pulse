@@ -66,11 +66,14 @@ public class AttributionCostScenarios : AtlasScenarioBase
     private const int SettleOnTicks = 60;
     private const int InitialSettleTicks = 60;
 
-    // The shipped default (PulseConfig.AttributionConfig), what the README and CHANGELOG
-    // document. Not changed here: the fixture's own burst is much wider so a clean "on" reading
-    // fits inside one continuous profiled window, and the amortised figure is computed at these
-    // defaults from that reading, same as the alternative duty cycles in the PR report.
-    private const int DefaultBurstTicks = 30;
+    // The shipped default (PulseConfig.AttributionConfig.BurstTicks/IntervalSeconds), what the
+    // README and CHANGELOG document; keep this pair in sync with that class, since the two
+    // cannot share the literal across the assembly boundary (Pulse.Scenarios deliberately does
+    // not reference Pulse's types, see this project's csproj). Not changed here: the fixture's
+    // own burst is much wider so a clean "on" reading fits inside one continuous profiled
+    // window, and the amortised figure is computed at these defaults from that reading, same as
+    // the alternative duty cycles in the PR report.
+    private const int DefaultBurstTicks = 10;
     private const int DefaultIntervalSeconds = 10;
 
     private static bool OptedIn => Environment.GetEnvironmentVariable(OptInVariable) == "1";

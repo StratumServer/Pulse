@@ -118,14 +118,14 @@ It is off by default, because it is not free. Add an `Attribution` block to `Mod
 {
   "Attribution": {
     "Enabled": true,
-    "BurstTicks": 30,
+    "BurstTicks": 10,
     "IntervalSeconds": 10
   }
 }
 ```
 
 `BurstTicks` is how many consecutive ticks each measurement covers, `IntervalSeconds` how long the
-server runs unmeasured between two of them. The defaults measure about one tick in twelve. Both are
+server runs unmeasured between two of them. The defaults measure about one tick in thirty. Both are
 clamped on read: at least a second between bursts, at most 300 ticks in one.
 
 ### Turning it on without a restart
@@ -194,10 +194,13 @@ about 8 ms, roughly 24% of the 33 ms budget, with the off baseline flat across e
 climbing. A second scenario splits that 8 ms further, forcing the engine's frame profiler on
 without letting Pulse fold what it records: about 7 ms (21% of budget) is the engine's own cost of
 writing the marks, and about 2 ms (6%) is Pulse's own cost of reading them back once a tick, so
-there is little left here for Pulse itself to optimise. At the default duty cycle the 8 ms blends
-down to about 2.2% of the budget. These figures replace the mark-count estimate this section used
-to carry (2.8% burst, 0.3% amortised); the estimate undershot both, likely because a dictionary
-write and a clock read cost more in practice than the estimate's per-operation guess. Markers scale
+there is little left here for Pulse itself to optimise. At the shipped default (10 ticks every 10
+seconds) the 8 ms blends down to about 0.8% of the budget, a slow window of roughly a third of a
+second every 10 seconds. The previous default was 30 ticks; this same measurement puts that at
+about 2.2% amortised, and the shorter burst is what shipped once the real cost of the longer one
+was known. Both replace the mark-count estimate this section used to carry (2.8% burst, 0.3%
+amortised at the old default); the estimate undershot both, likely because a dictionary write and
+a clock read cost more in practice than its per-operation guess. Markers scale
 with loaded entities times their behaviours, not with how many mods you run, so raising
 `BurstTicks` or lowering `IntervalSeconds` moves the burst share in the obvious direction, and on an
 idle server it is nothing at all. Run it yourself, with `VINTAGE_STORY` set:
@@ -247,7 +250,7 @@ the OTLP one does not. On first boot Pulse writes `ModConfig/pulse.json` with it
   "ChunksRefreshSeconds": 30,
   "Attribution": {
     "Enabled": false,
-    "BurstTicks": 30,
+    "BurstTicks": 10,
     "IntervalSeconds": 10
   }
 }
