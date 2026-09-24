@@ -6,15 +6,21 @@
     "test-projects": [
       "Pulse.Tests.csproj"
     ],
+    "mutate": [
+      "!**/PulseModSystem.cs",
+      "!**/EngineProbe.cs",
+      "!**/AttributionProbe.cs",
+      "!**/AttributionMetrics.Server.cs"
+    ],
     "configuration": "Release",
     "reporters": [
       "progress",
       "json"
     ],
     "thresholds": {
-      "high": 57,
-      "low": 50,
-      "break": 50
+      "high": 90,
+      "low": 80,
+      "break": 80
     }
   }
 }

@@ -6,15 +6,18 @@
     "test-projects": [
       "Pulse.Otlp.Tests.csproj"
     ],
+    "mutate": [
+      "!**/PulseOtlpModSystem.cs"
+    ],
     "configuration": "Release",
     "reporters": [
       "progress",
       "json"
     ],
     "thresholds": {
-      "high": 85,
-      "low": 70,
-      "break": 70
+      "high": 80,
+      "low": 65,
+      "break": 65
     }
   }
 }

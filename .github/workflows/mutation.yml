@@ -42,36 +42,46 @@ jobs:
       fail-fast: false
       matrix:
         # One job per project rather than both in one, so the lane's wall clock is the slower
-        # project rather than their sum. Local score at the commit that added this file, each run
-        # including its own solution build:
+        # project rather than their sum.
         #
-        #   Pulse        54.62 %   351 killed,  41 survived, 4 timeouts, 254 uncovered
-        #   Pulse.Otlp   97.75 %    87 killed,   2 survived, 0 timeouts,   0 uncovered
+        # stryker/Pulse.json and stryker/Pulse.Otlp.json exclude the same files sonar.yml's
+        # sonar.coverage.exclusions does (PulseModSystem.cs, EngineProbe.cs, AttributionProbe.cs,
+        # AttributionMetrics.Server.cs, PulseOtlpModSystem.cs) for the same reason: this suite
+        # cannot reach them, only the Atlas scenarios can, since they need a live server. Keep the
+        # two lists in step; a file added to one belongs on the other. Before the exclusion these
+        # mutants counted as NoCoverage, which drags the headline score down the same way a real
+        # survivor does, for code no unit test was ever going to kill.
         #
-        # Pulse's score looks low next to Pulse.Otlp because most of Pulse/*.cs (PulseModSystem,
-        # the engine probes, the command handlers) has no pure unit coverage by design: it only
-        # runs under a booted server, which is what the Atlas scenarios in ci.yml are for.
+        # Local score after adding the exclusion, each run including its own solution build:
         #
-        # Pulse.Otlp's own coverage-based run fails outright ("It looks like the test coverage
-        # capture failed") and Stryker falls back to running the whole 46-test suite per mutant.
-        # A CI run at this same commit's parent scored 85.39 % (76 killed, 13 survived) against
-        # this local 97.75 %, a gap local reproduces every time it is asked (86 and 87 killed
-        # across repeated runs) that CI does not share. Traced with -V trace -L: every fallback
-        # test host for Pulse.Otlp launches against Pulse.Otlp.Scenarios's runtimeconfig, depsfile
-        # and testhost.dll rather than Pulse.Otlp.Tests's own, and Stryker's injection step writes
-        # the mutated Pulse.Otlp.dll into that Scenarios project's staged copy as well as the real
-        # one. Neither a trimmed solution that drops the Scenarios projects (which instead
-        # reproduces the original all-mutants-survived failure from issue #2, restorable from
-        # dcc17ad if this needs re-proving) nor Microsoft.NET.Test.Sdk 17.11.1 or 18.10.1 in place
-        # of 17.14.1 changes any of this; it looks like a Stryker/VSTest test host resolution
-        # quirk triggered by a same-shaped sibling test project, not a Pulse-side setting. Pulse.
-        # Otlp's break sits 15 points under the worse of the two measurements instead of the usual
-        # few, to absorb it. tools/mutation-check.sh's 44 hand-mutations, run separately in
-        # ci.yml, are unaffected: it drives dotnet test directly and never goes through Stryker's
-        # coverage capture or host reuse.
+        #   Pulse        88.86 %   344 killed,  39 survived, 7 timeouts,   5 uncovered
+        #   Pulse.Otlp   91.49 %    43 killed,   4 survived, 0 timeouts,   0 uncovered
         #
-        # giving break 50 and 70. Raising a threshold is a deliberate commit, not a side effect of
-        # adding tests elsewhere.
+        # Pulse.Otlp's own coverage-based run still fails outright ("It looks like the test
+        # coverage capture failed") and Stryker still falls back to running the whole test suite
+        # per mutant; the exclusion above only shrinks how much that fallback has to cover (89
+        # tested mutants down to 47), it does not fix the fallback itself. Traced with -V trace
+        # -L: every fallback test host for Pulse.Otlp launches against Pulse.Otlp.Scenarios's
+        # runtimeconfig, depsfile and testhost.dll rather than Pulse.Otlp.Tests's own, and
+        # Stryker's injection step writes the mutated Pulse.Otlp.dll into that Scenarios
+        # project's staged copy as well as the real one. Measured scores before the exclusion:
+        # local a stable 96.63-97.75 % across repeated runs, CI 85.39 % and 91.01 % on two
+        # different commits; some individual survivors persisted across every one of those runs
+        # despite sitting under existing, direct, unconditional assertions (a fresh object's
+        # default property value, a boolean guard with dedicated tests on both branches), which
+        # does not read as a real gap so much as this same fallback mode failing to attribute a
+        # result correctly. Neither a trimmed solution that drops the Scenarios projects (which
+        # instead reproduces the original all-mutants-survived failure from issue #2, restorable
+        # from dcc17ad if this needs re-proving) nor Microsoft.NET.Test.Sdk 17.11.1 or 18.10.1 in
+        # place of 17.14.1 changes any of this; it looks like a Stryker/VSTest test host
+        # resolution quirk triggered by a same-shaped sibling test project, not a Pulse-side
+        # setting. tools/mutation-check.sh's 44 hand-mutations, run separately in ci.yml, are
+        # unaffected: it drives dotnet test directly and never goes through Stryker's coverage
+        # capture or host reuse.
+        #
+        # giving break 80 and 65, comfortably under every measurement taken so far in either
+        # direction. Raising a threshold is a deliberate commit, not a side effect of adding
+        # tests elsewhere.
         project: [Pulse, Pulse.Otlp]
 
     steps:
