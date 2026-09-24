@@ -1,0 +1,148 @@
+name: mutation
+
+# Line coverage says the unit suites execute the code; it cannot say whether anything is
+# checked. Stryker answers that: it changes the code and asks whether a test notices. The lane
+# is a ratchet, not a target. Each project breaks just under the score measured when this file
+# landed, so tests cannot quietly get weaker; raising a threshold is a deliberate commit.
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main, dev]
+    paths:
+      - "Pulse/**"
+      - "Pulse.Otlp/**"
+      - "Pulse.Tests/**"
+      - "Pulse.Otlp.Tests/**"
+      # Stryker builds the whole solution, so anything that can break that build has to be
+      # able to trigger this lane.
+      - "Pulse.slnx"
+      - "Directory.Build.props"
+      - ".config/dotnet-tools.json"
+      - "stryker/**"
+      - ".github/workflows/mutation.yml"
+
+# Least privilege: nothing here writes to the repository.
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  VS_VERSION: "1.22.7"
+
+jobs:
+  stryker:
+    name: Mutation (${{ matrix.project }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      # A weak spot in one project should not hide the other.
+      fail-fast: false
+      matrix:
+        # One job per project rather than both in one, so the lane's wall clock is the slower
+        # project rather than their sum. Pulse.Otlp only runs on workflow_dispatch: a job-level
+        # `if` cannot see `matrix.*` (the matrix has not expanded yet when it is evaluated), so
+        # the matrix itself is conditional on github.event_name below instead. This comment
+        # explains both thresholds and why Pulse.Otlp is manual.
+        #
+        # stryker/Pulse.json and stryker/Pulse.Otlp.json exclude the same files sonar.yml's
+        # sonar.coverage.exclusions does (PulseModSystem.cs, EngineProbe.cs, AttributionProbe.cs,
+        # AttributionMetrics.Server.cs, PulseOtlpModSystem.cs), and Pulse.Otlp.json also excludes
+        # ConfigUpgrade.cs. Each is excluded for the same shape of reason: its mutants are killed
+        # by tests this lane cannot see, either a live-server Atlas scenario, or, for
+        # ConfigUpgrade.cs, Pulse.Tests's own ConfigUpgradeTests.cs (Pulse.Otlp.csproj compiles a
+        # linked copy of that file that Pulse.Otlp.Tests never calls). Keep this list in step with
+        # sonar.yml's; a file added to one belongs on the other. Before an exclusion, that file's
+        # mutants counted as NoCoverage, which drags the headline score down the same way a real
+        # survivor does, for code no unit test was ever going to kill.
+        #
+        # Pulse's break (83) comes from two CI runs on one commit, 87.59% then 88.35%, with a
+        # nearly identical survivor list both times (43 of 45 lines repeat). That list is a real
+        # punch list, not noise, left for a future PR:
+        #
+        #   - seventeen of the forty-three repeat survivors are in Pulse/AttributionMetrics.cs
+        #     (lines 84-94, 201-228), the newest file in the project; its own test file did not
+        #     kill anywhere near what it should have.
+        #   - OtlpOptions.cs:100 (RenderHeaders defaulting a null header value with `??`): no
+        #     existing test passes a header with a null value.
+        #
+        # Pulse.Otlp runs on workflow_dispatch only. Its coverage-based run fails outright every
+        # time ("It looks like the test coverage capture failed"), so Stryker falls back to
+        # running its whole test suite per mutant, and that fallback does not agree with itself
+        # run to run: traced with -V trace -L, every fallback test host it launches for
+        # Pulse.Otlp.Tests uses Pulse.Otlp.Scenarios's runtimeconfig, depsfile and testhost.dll
+        # instead, a Stryker/VSTest test host mix-up from having a same-shaped sibling test
+        # project in the solution. Three CI runs on unchanged code scored 85.11%, 80.85% and
+        # 72.97% (break 70, under the worst by a few points), and most of each run's survivors sit
+        # in OtlpOptions.cs, which is pure and already thoroughly tested elsewhere, not a sign of
+        # missing tests. A non-required check that can go red at random on a healthy pull request
+        # teaches people to ignore it, so this lane stays manual: available to whoever picks up
+        # the host issue, rather than gating every PR on a coin flip. It belongs back on pull
+        # requests once that host resolution is fixed, upstream in Stryker or VSTest, or by a
+        # solution shape here that does not trigger it; a narrower solution was tried and instead
+        # reproduced the original all-mutants-survived failure from issue #2 (restorable from
+        # dcc17ad if that needs re-proving), so the fix is not a config change available today. In
+        # the meantime OtlpOptions.cs stays covered deterministically: tools/mutation-check.sh's
+        # 44 hand-mutations run on every push in ci.yml, drive dotnet test directly, and never go
+        # through Stryker's coverage capture or host reuse.
+        #
+        # Raising a threshold is a deliberate commit, not a side effect of adding tests elsewhere.
+        project: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["Pulse","Pulse.Otlp"]') || fromJSON('["Pulse"]') }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache Vintage Story server
+        id: cache-vs
+        uses: actions/cache@v6
+        with:
+          path: ~/vs
+          key: vs-server-linux-x64-${{ env.VS_VERSION }}
+
+      - name: Download Vintage Story server
+        if: steps.cache-vs.outputs.cache-hit != 'true'
+        run: |
+          set -e
+          curl -sSL --proto '=https' --proto-redir '=https' -o vs_server.tar.gz "https://cdn.vintagestory.at/gamefiles/stable/vs_server_linux-x64_${VS_VERSION}.tar.gz"
+          mkdir -p "$HOME/vs"
+          tar -xzf vs_server.tar.gz -C "$HOME/vs"
+
+      # The csproj files resolve VintagestoryAPI.dll straight from $VINTAGE_STORY. Stryker builds
+      # the whole solution, which includes the Atlas scenario projects, so this has to run even
+      # though the mutation run itself never boots a server.
+      - name: Export VINTAGE_STORY
+        run: |
+          set -e
+          DLL_DIR="$(dirname "$(find "$HOME/vs" -name VintagestoryAPI.dll | head -1)")"
+          echo "VINTAGE_STORY=$DLL_DIR" >> "$GITHUB_ENV"
+          echo "Resolved VINTAGE_STORY=$DLL_DIR"
+
+      # dotnet-stryker is pinned in .config/dotnet-tools.json, so the lane cannot change its
+      # verdict because a new Stryker shipped new mutators overnight.
+      - name: Restore dotnet tools
+        run: dotnet tool restore
+
+      # Not --since. A pull request that only deletes a contract test would leave every mutant
+      # filtered out under --since and pass, which is exactly the case this lane exists to catch.
+      # The full run is a stable number. Each mutant run restarts a test host, and that startup
+      # cost dominates on a shared runner: the timeout is generous because the score itself is
+      # the fast part, the fixed per-mutant overhead is what takes the wall clock past local.
+      - name: Mutation test ${{ matrix.project }}
+        run: dotnet dotnet-stryker -f stryker/${{ matrix.project }}.json --skip-version-check --output StrykerOutput/${{ matrix.project }}
+
+      # The surviving mutants are the finding; without the report a red job only says a number
+      # moved.
+      - name: Upload mutation report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report-${{ matrix.project }}
+          path: StrykerOutput/${{ matrix.project }}/reports/mutation-report.json
+          if-no-files-found: warn

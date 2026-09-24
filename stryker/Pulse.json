@@ -1,0 +1,26 @@
+{
+  "$schema": "https://raw.githubusercontent.com/stryker-mutator/stryker-net/master/src/Stryker.Core/Stryker.Core/Schemas/stryker-config.json",
+  "stryker-config": {
+    "solution": "Pulse.slnx",
+    "project": "Pulse.csproj",
+    "test-projects": [
+      "Pulse.Tests.csproj"
+    ],
+    "mutate": [
+      "!**/PulseModSystem.cs",
+      "!**/EngineProbe.cs",
+      "!**/AttributionProbe.cs",
+      "!**/AttributionMetrics.Server.cs"
+    ],
+    "configuration": "Release",
+    "reporters": [
+      "progress",
+      "json"
+    ],
+    "thresholds": {
+      "high": 92,
+      "low": 83,
+      "break": 83
+    }
+  }
+}
