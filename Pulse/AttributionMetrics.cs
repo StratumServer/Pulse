@@ -151,7 +151,7 @@ internal sealed partial class AttributionMetrics
 
         try
         {
-            bool starting = !attribution!.Profiling;
+            bool starting = !attribution.Profiling;
             AttributionBurst? burst = attribution.OnTick(elapsedSeconds, profiler.PrevRootEntry, owners!.Owner);
             if (starting && attribution.Profiling)
             {
