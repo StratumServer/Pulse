@@ -1,0 +1,50 @@
+version: 2
+
+# Actions are pinned by major tag, so patch and minor releases arrive on their own and only a
+# new major needs a pull request; NuGet packages move at a similar pace. Monthly is enough for
+# both.
+#
+# target-branch: dev on both entries because the default branch, main, is released stable
+# (0.1.0) and only takes changes through a dev-to-main release pull request, not directly from
+# Dependabot.
+updates:
+  - package-ecosystem: nuget
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: monthly
+    # Three groups, checked in this order, first match wins: the test stack and OpenTelemetry
+    # each get their own monthly pull request, and everything else lands in one more. Splitting
+    # them keeps one bad bump from turning every package's update red as part of the same PR;
+    # a single ungrouped nuget entry means one bad test-stack release blocks the OpenTelemetry
+    # bump sitting right next to it in the same branch.
+    groups:
+      test-stack:
+        patterns:
+          - "xunit*"
+          - "Microsoft.NET.Test.Sdk"
+          - "coverlet*"
+      opentelemetry:
+        patterns:
+          - "OpenTelemetry*"
+      other:
+        patterns:
+          - "*"
+    ignore:
+      # Our own test harness; bumped by hand together with the scenario changes a new version
+      # needs, not on Dependabot's schedule.
+      - dependency-name: "Pixnop.Atlas.*"
+      # Coverage only runs in the Sonar job, and that job skips Dependabot pull requests, so a
+      # breaking major here would build and test green with nobody watching coverage.
+      - dependency-name: "coverlet.*"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    target-branch: dev
+    schedule:
+      interval: monthly
+    groups:
+      actions:
+        patterns:
+          - "*"

@@ -6,6 +6,20 @@ on:
   pull_request:
     branches: [main, dev]
 
+# Least privilege: nothing here writes to the repository. The job reads the checkout, restores
+# the cached server and uploads the mod zips, none of which needs more than this.
+permissions:
+  contents: read
+
+# A pull request's own commits share a group and cancel each other's stale run, which is the
+# point: only the newest commit's result matters there. A push does not share its group with
+# anything, keyed on the run id rather than the ref, because GitHub keeps only one queued run
+# per group regardless of cancel-in-progress; sharing the ref the way the pull request side does
+# would still let a third rapid push evict the second one's result before it ever runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   VS_VERSION: "1.22.7"
 
