@@ -59,8 +59,8 @@ public class HotToggleScenarios : AtlasScenarioBase
 
         await World.Ticks(5);
 
-        // The flag actually went back down. Leaving it up would charge every later tick a few
-        // percent for a tree nobody reads.
+        // The flag actually went back down. Leaving it up would charge every later tick close to
+        // a quarter of the budget for a tree nobody reads.
         Assert.False(World.Api.World.FrameProfiler.Enabled);
 
         long profiled = (long)Scrape.Value(await Scrape.Metrics(Port), "pulse_attribution_ticks_total");

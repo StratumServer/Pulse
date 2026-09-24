@@ -270,7 +270,7 @@ tests:
               job: vintagestory
             exp_annotations:
               summary: "Mod heavymod holding over half the tick for 10m while the server is loaded."
-              description: "heavymod has held more than 50% of the profiled main-thread tick for 10 minutes while tick busy time stayed over 80% of budget; open the dashboard's attribution row for the full breakdown and look at that mod first. Attribution is sampled (about one tick in twelve at the default duty cycle) and only sees listeners and behaviours, not broadcast event handlers, so treat this as where to look first, not a full accounting."
+              description: "heavymod has held more than 50% of the profiled main-thread tick for 10 minutes while tick busy time stayed over 80% of budget; open the dashboard's attribution row for the full breakdown and look at that mod first. Attribution is sampled (about one tick in thirty at the default duty cycle) and only sees listeners and behaviours, not broadcast event handlers, so treat this as where to look first, not a full accounting."
 
   # Case two: engine, not a real mod, holds 80% of the tick while the server is loaded the
   # whole time. modid!~"engine|unattributed" excludes it before the share comparison ever
@@ -326,7 +326,7 @@ tests:
               job: vintagestory
             exp_annotations:
               summary: "Mod heavymod holding over half the tick for 10m while the server is loaded."
-              description: "heavymod has held more than 50% of the profiled main-thread tick for 10 minutes while tick busy time stayed over 80% of budget; open the dashboard's attribution row for the full breakdown and look at that mod first. Attribution is sampled (about one tick in twelve at the default duty cycle) and only sees listeners and behaviours, not broadcast event handlers, so treat this as where to look first, not a full accounting."
+              description: "heavymod has held more than 50% of the profiled main-thread tick for 10 minutes while tick busy time stayed over 80% of budget; open the dashboard's attribution row for the full breakdown and look at that mod first. Attribution is sampled (about one tick in thirty at the default duty cycle) and only sees listeners and behaviours, not broadcast event handlers, so treat this as where to look first, not a full accounting."
 
   # unattributed hogging a loaded server: silent. Kills 'modid!="engine"'.
   - interval: 1m

@@ -120,8 +120,8 @@ internal sealed partial class AttributionMetrics
     /// <summary>Advances the attribution duty cycle by one tick, and gives up on it for good if
     /// that ever throws.</summary>
     /// <remarks>Same bargain as the engine probe, with one addition: the profiler flag is put back
-    /// before giving up, because leaving it on would charge every later tick a few percent for data
-    /// nobody is reading any more.</remarks>
+    /// before giving up, because leaving it on would charge every later tick close to a quarter of
+    /// the budget for data nobody is reading any more.</remarks>
     public void Tick(double elapsedSeconds)
     {
         if (attribution == null || resolveProfiler() is not { } profiler)

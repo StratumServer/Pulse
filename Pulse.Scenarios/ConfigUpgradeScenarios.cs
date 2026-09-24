@@ -28,7 +28,7 @@ public class ConfigUpgradeScenarios : AtlasScenarioBase
         // The block that arrived after 0.1.0, written out with the defaults the class declares.
         JsonObject attribution = Assert.IsType<JsonObject>(config["Attribution"]);
         Assert.False((bool)attribution["Enabled"]!);
-        Assert.Equal(30, (int)attribution["BurstTicks"]!);
+        Assert.Equal(10, (int)attribution["BurstTicks"]!);
         Assert.Equal(10, (int)attribution["IntervalSeconds"]!);
 
         // And the rest of the keys the file never had.
