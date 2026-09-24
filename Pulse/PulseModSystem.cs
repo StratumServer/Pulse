@@ -12,7 +12,9 @@ public sealed class PulseModSystem : ModSystem
     /// <summary>The runtime's own meter, published by the shared framework on .NET 8 and up.</summary>
     private const string RuntimeMeterName = "System.Runtime";
 
-    private const string ConfigFile = "pulse.json";
+    /// <summary>Shared with <see cref="AttributionMetrics"/>, which reads and rewrites the same
+    /// file from <c>/pulse reload</c>.</summary>
+    internal const string ConfigFile = "pulse.json";
     private const double SnapshotIntervalSeconds = 1.0;
 
     /// <summary>The engine rotates its statistics ring every two seconds, a constant wired into

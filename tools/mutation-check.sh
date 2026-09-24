@@ -47,7 +47,7 @@ mutate() { # <file> <sed -E expression> <label>
     git checkout -- "$file"
 }
 
-MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse/EngineSample.cs Pulse/PingSummary.cs Pulse/EntityBreakdown.cs Pulse/SuspendBookkeeper.cs Pulse/TickAttribution.cs Pulse/ModOwners.cs Pulse/ConfigUpgrade.cs Pulse/PulseCommands.cs Pulse.Otlp/OtlpOptions.cs"
+MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse/EngineSample.cs Pulse/PingSummary.cs Pulse/EntityBreakdown.cs Pulse/SuspendBookkeeper.cs Pulse/TickAttribution.cs Pulse/ModOwners.cs Pulse/ConfigUpgrade.cs Pulse/PulseCommands.cs Pulse/AttributionMetrics.cs Pulse.Otlp/OtlpOptions.cs"
 
 if ! git diff --quiet -- $MUTATED; then
     echo "One of $MUTATED has uncommitted changes; refusing to mutate over them."
@@ -210,6 +210,10 @@ mutate Pulse/ConfigUpgrade.cs \
 mutate Pulse/TickAttribution.cs \
     's/if \(!Enabled\)/if (false)/' \
     "attribution: the duty cycle runs on a server that never switched it on"
+
+mutate Pulse/AttributionMetrics.cs \
+    's/\+\+unprimedTicks > UnprimedTickLimit/++unprimedTicks >= UnprimedTickLimit/' \
+    "attribution: the unprimed-tick give-up trips one tick before its own documented threshold"
 
 mutate Pulse/PulseCommands.cs \
     's/\.Where\(key => key\.Changed\)/.Where(key => true)/' \
