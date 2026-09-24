@@ -54,13 +54,14 @@ Three things worth knowing before you rely on these:
   the same as the tick rate and log/worldgen rules.
 - `PulseModHoggingTick` reads `pulse_server_tick_busy_seconds` too, so it is quiet in degraded mode
   for the same reason. It also needs attribution switched on (see the main README's "Attribution"
-  section) for `pulse_mod_tick_share`, but attribution going off does not make that family
-  disappear the way a failed engine probe does: the share is a plain gauge and the last burst's
-  values stay on `/metrics`, frozen, until the server restarts. That is why the rule also checks
-  `increase(pulse_attribution_ticks_total[5m]) > 0`: once the duty cycle stops advancing that
-  counter, whether from `/pulse attribution off`, a reload with `Enabled` false, or the duty cycle
-  giving up on its own, the guard goes quiet even though the stale share is still sitting there
-  looking like a real number.
+  section) for `pulse_mod_tick_share`. That family is an observable gauge tied to the same duty
+  cycle, so it disappears from `/metrics` the moment attribution stops, whether that is
+  `/pulse attribution off`, a reload with `Enabled` false, or the duty cycle giving up on its own;
+  it no longer sits there at the last burst's values looking like a real number. The rule keeps its
+  own guard regardless, `increase(pulse_attribution_ticks_total[5m]) > 0`: that counter only moves
+  when a burst actually completes, a more direct signal that attribution is doing real work than
+  the family merely being present, and one that still protects the rule if a future change ever
+  lets the gauge report something without a completed burst behind it.
 
 Validate the file after editing it with the same promtool container used to write it:
 

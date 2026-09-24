@@ -30,6 +30,13 @@ public sealed class MetricsAggregator : IDisposable
     private readonly List<Series> series = [];
     private readonly MeterListener listener = new();
 
+    /// <summary>Bumped once per <see cref="Collect"/>, stamped onto every series a measurement
+    /// touches. What lets an observable instrument's absent tag set retire a series instead of
+    /// freezing it at its last value: synchronous instruments are exempt, since a Counter or a
+    /// Gauge is only ever touched when the application explicitly records one, not every scrape,
+    /// and must keep reading its last value between those.</summary>
+    private long generation;
+
     public MetricsAggregator(params string[] meterNames)
         : this(null, meterNames)
     {
@@ -69,10 +76,21 @@ public sealed class MetricsAggregator : IDisposable
     /// They must therefore read only data the main thread has already published.</remarks>
     public IReadOnlyList<MetricSample> Collect()
     {
+        lock (gate)
+        {
+            generation++;
+        }
+
         listener.RecordObservableInstruments();
 
         lock (gate)
         {
+            // An observable series this pass never touched did not report that tag set this time,
+            // which for an observable instrument means it is gone, not merely unchanged: this is
+            // what lets a family like a per-mod share retire a modid instead of serving it forever
+            // at whatever it last measured.
+            series.RemoveAll(s => s.Instrument.IsObservable && s.Generation != generation);
+
             List<MetricSample> samples = new(series.Count);
             foreach (Series s in series)
             {
@@ -172,6 +190,8 @@ public sealed class MetricsAggregator : IDisposable
                 return;
             }
 
+            s.Generation = generation;
+
             if (s.Kind == MetricKind.Histogram)
             {
                 s.Count++;
@@ -260,5 +280,9 @@ public sealed class MetricsAggregator : IDisposable
         public double Sum { get; set; }
 
         public long Count { get; set; }
+
+        /// <summary>The generation this series was last touched in. Meaningless for a synchronous
+        /// instrument's series, which <see cref="Collect"/> never checks it against.</summary>
+        public long Generation { get; set; }
     }
 }

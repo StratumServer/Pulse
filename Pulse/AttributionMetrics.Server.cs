@@ -130,6 +130,7 @@ internal sealed partial class AttributionMetrics
 
         AttributionConfig cycle = loaded.Attribution ?? new AttributionConfig();
         attribution?.Apply(cycle.Enabled, cycle.BurstTicks, cycle.IntervalSeconds);
+        lastShares = [];
         Seed();
 
         return TextCommandResult.Success(PulseCommands.Reloaded(

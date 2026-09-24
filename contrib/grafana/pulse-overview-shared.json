@@ -551,7 +551,7 @@
       "type": "timeseries",
       "title": "Tick share by mod",
       "id": 34,
-      "description": "Per-mod share of profiled main-thread tick time over the last completed burst; shares sum to 1 across every modid, including engine for core systems and unmarked time, and unattributed for marked work no loaded mod claims. Nothing to show until attribution has run at least once: set Attribution.Enabled in ModConfig/pulse.json, or run /pulse attribution on for an immediate look with no restart. Turning it off again does not clear the panel, the last burst's shares stay published and frozen until the server restarts, so a flat line here is not proof attribution is still on; check the profiled ticks rate panel for that. It is blind to broadcast event handlers, which carry no markers at all. A thread-safe behaviour is not blind, it reads low, since only its main-thread slice gets marked; a side-library listener is not blind either, it lands in unattributed, since mapping is by assembly. Read the README's Attribution section before acting on one mod's number.",
+      "description": "Per-mod share of profiled main-thread tick time over the last completed burst; shares sum to 1 across every modid, including engine for core systems and unmarked time, and unattributed for marked work no loaded mod claims. Nothing to show until attribution has run at least once: set Attribution.Enabled in ModConfig/pulse.json, or run /pulse attribution on for an immediate look with no restart. Turning it off again clears the panel: the series disappears rather than freezing on the last burst, since attribution stops serving it the moment it is off, whether that is /pulse attribution off, a reload with Attribution.Enabled false, or attribution giving up on an unreadable profiler. It is blind to broadcast event handlers, which carry no markers at all. A thread-safe behaviour is not blind, it reads low, since only its main-thread slice gets marked; a side-library listener is not blind either, it lands in unattributed, since mapping is by assembly. Read the README's Attribution section before acting on one mod's number.",
       "gridPos": {
         "x": 0,
         "y": 15,
@@ -605,7 +605,7 @@
       "type": "bargauge",
       "title": "Current share by mod",
       "id": 35,
-      "description": "The same shares as a snapshot instead of a trend: which mod is heaviest right now. Same sampling and blind spots as the panel to the left, and the same staleness: once attribution is off this freezes on the last burst rather than clearing, so pair it with the profiled ticks rate panel before trusting a number here.",
+      "description": "The same shares as a snapshot instead of a trend: which mod is heaviest right now. Same sampling and blind spots as the panel to the left, and the same behaviour once attribution is off: the gauge goes empty rather than freezing on the last burst, so no bars here means attribution is not running, not that nothing costs anything.",
       "gridPos": {
         "x": 16,
         "y": 15,

@@ -67,6 +67,17 @@ first.
   URL, `https://opentelemetry.io/schemas/1.44.0`, where 1.18.0 sent none; OTLP exports gain that
   field on the wire. The collision precedence the `ServiceName` guard depends on is unaffected.
 
+### Fixed
+
+- `pulse_mod_tick_share{modid}` no longer keeps serving the last completed burst's shares after
+  attribution stops. It is now an observable gauge tied to the same `Attribution.Enabled` state as
+  the duty cycle, so the family disappears from `/metrics` and from OTLP exports the moment
+  `/pulse attribution off`, a reload with `Enabled` false, or the duty cycle giving up on its own
+  switches it off, instead of freezing at the last burst's values until the server restarts.
+  `pulse_mod_tick_seconds_total`, `pulse_attribution_ticks_total` and
+  `pulse_attribution_dropped_samples_total` are unaffected: they are cumulative counters and simply
+  stop moving.
+
 ## [0.1.0] - 2026-09-01
 
 The first stable release, identical in content to v0.1.0-indev.5. Field-tested on a hosting

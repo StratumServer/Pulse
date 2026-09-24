@@ -63,7 +63,14 @@ public class HotToggleScenarios : AtlasScenarioBase
         // percent for a tree nobody reads.
         Assert.False(World.Api.World.FrameProfiler.Enabled);
 
-        long profiled = (long)Scrape.Value(await Scrape.Metrics(Port), "pulse_attribution_ticks_total");
+        // The share family is gone, not frozen at the last burst it measured: a dashboard plotting
+        // it would otherwise keep showing a mod cost that stopped being true the moment this
+        // command replied. The tick and dropped-sample counters are untouched: they are cumulative
+        // and simply stop moving, which the loop below checks.
+        string stopped = await Scrape.Metrics(Port);
+        Assert.DoesNotContain("pulse_mod_tick_share", stopped);
+
+        long profiled = (long)Scrape.Value(stopped, "pulse_attribution_ticks_total");
         await World.Ticks(300);
         Assert.Equal(profiled, (long)Scrape.Value(await Scrape.Metrics(Port), "pulse_attribution_ticks_total"));
 

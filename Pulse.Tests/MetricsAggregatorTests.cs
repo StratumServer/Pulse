@@ -66,6 +66,54 @@ public class MetricsAggregatorTests
         Assert.Equal(7, sample.Value);
     }
 
+    /// <summary>What lets a family like a per-mod share retire a tag set once its owner stops
+    /// reporting it, instead of serving that tag set forever at whatever it last measured.</summary>
+    [Fact]
+    public void ObservableGauge_Retires_ATagSet_ItsCallbackStopsReporting()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        bool includeMod = true;
+        meter.CreateObservableGauge("g_share", () =>
+        {
+            List<Measurement<double>> shares = [new(1.0, new KeyValuePair<string, object?>("modid", "engine"))];
+            if (includeMod)
+            {
+                shares.Add(new(0.5, new KeyValuePair<string, object?>("modid", "mymod")));
+            }
+
+            return shares;
+        });
+
+        IReadOnlyList<MetricSample> withMod = aggregator.Collect();
+        Assert.Contains(withMod, s => s.Name == "g_share" && s.Labels.Any(l => l.Value == "mymod"));
+
+        includeMod = false;
+        IReadOnlyList<MetricSample> withoutMod = aggregator.Collect();
+        Assert.DoesNotContain(withoutMod, s => s.Name == "g_share" && s.Labels.Any(l => l.Value == "mymod"));
+        Assert.Contains(withoutMod, s => s.Name == "g_share" && s.Labels.Any(l => l.Value == "engine"));
+    }
+
+    /// <summary>The exemption the retiring behaviour above needs: a synchronous instrument is only
+    /// ever touched when the application explicitly records one, not every scrape, so a series it
+    /// is not scraping-blind to must keep reading its last value rather than vanish between calls.</summary>
+    [Fact]
+    public void Counter_Keeps_ItsSeries_BetweenScrapesEvenWithoutBeingRecordedAgain()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        Counter<long> counter = meter.CreateCounter<long>("c_total", "{tick}", "C.");
+
+        counter.Add(3);
+        aggregator.Collect();
+        aggregator.Collect();
+        aggregator.Collect();
+
+        Assert.Equal(3, Sample(aggregator.Collect(), "c_total").Value);
+    }
+
     [Fact]
     public void Histogram_Places_ValuesInTheFirstBucketThatCoversThem()
     {
