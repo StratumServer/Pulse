@@ -54,9 +54,14 @@ public class AttributionMetricsTests
     public void Tick_GivesUpForGood_WhenThePrimedTickNeverCompletes()
     {
         using Meter meter = new(UniqueMeterName());
+        using MetricsAggregator aggregator = new(meter.Name);
         FrameProfilerUtil profiler = new("test") { Enabled = true };
         List<(string Template, string Message)> warnings = [];
         AttributionMetrics metrics = Metrics(meter, profiler, warnings);
+
+        // Established while attribution is still live, so the assertion below proves the family
+        // was retired, not merely that it was never there against a fresh aggregator.
+        Assert.Contains(aggregator.Collect(), s => s.Name == "pulse_mod_tick_share");
 
         for (int tick = 0; tick < 1001; tick++)
         {
@@ -78,6 +83,53 @@ public class AttributionMetricsTests
         Assert.Single(warnings);
         Assert.Equal(EnumCommandStatus.Error, metrics.Status().Status);
         Assert.Equal(EnumCommandStatus.Error, metrics.Switch(true).Status);
+
+        // Giving up must not leave the share family serving whatever it last measured either.
+        Assert.DoesNotContain(aggregator.Collect(), s => s.Name == "pulse_mod_tick_share");
+    }
+
+    /// <summary>The bug this class exists to fix: pulse_mod_tick_share is an observable gauge
+    /// precisely so that switching attribution off makes the family disappear from a scrape, rather
+    /// than serve the shares of whichever mod was profiled in the last burst before the restart.
+    /// The two counted families are unaffected: they are cumulative and simply stop moving.</summary>
+    [Fact]
+    public void Switch_Off_Retires_TheShareSeries_InsteadOfFreezingThem()
+    {
+        using Meter meter = new(UniqueMeterName());
+        using MetricsAggregator aggregator = new(meter.Name);
+        FrameProfilerUtil profiler = new("test") { Enabled = true };
+        profiler.Begin("tick");
+        profiler.End();
+        AttributionMetrics metrics = Metrics(meter, profiler, []);
+
+        // Run a whole burst (interval, warm-up, five folded samples) so the share family carries a
+        // real, measured value rather than only the zero seed.
+        for (int tick = 0; tick < 7; tick++)
+        {
+            metrics.Tick(1.0);
+        }
+
+        IReadOnlyList<MetricSample> running = aggregator.Collect();
+        Assert.Contains(running, s => s.Name == "pulse_mod_tick_share");
+        double ticksBefore = running.Single(s => s.Name == "pulse_attribution_ticks_total").Value;
+
+        metrics.Switch(false);
+
+        IReadOnlyList<MetricSample> stopped = aggregator.Collect();
+        Assert.DoesNotContain(stopped, s => s.Name == "pulse_mod_tick_share");
+
+        // The cumulative families are untouched by the switch: they simply stop moving.
+        Assert.Equal(ticksBefore, stopped.Single(s => s.Name == "pulse_attribution_ticks_total").Value);
+
+        // Switching back on must not flash the burst measured before it was switched off: the
+        // remembered shares are cleared, so this is exactly the zero seed, not stale non-zero
+        // values and not an empty family either.
+        metrics.Switch(true);
+        List<MetricSample> restarted = aggregator.Collect().Where(s => s.Name == "pulse_mod_tick_share").ToList();
+        Assert.Equal(2, restarted.Count);
+        Assert.All(restarted, s => Assert.Equal(0, s.Value));
+        Assert.Contains(restarted, s => s.Labels.Any(l => l.Value == "engine"));
+        Assert.Contains(restarted, s => s.Labels.Any(l => l.Value == "unattributed"));
     }
 
     /// <summary>A failed listener walk is not the same failure as an unreadable profiler: it logs

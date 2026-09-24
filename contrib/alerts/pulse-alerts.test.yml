@@ -18,9 +18,11 @@
 #
 # PulseModHoggingTick gets more than the usual one-firing-one-silent pair: two scrape targets to
 # prove the match stays per-instance, unattributed hogging alongside the already-covered engine,
-# a pending case short of the for: window, and a reproduction of a live bug where the last burst's
-# share stays on /metrics, frozen, after attribution stops, which the rule's own ticks-increase
-# guard has to catch since the share's mere presence proves nothing by itself.
+# a pending case short of the for: window, and a synthetic case where the share stays non-zero on
+# /metrics after attribution stops (pulse_mod_tick_share is an observable gauge that retires the
+# series once attribution is off, so this no longer happens in practice) to prove the rule's own
+# ticks-increase guard would still catch it if it ever did, since the share's mere presence proves
+# nothing by itself.
 
 rule_files:
   - pulse-alerts.yml
@@ -344,9 +346,10 @@ tests:
         alertname: PulseModHoggingTick
         exp_alerts: []
 
-  # /pulse attribution off at minute 5: the gauge keeps its last burst's 0.7 on the wire (a
-  # synchronous Gauge the aggregator never drops), the ticks counter goes flat, the server stays
-  # loaded. Must stay silent, since nothing is being measured any more.
+  # /pulse attribution off at minute 5: feeds the rule a synthetic 0.7 that stays on the wire
+  # regardless of what the real gauge would do (it retires instead; see the guard's own comment
+  # above), while the ticks counter goes flat and the server stays loaded. Must stay silent, since
+  # nothing is being measured any more.
   - interval: 1m
     input_series:
       - series: 'pulse_mod_tick_share{instance="a:9464",job="vintagestory",modid="heavymod"}'

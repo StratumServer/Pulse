@@ -48,6 +48,10 @@ public class AttributionScenarios : AtlasScenarioBase
     private static double Share(string exposition, string modid)
         => Scrape.Value(exposition, $"pulse_mod_tick_share{{modid=\"{modid}\"}}");
 
+    /// <summary>What attribution serves the moment it is armed, before any burst has run. Now
+    /// order-independent within the class: engine and unattributed are always both reported while
+    /// attribution runs (see AttributionMetrics.ShareMeasurements), zero when a burst has not
+    /// produced them yet, so this holds whichever of the scenarios below happens to run first.</summary>
     [AtlasScenario]
     public async Task Attribution_Serves_ItsFamilies_FromBoot()
     {

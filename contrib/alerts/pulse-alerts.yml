@@ -145,13 +145,13 @@ groups:
   - name: pulse-attribution
     rules:
       # Needs attribution switched on (README.md's Attribution section: the config block or
-      # `/pulse attribution on`). pulse_mod_tick_share is a plain synchronous gauge and the
-      # aggregator never retracts a series, so switching attribution off, reloading with Enabled
-      # false, or the duty cycle giving up on its own does not remove it from /metrics: the last
-      # burst's shares stay published, frozen, until the process restarts. The
-      # increase(pulse_attribution_ticks_total) term below is what actually goes quiet when that
-      # happens, since a stopped duty cycle stops advancing that counter; the share alone cannot
-      # tell a live 70% from a 70% nobody has measured in the last half hour.
+      # `/pulse attribution on`). pulse_mod_tick_share is an observable gauge that disappears from
+      # /metrics the moment attribution stops, whether that is switching it off, a reload with
+      # Enabled false, or the duty cycle giving up on its own, so its absence alone already means
+      # nothing is being measured. The increase(pulse_attribution_ticks_total) term below stays as
+      # a second, independent guard: it only moves when a burst actually completes, which is a
+      # more direct proof of live measurement than the share's mere presence, and it is what would
+      # still catch a future change that let the share report again with nothing behind it.
       #
       # Two conditions on top of that, both required: pulse_mod_tick_share sums to 1 across every
       # modid including engine and unattributed, so one mod clearing 0.5 already outweighs
