@@ -8,6 +8,128 @@ bundled dependencies, and does not talk to anything on its own: something has to
 Grab both from the [ModDB page](https://mods.vintagestory.at/pulse) or from
 [GitHub releases](https://github.com/StratumServer/Pulse/releases).
 
+## Table of contents
+
+- [Install](#install)
+- [Configuration](#configuration)
+- [Scraping it](#scraping-it)
+- [Degraded mode](#degraded-mode)
+- [Runtime metrics](#runtime-metrics)
+- [Attribution](#attribution)
+- [OTLP export](#otlp-export)
+- [Building and testing](#building-and-testing)
+- [Where this is going](#where-this-is-going)
+- [License](#license)
+
+## Install
+
+Drop `pulse_x.x.x.zip` into your server's `Mods/` folder and start the server. Add
+`pulseotlp_x.x.x.zip` beside it if you want OTLP push as well; the base mod works on its own and
+the OTLP one does not. On first boot Pulse writes `ModConfig/pulse.json` with its defaults:
+
+```json
+{
+  "Enabled": true,
+  "Bind": "127.0.0.1",
+  "Port": 9464,
+  "RuntimeMetrics": true,
+  "ChunksRefreshSeconds": 30,
+  "Attribution": {
+    "Enabled": false,
+    "BurstTicks": 10,
+    "IntervalSeconds": 10
+  }
+}
+```
+
+Set `Enabled` to false and the mod loads but registers nothing at all: no tick listener, no
+socket, no meter. `RuntimeMetrics` false drops the `dotnet_*` families and keeps the rest, which
+is what you want if something else already collects them on that host. `ChunksRefreshSeconds`
+is how often the loaded-chunk gauge is refreshed, and 30 is already fast for what that read
+costs; lower it only if you know why. `Attribution` is the per-mod breakdown described further
+down, off because it costs tick time.
+
+Everything outside the `Attribution` block takes a server restart. The block itself does not:
+`/pulse reload` applies it live, and `/pulse attribution on` and `off` switch it without touching
+the file at all.
+
+Upgrading does not mean editing the file by hand. Each mod checks its config file at startup and
+writes back any key it knows about that the file is missing, with that key's default; the values
+you already set are kept exactly as they are, and the log lists what was added. A key neither mod
+recognises does not survive that rewrite, so it is reported as a warning instead of disappearing
+quietly: usually it is a typo, and the setting you meant has been running on its default. A file
+that already holds every key is not written at all, which matters if you mount `ModConfig`
+read-only or keep it under version control.
+
+## Configuration
+
+Pulse and the OTLP mod each keep their settings in their own file under `ModConfig/`, written
+with their defaults on first boot. Both files pick up new keys the same way an upgrade adds
+them to a file that predates those keys; see the paragraph on that in [Install](#install).
+
+**`ModConfig/pulse.json`**
+
+| Key | Default | What it does | Live or restart |
+| --- | --- | --- | --- |
+| `Enabled` | `true` | Turns the mod on. `false` loads it but registers nothing: no tick listener, no socket, no meter. | Restart |
+| `Bind` | `"127.0.0.1"` | Address the metrics endpoint binds. See [A word on the bind address](#a-word-on-the-bind-address). | Restart |
+| `Port` | `9464` | Port the metrics endpoint listens on. If it is already taken, Pulse logs an error and runs without the endpoint. | Restart |
+| `RuntimeMetrics` | `true` | Serves the .NET runtime's own `dotnet_*` metrics alongside Pulse's. See [Runtime metrics](#runtime-metrics). | Restart |
+| `ChunksRefreshSeconds` | `30` | How often the loaded-chunk gauge, and the entity breakdown riding the same listener, are refreshed. Floored at 1 second. | Restart |
+| `Attribution.Enabled` | `false` | Turns per-mod tick attribution on. See [Attribution](#attribution). | Live, via `/pulse reload` |
+| `Attribution.BurstTicks` | `10` | Consecutive ticks profiled per burst. Clamped to 1 through 300. | Live, via `/pulse reload` |
+| `Attribution.IntervalSeconds` | `10` | Seconds between the end of one burst and the start of the next. Floored at 1. | Live, via `/pulse reload` |
+
+**`ModConfig/pulse-otlp.json`**
+
+The OTLP mod has no reload command: every key below needs a restart to take effect.
+
+| Key | Default | What it does | Live or restart |
+| --- | --- | --- | --- |
+| `Enabled` | `true` | Turns OTLP export on. `false` keeps the mod loaded but exports nothing. | Restart |
+| `Endpoint` | `"http://localhost:4318"` | Base address of the collector, without a signal path. Pulse appends `/v1/metrics` for `http/protobuf`; the exporter appends its own service path for `grpc`. | Restart |
+| `Protocol` | `"http/protobuf"` | `http/protobuf` or `grpc`. Anything else logs a warning and falls back to `http/protobuf`. | Restart |
+| `Headers` | `{}` | Headers sent with every export, for backend authentication. See [OTLP export](#otlp-export). | Restart |
+| `IntervalSeconds` | `60` | Seconds between two exports. Floored at 5. | Restart |
+| `IncludeRuntimeMetrics` | `true` | Adds the `System.Runtime` meter to what gets pushed. Independent of the base mod's `RuntimeMetrics`. | Restart |
+| `ServiceName` | `"vintagestory"` | Sets the `service.name` resource attribute. A blank value falls back to `vintagestory`; `OTEL_SERVICE_NAME`, if set, overrides this key. | Restart |
+
+## Scraping it
+
+```yaml
+scrape_configs:
+  - job_name: vintagestory
+    static_configs:
+      - targets: ["127.0.0.1:9464"]
+```
+
+`GET /metrics` returns the exposition text; every other path returns 404.
+
+A ready-to-run Prometheus and Grafana pair lives in `contrib/grafana`; Prometheus alerting rules
+calibrated to these thresholds live in `contrib/alerts`.
+
+### For panel authors
+
+The exposition text is the contract: game panels can read `/metrics` directly instead of going
+through Prometheus, which is how the first panel integration was built. Three things to know.
+Each server instance runs its own Pulse on its own port, so a shared machine has one endpoint
+per instance. The loopback bind covers a panel running on the same host; scraping from another
+machine goes through a reverse proxy or a deliberate `Bind` change, as above. Any polling
+cadence works, the endpoint is cheap to hit; existing metric families keep their names and
+shapes, and anything breaking would be called out loudly in the changelog first.
+
+### A word on the bind address
+
+The default binds loopback, which means only something running on the same host can scrape it.
+That default is deliberate. A Vintage Story server is usually a public host, and the metrics
+endpoint has no authentication of any kind, so widening `Bind` to `0.0.0.0` publishes your
+player count and tick health to whoever asks. If you need to scrape from elsewhere, put the
+endpoint behind a reverse proxy or a firewall rule, or tunnel to it. Changing `Bind` is a choice
+you should make on purpose, not a default you inherit.
+
+If the port is already taken, Pulse logs an error and carries on without the endpoint. The game
+server keeps running; you get no metrics until you fix the config.
+
 The metric families it serves:
 
 - `pulse_server_ticks_total` (counter): server ticks processed since startup. Prometheus
@@ -237,82 +359,6 @@ well be profiled during a quiet stretch and read as harmless.
 
 If the numbers matter enough to act on, this is a first pass that says which mod to look at, not
 a call tree. Lithos Probe's sampling profiler is the tool for the second pass.
-
-## Install
-
-Drop `pulse_x.x.x.zip` into your server's `Mods/` folder and start the server. Add
-`pulseotlp_x.x.x.zip` beside it if you want OTLP push as well; the base mod works on its own and
-the OTLP one does not. On first boot Pulse writes `ModConfig/pulse.json` with its defaults:
-
-```json
-{
-  "Enabled": true,
-  "Bind": "127.0.0.1",
-  "Port": 9464,
-  "RuntimeMetrics": true,
-  "ChunksRefreshSeconds": 30,
-  "Attribution": {
-    "Enabled": false,
-    "BurstTicks": 10,
-    "IntervalSeconds": 10
-  }
-}
-```
-
-Set `Enabled` to false and the mod loads but registers nothing at all: no tick listener, no
-socket, no meter. `RuntimeMetrics` false drops the `dotnet_*` families and keeps the rest, which
-is what you want if something else already collects them on that host. `ChunksRefreshSeconds`
-is how often the loaded-chunk gauge is refreshed, and 30 is already fast for what that read
-costs; lower it only if you know why. `Attribution` is the per-mod breakdown described above, off
-because it costs tick time.
-
-Everything outside the `Attribution` block takes a server restart. The block itself does not:
-`/pulse reload` applies it live, and `/pulse attribution on` and `off` switch it without touching
-the file at all.
-
-Upgrading does not mean editing the file by hand. Each mod checks its config file at startup and
-writes back any key it knows about that the file is missing, with that key's default; the values
-you already set are kept exactly as they are, and the log lists what was added. A key neither mod
-recognises does not survive that rewrite, so it is reported as a warning instead of disappearing
-quietly: usually it is a typo, and the setting you meant has been running on its default. A file
-that already holds every key is not written at all, which matters if you mount `ModConfig`
-read-only or keep it under version control.
-
-## Scraping it
-
-```yaml
-scrape_configs:
-  - job_name: vintagestory
-    static_configs:
-      - targets: ["127.0.0.1:9464"]
-```
-
-`GET /metrics` returns the exposition text; every other path returns 404.
-
-A ready-to-run Prometheus and Grafana pair lives in `contrib/grafana`; Prometheus alerting rules
-calibrated to these thresholds live in `contrib/alerts`.
-
-### For panel authors
-
-The exposition text is the contract: game panels can read `/metrics` directly instead of going
-through Prometheus, which is how the first panel integration was built. Three things to know.
-Each server instance runs its own Pulse on its own port, so a shared machine has one endpoint
-per instance. The loopback bind covers a panel running on the same host; scraping from another
-machine goes through a reverse proxy or a deliberate `Bind` change, as above. Any polling
-cadence works, the endpoint is cheap to hit; existing metric families keep their names and
-shapes, and anything breaking would be called out loudly in the changelog first.
-
-### A word on the bind address
-
-The default binds loopback, which means only something running on the same host can scrape it.
-That default is deliberate. A Vintage Story server is usually a public host, and the metrics
-endpoint has no authentication of any kind, so widening `Bind` to `0.0.0.0` publishes your
-player count and tick health to whoever asks. If you need to scrape from elsewhere, put the
-endpoint behind a reverse proxy or a firewall rule, or tunnel to it. Changing `Bind` is a choice
-you should make on purpose, not a default you inherit.
-
-If the port is already taken, Pulse logs an error and carries on without the endpoint. The game
-server keeps running; you get no metrics until you fix the config.
 
 ## OTLP export
 
