@@ -196,16 +196,96 @@ public class PrometheusTextTests
     }
 
     [Theory]
-    [InlineData("dotnet.gc.collections", MetricKind.Counter, "dotnet_gc_collections_total")]
-    [InlineData("dotnet.gc.pause.time", MetricKind.Counter, "dotnet_gc_pause_time_total")]
-    [InlineData("dotnet.process.memory.working_set", MetricKind.Gauge, "dotnet_process_memory_working_set")]
-    [InlineData("dotnet.gc.heap.size", MetricKind.Histogram, "dotnet_gc_heap_size")]
-    [InlineData("pulse_server_ticks_total", MetricKind.Counter, "pulse_server_ticks_total")]
-    [InlineData("pulse_players_online", MetricKind.Gauge, "pulse_players_online")]
-    public void MetricName_Underscores_Dots_AndSuffixesMonotonicCountersOnly(
-        string name, MetricKind kind, string expected)
+    [InlineData("dotnet.gc.collections", MetricKind.Counter, "{collection}", "dotnet_gc_collections_total")]
+    [InlineData("dotnet.gc.pause.time", MetricKind.Counter, "s", "dotnet_gc_pause_time_seconds_total")]
+    [InlineData("dotnet.process.memory.working_set", MetricKind.Gauge, "By", "dotnet_process_memory_working_set_bytes")]
+    [InlineData("dotnet.gc.heap.size", MetricKind.Histogram, "", "dotnet_gc_heap_size")]
+    [InlineData("pulse_server_ticks_total", MetricKind.Counter, "{tick}", "pulse_server_ticks_total")]
+    [InlineData("pulse_players_online", MetricKind.Gauge, "{player}", "pulse_players_online")]
+    [InlineData("pulse_mod_tick_share", MetricKind.Gauge, "{share}", "pulse_mod_tick_share")]
+    [InlineData("thing_gauge", MetricKind.Gauge, "1", "thing_gauge_ratio")]
+    public void MetricName_Underscores_Dots_AppliesUnitWords_AndSuffixesMonotonicCountersOnly(
+        string name, MetricKind kind, string unit, string expected)
     {
-        Assert.Equal(expected, PrometheusText.MetricName(name, kind));
+        Assert.Equal(expected, PrometheusText.MetricName(name, kind, unit));
+    }
+
+    /// <summary>Every instrument Pulse.Server and the runtime's System.Runtime meter publish, with
+    /// the exact name prometheus/otlptranslator v1.0.0 derives from its instrument name, unit and
+    /// kind (UnderscoreEscapingWithSuffixes, no namespace): the same translation Grafana applies to
+    /// the OTLP export and opentelemetry-dotnet's own Prometheus exporter applies in process. This
+    /// table is the proof that carrying the unit into the writer and applying the translator's
+    /// rules generally, rather than special-casing the nine renamed runtime families, still leaves
+    /// every one of the 28 Pulse.Server names exactly as it already was.</summary>
+    [Theory]
+    [MemberData(nameof(AllInstruments))]
+    public void MetricName_MatchesTheOtlpTranslation_ForEveryInstrumentPulsePublishes(
+        string instrument, MetricKind kind, string unit, string expected)
+    {
+        Assert.Equal(expected, PrometheusText.MetricName(instrument, kind, unit));
+    }
+
+    /// <summary>One row per instrument in harness/instruments.tsv from the naming investigation,
+    /// with the three fixed units and the expected name each produces through
+    /// github.com/prometheus/otlptranslator v1.0.0 (UnderscoreEscapingWithSuffixes, no namespace).</summary>
+    public static IEnumerable<object[]> AllInstruments()
+    {
+        (string Instrument, MetricKind Kind, string Unit, string Expected)[] rows =
+        [
+            ("pulse_server_ticks_total", MetricKind.Counter, "{tick}", "pulse_server_ticks_total"),
+            ("pulse_server_tick_seconds", MetricKind.Histogram, "s", "pulse_server_tick_seconds"),
+            ("pulse_players_online", MetricKind.Gauge, "{player}", "pulse_players_online"),
+            ("pulse_entities_loaded", MetricKind.Gauge, "{entity}", "pulse_entities_loaded"),
+            ("pulse_server_tick_budget_seconds", MetricKind.Gauge, "s", "pulse_server_tick_budget_seconds"),
+            ("pulse_worldgen_queue_columns", MetricKind.Gauge, "{column}", "pulse_worldgen_queue_columns"),
+            ("pulse_chunks_loaded", MetricKind.Gauge, "{chunk}", "pulse_chunks_loaded"),
+            ("pulse_server_uptime_seconds", MetricKind.Gauge, "s", "pulse_server_uptime_seconds"),
+            ("pulse_player_ping_seconds", MetricKind.Gauge, "s", "pulse_player_ping_seconds"),
+            ("pulse_network_sent_bytes_total", MetricKind.Counter, "By", "pulse_network_sent_bytes_total"),
+            ("pulse_network_received_bytes_total", MetricKind.Counter, "By", "pulse_network_received_bytes_total"),
+            ("pulse_entities_by_code", MetricKind.Gauge, "{entity}", "pulse_entities_by_code"),
+            ("pulse_player_deaths_total", MetricKind.Counter, "{death}", "pulse_player_deaths_total"),
+            ("pulse_server_suspends_total", MetricKind.Counter, "{suspend}", "pulse_server_suspends_total"),
+            ("pulse_server_suspend_seconds_total", MetricKind.Counter, "s", "pulse_server_suspend_seconds_total"),
+            ("pulse_worldgen_columns_generated_total", MetricKind.Counter, "{column}", "pulse_worldgen_columns_generated_total"),
+            ("pulse_log_entries_total", MetricKind.Counter, "{entry}", "pulse_log_entries_total"),
+            ("pulse_engine_warnings_total", MetricKind.Counter, "{warning}", "pulse_engine_warnings_total"),
+            ("pulse_server_tick_busy_seconds", MetricKind.Gauge, "s", "pulse_server_tick_busy_seconds"),
+            ("pulse_network_packets_per_second", MetricKind.Gauge, "{packet/s}", "pulse_network_packets_per_second"),
+            ("pulse_network_bytes_per_second", MetricKind.Gauge, "{byte/s}", "pulse_network_bytes_per_second"),
+            ("pulse_connection_queue_clients", MetricKind.Gauge, "{client}", "pulse_connection_queue_clients"),
+            ("pulse_network_udp_sent_bytes_total", MetricKind.Counter, "By", "pulse_network_udp_sent_bytes_total"),
+            ("pulse_network_udp_received_bytes_total", MetricKind.Counter, "By", "pulse_network_udp_received_bytes_total"),
+            ("pulse_mod_tick_share", MetricKind.Gauge, "{share}", "pulse_mod_tick_share"),
+            ("pulse_mod_tick_seconds_total", MetricKind.Counter, "s", "pulse_mod_tick_seconds_total"),
+            ("pulse_attribution_ticks_total", MetricKind.Counter, "{tick}", "pulse_attribution_ticks_total"),
+            ("pulse_attribution_dropped_samples_total", MetricKind.Counter, "{sample}", "pulse_attribution_dropped_samples_total"),
+            ("dotnet.gc.collections", MetricKind.Counter, "{collection}", "dotnet_gc_collections_total"),
+            ("dotnet.process.memory.working_set", MetricKind.Gauge, "By", "dotnet_process_memory_working_set_bytes"),
+            ("dotnet.gc.heap.total_allocated", MetricKind.Counter, "By", "dotnet_gc_heap_allocated_bytes_total"),
+            ("dotnet.gc.last_collection.memory.committed_size", MetricKind.Gauge, "By", "dotnet_gc_last_collection_memory_committed_size_bytes"),
+            ("dotnet.gc.last_collection.heap.size", MetricKind.Gauge, "By", "dotnet_gc_last_collection_heap_size_bytes"),
+            ("dotnet.gc.last_collection.heap.fragmentation.size", MetricKind.Gauge, "By", "dotnet_gc_last_collection_heap_fragmentation_size_bytes"),
+            ("dotnet.gc.pause.time", MetricKind.Counter, "s", "dotnet_gc_pause_time_seconds_total"),
+            ("dotnet.jit.compiled_il.size", MetricKind.Counter, "By", "dotnet_jit_compiled_il_size_bytes_total"),
+            ("dotnet.jit.compiled_methods", MetricKind.Counter, "{method}", "dotnet_jit_compiled_methods_total"),
+            ("dotnet.jit.compilation.time", MetricKind.Counter, "s", "dotnet_jit_compilation_time_seconds_total"),
+            ("dotnet.monitor.lock_contentions", MetricKind.Counter, "{contention}", "dotnet_monitor_lock_contentions_total"),
+            ("dotnet.thread_pool.thread.count", MetricKind.Counter, "{thread}", "dotnet_thread_pool_thread_count_total"),
+            ("dotnet.thread_pool.work_item.count", MetricKind.Counter, "{work_item}", "dotnet_thread_pool_work_item_count_total"),
+            ("dotnet.thread_pool.queue.length", MetricKind.Counter, "{work_item}", "dotnet_thread_pool_queue_length_total"),
+            ("dotnet.timer.count", MetricKind.Gauge, "{timer}", "dotnet_timer_count"),
+            ("dotnet.assembly.count", MetricKind.Gauge, "{assembly}", "dotnet_assembly_count"),
+            ("dotnet.exceptions", MetricKind.Counter, "{exception}", "dotnet_exceptions_total"),
+            ("dotnet.process.cpu.count", MetricKind.Gauge, "{cpu}", "dotnet_process_cpu_count"),
+            ("dotnet.process.cpu.time", MetricKind.Counter, "s", "dotnet_process_cpu_time_seconds_total"),
+        ];
+
+        Assert.Equal(47, rows.Length);
+        foreach ((string instrument, MetricKind kind, string unit, string expected) in rows)
+        {
+            yield return [instrument, kind, unit, expected];
+        }
     }
 
     [Fact]

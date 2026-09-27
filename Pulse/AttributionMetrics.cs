@@ -88,7 +88,7 @@ internal sealed partial class AttributionMetrics
 
         attribution = new TickAttribution(config.BurstTicks, config.IntervalSeconds, config.Enabled);
         meter.CreateObservableGauge(
-            "pulse_mod_tick_share", ShareMeasurements, "1",
+            "pulse_mod_tick_share", ShareMeasurements, "{share}",
             "Fraction of the profiled main-thread busy time attributed to one mod over the last completed burst, while attribution is running.");
         modTickSeconds = meter.CreateCounter<double>(
             "pulse_mod_tick_seconds_total", "s",

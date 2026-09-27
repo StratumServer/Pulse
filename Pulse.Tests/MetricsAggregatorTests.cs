@@ -353,11 +353,12 @@ public class MetricsAggregatorTests
         string text = PrometheusText.Render(aggregator.Collect());
 
         // The built-in net10 meter, mapped: dotted names, an ObservableCounter that is a counter
-        // with a _total suffix, an ObservableUpDownCounter that is a gauge, and real tags.
+        // with a _total suffix, an ObservableUpDownCounter that is a gauge, real tags, and the
+        // unit-driven translation for the two families the OTLP path spells differently.
         Assert.Contains("# TYPE dotnet_gc_collections_total counter\n", text);
         Assert.Contains("dotnet_gc_collections_total{gc_heap_generation=\"gen0\"} ", text);
-        Assert.Contains("# TYPE dotnet_process_memory_working_set gauge\n", text);
-        Assert.Contains("dotnet_process_cpu_time_total{cpu_mode=\"user\"} ", text);
+        Assert.Contains("# TYPE dotnet_process_memory_working_set_bytes gauge\n", text);
+        Assert.Contains("dotnet_process_cpu_time_seconds_total{cpu_mode=\"user\"} ", text);
     }
 
     /// <summary>An instrument that is none of the seven shapes the aggregator knows.</summary>
