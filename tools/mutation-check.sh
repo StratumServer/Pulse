@@ -127,8 +127,12 @@ mutate Pulse/TickBookkeeper.cs \
     "tick bookkeeper: snapshot cadence boundary made inclusive, delaying the due tick that lands exactly on it"
 
 mutate Pulse/PrometheusText.cs \
-    's/samples\.GroupBy\(sample => MetricName\(sample\.Name, sample\.Kind\)\)/samples.GroupBy(sample => MetricName(sample.Name, sample.Kind) + sample.Labels.Length)/' \
+    's/samples\.GroupBy\(sample => MetricName\(sample\.Name, sample\.Kind, sample\.Unit\)\)/samples.GroupBy(sample => MetricName(sample.Name, sample.Kind, sample.Unit) + sample.Labels.Length)/' \
     "writer: a family is split by tag set, repeating its HELP and TYPE lines"
+
+mutate Pulse/PrometheusText.cs \
+    's/tokens\.RemoveAll\(t => t == word\);//' \
+    "writer: a counter or ratio suffix already present in the name is duplicated instead of moved to the end"
 
 mutate Pulse/EngineSample.cs \
     's/ticksTotal > 0 \?/ticksTotal >= 0 ?/' \
