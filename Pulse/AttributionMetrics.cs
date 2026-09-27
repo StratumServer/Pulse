@@ -39,6 +39,8 @@ internal sealed partial class AttributionMetrics
     /// concluding that priming never took. Roughly half a minute at the default tick rate.</summary>
     private const int UnprimedTickLimit = 1000;
 
+    private const string Modid = "modid";
+
     private readonly Func<FrameProfilerUtil?> resolveProfiler;
     private readonly Action<string, string> warn;
 
@@ -47,10 +49,15 @@ internal sealed partial class AttributionMetrics
     // before `this` exists), so it chains with a placeholder here and replaces it in its body,
     // once attributionProbe is a field it can actually reference.
     private Action<ModOwners> walkListeners;
-    private readonly Gauge<double> modTickShare;
     private readonly Counter<double> modTickSeconds;
     private readonly Counter<long> attributionTicks;
     private readonly Counter<long> attributionDropped;
+
+    /// <summary>The shares the last completed burst measured, read by the observable gauge's
+    /// callback rather than pushed to it: an absent modid there is what lets
+    /// <c>pulse_mod_tick_share</c> retire a series instead of freezing it once attribution stops,
+    /// which a synchronous <c>Gauge</c> cannot do (see MetricsAggregator.Collect).</summary>
+    private List<KeyValuePair<string, double>> lastShares = [];
 
     private TickAttribution? attribution;
     private ModOwners? owners;
@@ -80,9 +87,9 @@ internal sealed partial class AttributionMetrics
         owners = new ModOwners(_ => null);
 
         attribution = new TickAttribution(config.BurstTicks, config.IntervalSeconds, config.Enabled);
-        modTickShare = meter.CreateGauge<double>(
-            "pulse_mod_tick_share", "1",
-            "Fraction of the profiled main-thread busy time attributed to one mod over the last completed burst.");
+        meter.CreateObservableGauge(
+            "pulse_mod_tick_share", ShareMeasurements, "1",
+            "Fraction of the profiled main-thread busy time attributed to one mod over the last completed burst, while attribution is running.");
         modTickSeconds = meter.CreateCounter<double>(
             "pulse_mod_tick_seconds_total", "s",
             "Main-thread seconds attributed to one mod while attribution was profiling. Sampled: this is time inside the bursts, not since startup.");
@@ -102,6 +109,7 @@ internal sealed partial class AttributionMetrics
         }
 
         attribution.Apply(on, attribution.BurstTicks, attribution.IntervalSeconds);
+        lastShares = [];
         Seed();
         return TextCommandResult.Success(
             PulseCommands.Switched(on, attribution.BurstTicks, attribution.IntervalSeconds));
@@ -196,22 +204,70 @@ internal sealed partial class AttributionMetrics
     {
         attributionTicks.Add(burst.Ticks);
         attributionDropped.Add(burst.Dropped);
+        List<KeyValuePair<string, double>> shares = new(burst.Seconds.Count);
         foreach (KeyValuePair<string, double> entry in burst.Seconds)
         {
-            KeyValuePair<string, object?> modid = new("modid", entry.Key);
-            modTickSeconds.Add(entry.Value, modid);
-            modTickShare.Record(burst.BusySeconds > 0 ? entry.Value / burst.BusySeconds : 0, modid);
+            modTickSeconds.Add(entry.Value, new KeyValuePair<string, object?>(Modid, entry.Key));
+            shares.Add(new KeyValuePair<string, double>(
+                entry.Key, burst.BusySeconds > 0 ? entry.Value / burst.BusySeconds : 0));
+        }
+
+        lastShares = shares;
+    }
+
+    /// <summary>The observable callback behind <c>pulse_mod_tick_share</c>.</summary>
+    /// <remarks>Nothing at all once attribution has stopped, which is what makes the family
+    /// disappear from a scrape rather than serve the last burst forever: MetricsAggregator retires
+    /// an observable series the moment its callback stops reporting the tag set, and the OTLP SDK
+    /// does the same for an export cycle with no measurement for a series (confirmed against the
+    /// 1.19.1 SDK source, <c>AggregatorStore.SnapshotCumulative</c>; the behaviour needs
+    /// OpenTelemetry 1.15.1 or later, opentelemetry-dotnet issue #5950, so pinning an older SDK
+    /// would silently bring stale OTLP shares back even though the mod's own logic is correct).
+    /// While attribution is running, <c>engine</c> and <c>unattributed</c> are always reported,
+    /// either from the last burst or at zero when that burst never produced them:
+    /// <c>TickAttribution.Take</c> only carries a modid forward once something has been folded
+    /// into it, so a run where nothing has ever gone unattributed would otherwise drop that bucket
+    /// the moment any real burst completed, exactly the assumption <see cref="Seed"/> also
+    /// depends on. <see cref="lastShares"/> is read once into a local rather than twice, so a
+    /// Switch or Reload landing mid-callback cannot blank the family for that one scrape.</remarks>
+    private IEnumerable<Measurement<double>> ShareMeasurements()
+    {
+        if (attribution is not { Enabled: true })
+        {
+            yield break;
+        }
+
+        List<KeyValuePair<string, double>> shares = lastShares;
+        bool sawEngine = false;
+        bool sawUnattributed = false;
+        foreach (KeyValuePair<string, double> share in shares)
+        {
+            sawEngine |= share.Key == TickAttribution.Engine;
+            sawUnattributed |= share.Key == TickAttribution.Unattributed;
+            yield return new Measurement<double>(share.Value, new KeyValuePair<string, object?>(Modid, share.Key));
+        }
+
+        if (!sawEngine)
+        {
+            yield return new Measurement<double>(0, new KeyValuePair<string, object?>(Modid, TickAttribution.Engine));
+        }
+
+        if (!sawUnattributed)
+        {
+            yield return new Measurement<double>(0, new KeyValuePair<string, object?>(Modid, TickAttribution.Unattributed));
         }
     }
 
-    /// <summary>Puts the attribution families on the wire from boot, at zero, rather than the first
-    /// time a burst completes.</summary>
-    /// <remarks>The two labelled families are seeded on the buckets that always exist. A mod's own
-    /// series still appears the first time it is measured, which is unavoidable: nothing knows
-    /// which mods eat tick time until one has been profiled.
+    /// <summary>Puts the two counted families on the wire from boot, at zero, rather than the
+    /// first time a burst completes.</summary>
+    /// <remarks><c>pulse_mod_tick_share</c> needs no push here: it is observable, so its callback
+    /// seeds the same two buckets itself the moment something scrapes it, and only for as long as
+    /// attribution is actually running. A mod's own series still appears the first time it is
+    /// measured, which is unavoidable: nothing knows which mods eat tick time until one has been
+    /// profiled.
     /// <para>Only once attribution is actually running, which is also what keeps a server that
-    /// never switches it on free of four families that would never move. Called again by the
-    /// command that switches it on, so the families reach the wire there too.</para></remarks>
+    /// never switches it on free of families that would never move. Called again by the command
+    /// that switches it on, so the counted families reach the wire there too.</para></remarks>
     public void Seed()
     {
         if (attribution is not { Enabled: true })
@@ -223,9 +279,7 @@ internal sealed partial class AttributionMetrics
         attributionDropped.Add(0);
         foreach (string modid in new[] { TickAttribution.Engine, TickAttribution.Unattributed })
         {
-            KeyValuePair<string, object?> label = new("modid", modid);
-            modTickSeconds.Add(0, label);
-            modTickShare.Record(0, label);
+            modTickSeconds.Add(0, new KeyValuePair<string, object?>(Modid, modid));
         }
     }
 
