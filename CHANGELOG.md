@@ -77,6 +77,14 @@ first.
   endpoint nobody configured, and redacts any value Newtonsoft quoted in the parser's message (a
   `Headers` entry of the wrong shape, most often) before it reaches the log. An absent file and a
   valid one are unaffected.
+- `pulse_mod_tick_share{modid}` no longer keeps serving the last completed burst's shares after
+  attribution stops. It is now an observable gauge tied to the same `Attribution.Enabled` state as
+  the duty cycle, so the family disappears from `/metrics` and from OTLP exports the moment
+  `/pulse attribution off`, a reload with `Enabled` false, or the duty cycle giving up on its own
+  switches it off, instead of freezing at the last burst's values until the server restarts.
+  `pulse_mod_tick_seconds_total`, `pulse_attribution_ticks_total` and
+  `pulse_attribution_dropped_samples_total` are unaffected: they are cumulative counters and simply
+  stop moving.
 
 ## [0.1.0] - 2026-09-01
 

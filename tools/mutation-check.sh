@@ -106,6 +106,14 @@ mutate Pulse/MetricsAggregator.cs \
     's/return bounds\.Length;/return 0;/' \
     "aggregator: overflow values land in the first bucket"
 
+mutate Pulse/MetricsAggregator.cs \
+    's/s\.Instrument\.IsObservable && s\.Generation != generation/s.Generation != generation/' \
+    "aggregator: a synchronous series is retired between scrapes as if it were observable"
+
+mutate Pulse/MetricsAggregator.cs \
+    's/series\.RemoveAll\(s => s\.Instrument\.IsObservable && s\.Generation != generation\);//' \
+    "aggregator: an observable series is never retired, freezing it at whatever it last measured"
+
 mutate Pulse/LogClassifier.cs \
     's/\("Server suspend requested, but reached max wait time", "suspend_timeout"\)/("Server suspend requested and reached max wait time", "suspend_timeout")/' \
     "classifier: an engine warning prefix drifts from the engine string"
