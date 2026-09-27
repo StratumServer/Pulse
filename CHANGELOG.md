@@ -14,20 +14,18 @@ first.
   Grafana, routed by how their server is hosted: installing the base mod, then either a local
   Prometheus and Grafana pair or Grafana Cloud's free tier over OTLP, ending at the shared
   dashboard either way. `contrib/grafana` gains `docker-compose.yml` for a Linux machine (host
-  networking, one `docker compose up -d` instead of the two `docker run` commands the README
-  also shows) and `docker-compose.desktop.yml` plus `prometheus.desktop.yml` for Windows and
-  macOS. The Windows and macOS file reaches Pulse through `host.docker.internal` with a
-  Prometheus `proxy_url`, still addressing Pulse itself as `127.0.0.1`: on Linux and macOS,
-  Pulse's listener answers 404 to any other Host header, `localhost` included, now called out in
-  the guide's troubleshooting too. Grafana shares Prometheus's network namespace so the
-  provisioned datasource needs no change between the two files. All three, plus the README's own
-  `docker run` commands in both `contrib/grafana` and `contrib/alerts`, bind Grafana and
-  Prometheus to 127.0.0.1: with host networking an unbound, unauthenticated Grafana admin
-  account and an unbound Prometheus are reachable from anywhere that can reach the machine, not
-  just from it, so the guides cover an SSH tunnel for viewing a remote server instead. The guide
-  also lists, by panel title, which nine Grafana Cloud dashboard panels do not yet render over
-  OTLP, tracked in [issue #77](https://github.com/StratumServer/Pulse/issues/77) pending a
-  decision between fixing the dashboard's queries or the OTLP mod's reported units.
+  networking, one `docker compose up -d` instead of the two `docker run` commands the README also
+  shows) and `docker-compose.desktop.yml` plus `prometheus.desktop.yml` for Windows and macOS. The
+  Windows and macOS file reaches Pulse through `host.docker.internal` directly. Grafana shares
+  Prometheus's network namespace so the provisioned datasource needs no change between the two
+  files. All three, plus the README's own `docker run` commands in both `contrib/grafana` and
+  `contrib/alerts`, bind Grafana and Prometheus to 127.0.0.1: with host networking an unbound,
+  unauthenticated Grafana admin account and an unbound Prometheus are reachable from anywhere that
+  can reach the machine, not just from it, so the guides cover an SSH tunnel for viewing a remote
+  server instead. The guide also lists, by panel title, which nine Grafana Cloud dashboard panels
+  do not yet render over OTLP, tracked in
+  [issue #77](https://github.com/StratumServer/Pulse/issues/77) pending a decision between fixing
+  the dashboard's queries or the OTLP mod's reported units.
 - A dashboard row, `Attribution, only when turned on`, placed right after tick health: a stacked
   time series of `pulse_mod_tick_share` by mod, a bar gauge for the current share, attributed tick
   time per mod using the main README's own seconds-per-profiled-tick recipe, and a small panel for
@@ -87,6 +85,17 @@ first.
 
 ### Fixed
 
+- The metrics endpoint now serves from a plain TCP socket instead of `HttpListener`, which fixes
+  four different ways it could fail to serve anything. On Windows, binding loopback no longer
+  needs an administrator or a `netsh` URL reservation: `HttpListener` went through `http.sys`,
+  which refused that to an ordinary user. On Linux and macOS, `http://localhost:9464/metrics` and
+  `http://host.docker.internal:9464/metrics` no longer answer 404: the old listener matched the
+  Host header against the configured `Bind` address and rejected anything else, and the new
+  server does not look at Host at all. `Bind` set to `0.0.0.0` no longer throws at startup on
+  Linux. An invalid `Bind` value, an empty string or `::1` without brackets among them, is now
+  caught in the same place a taken port already was, logged as a clean bind failure instead of
+  raising an exception that left the rest of the mod running with no endpoint and no explanation
+  in the log.
 - A `pulse.json` or `pulse-otlp.json` that exists but will not parse (a stray comma is enough) no
   longer stops the mod from starting; before, recovering meant deleting the file by hand. Each mod
   now logs one error naming the file's full path and the parser's own message, and leaves the file

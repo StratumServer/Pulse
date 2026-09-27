@@ -4,11 +4,10 @@
 #   docker compose -f docker-compose.desktop.yml up -d
 #
 # Prometheus reaches the host through host.docker.internal, the address Docker Desktop provides
-# from inside a container, but still asks Pulse for 127.0.0.1 once it gets there (see the
-# comment in prometheus.desktop.yml): on Linux and macOS, Pulse's listener answers 404 to any
-# other Host header, host.docker.internal included; Windows does not have this problem. Use this
-# file when the Pulse-equipped server runs directly on this same Windows or macOS machine, not
-# inside another container of its own (see docs/getting-started.md, "Which path is yours").
+# from inside a container, and scrapes Pulse there directly: Pulse's socket server answers
+# whatever Host header a request carries. Use this file when the Pulse-equipped server runs
+# directly on this same Windows or macOS machine, not inside another container of its own (see
+# docs/getting-started.md, "Which path is yours").
 #
 # Both ports are published to 127.0.0.1 only, same reasoning as docker-compose.yml: an
 # unauthenticated Grafana and Prometheus should not be reachable from outside this machine.
