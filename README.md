@@ -231,10 +231,22 @@ out, instead of shipping a mod that quietly serves six families fewer.
 With `RuntimeMetrics` left on, the .NET runtime's own `System.Runtime` meter is served
 alongside Pulse's, as `dotnet_*` families: GC collections and pause time, heap size and
 fragmentation by generation, working set, CPU time by mode, JIT, thread pool, lock contention,
-loaded assemblies. None of it is instrumented here. The runtime publishes the meter, Pulse
-subscribes to it, and the writer renames the instruments for the exposition format: dots become
-underscores, and a monotonic counter gains the `_total` suffix if it lacks one, so
-`dotnet.gc.collections` is served as `dotnet_gc_collections_total`.
+loaded assemblies. None of it is instrumented here. The runtime publishes the meter, and the
+writer renames each instrument the same way OpenTelemetry's own OTLP-to-Prometheus translation
+does: dots become underscores, the instrument's unit becomes a trailing word unless the name
+already ends in it, and a monotonic counter's name ends in `_total`, moved there rather than
+duplicated if the name already spells "total" somewhere. `dotnet.gc.collections` is served as
+`dotnet_gc_collections_total`; `dotnet.process.memory.working_set`, a gauge in bytes, is served as
+`dotnet_process_memory_working_set_bytes`; `dotnet.gc.heap.total_allocated`, a counter also in
+bytes, is served as `dotnet_gc_heap_allocated_bytes_total` rather than the doubled
+`..._total_allocated_bytes_total`. This is the same name Grafana derives when it translates the
+OTLP export, and the same one opentelemetry-dotnet's own Prometheus exporter gives the instrument
+in process, so a dashboard or alert built against either of those reads Pulse's own `/metrics`
+without translation.
+
+Nine of these families moved to this spelling in 0.2, to line up with that translation; see the
+changelog for the full old to new list if you have a dashboard or alert built against the earlier
+names. `pulse_*` families are unaffected.
 
 Pulse renders the shape each instrument declares, including where that is arguable.
 `dotnet_thread_pool_thread_count_total` is typed as a counter because the runtime publishes it

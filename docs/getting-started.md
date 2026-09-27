@@ -250,17 +250,15 @@ Once the numbers are flowing, bring in the dashboard:
 4. Open the imported dashboard. It is the same "Pulse server overview" dashboard as path A, with
    one difference, covered next.
 
-Nine panels stay empty on this dashboard when the data arrives over OTLP instead of a direct
-scrape, even though the numbers behind them exist. Grafana Cloud's own translation from OTLP
-into Prometheus-style names adds a unit suffix to some series on the way in, and the dashboard's
-queries do not know the translated names yet: "Bytes per second by channel" and "Packets per
-second by channel" in the Network row, "Tick share by mod" and "Current share by mod" in
-Attribution, and "GC pause time", "Allocation rate", "Managed heap after last collection",
-"Process memory" and "CPU time" in the Runtime row. A decision on the fix, either the dashboard's
-queries or how the OTLP mod reports units, is tracked in
-[issue #77](https://github.com/StratumServer/Pulse/issues/77); nothing in the dashboard JSON
-changes here. Everything else, including tick health, players, world and worldgen, reads
-normally.
+Every panel on this dashboard reads the same over OTLP as it does from a direct scrape. That used
+to not be true: nine panels (the two per-second network panels, the two attribution share panels,
+and five in the Runtime row) stayed empty over OTLP, because Grafana Cloud's own translation from
+OTLP into Prometheus-style names did not match what the dashboard queried, tracked in
+[issue #77](https://github.com/StratumServer/Pulse/issues/77). 0.2 fixed both sides of that
+mismatch: three instruments had the wrong declared unit, and the runtime panels now query the same
+translated names Grafana Cloud already produced, so nothing here needs a workaround any more. See
+the main README's [Runtime metrics](../README.md#runtime-metrics) section and the changelog if a
+dashboard or alert you built against the old names still needs updating.
 
 ## Troubleshooting
 
