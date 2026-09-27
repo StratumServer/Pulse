@@ -14,5 +14,8 @@ StrykerOutput/
 # Packaged mod zips built locally.
 *.zip
 
+# Left behind by the Grafana kit's Python scripts.
+__pycache__/
+
 # Agent worktrees live under the checkout; nothing in there is source.
 .claude/
