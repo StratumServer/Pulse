@@ -10,6 +10,13 @@ first.
 
 ### Added
 
+- `docs/getting-started.md`, a walkthrough for a server owner who has never used Prometheus or
+  Grafana: installing the base mod, then either a local Prometheus and Grafana pair or Grafana
+  Cloud's free tier over OTLP, ending at the shared dashboard either way. `contrib/grafana`
+  gains `docker-compose.yml`, running the folder's existing Prometheus and Grafana with their
+  existing provisioning as one `docker compose up -d` instead of the two `docker run` commands
+  the README still shows; it uses host networking, Linux only, and carries a comment for the
+  Docker Desktop change that path needs.
 - A dashboard row, `Attribution, only when turned on`, placed right after tick health: a stacked
   time series of `pulse_mod_tick_share` by mod, a bar gauge for the current share, attributed tick
   time per mod using the main README's own seconds-per-profiled-tick recipe, and a small panel for

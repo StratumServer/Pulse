@@ -1,0 +1,42 @@
+# Prometheus and Grafana, wired exactly like the two `docker run` commands in this folder's
+# README, as one `docker compose up -d` instead of two commands run by hand.
+#
+# Host networking (below) only works on Linux, where a container shares the host's network
+# stack and can reach a Pulse endpoint at 127.0.0.1:9464 same as anything else on the host. On
+# Docker Desktop for Windows or macOS, host networking does not reach the host at all, so this
+# file needs two changes there:
+#
+#   1. Delete the `network_mode: host` line from both services, and add instead:
+#        prometheus:
+#          ports: ["9090:9090"]
+#        grafana:
+#          ports: ["3000:3000"]
+#   2. In prometheus.yml, change the scrape target from "127.0.0.1:9464" to
+#      "host.docker.internal:9464", the hostname Docker Desktop provides for reaching the host
+#      from inside a container.
+#
+# Grafana's anonymous access below is enabled with admin rights, same as the plain `docker run`
+# setup this replaces: fine for a local look on your own machine, not for anything reachable
+# from outside it. Run Grafana properly (real accounts, a real org role) if you keep this beyond
+# a first look.
+services:
+  prometheus:
+    image: prom/prometheus
+    container_name: pulse-prom
+    network_mode: host
+    volumes:
+      - ./:/etc/pulse
+    command: ["--config.file=/etc/pulse/prometheus.yml"]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana
+    container_name: pulse-graf
+    network_mode: host
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./provisioning:/etc/grafana/provisioning
+    restart: unless-stopped
