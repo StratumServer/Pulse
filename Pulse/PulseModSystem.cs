@@ -100,7 +100,7 @@ public sealed class PulseModSystem : ModSystem
                 string path = Path.Combine(api.GetOrCreateDataPath("ModConfig"), ConfigFile);
                 api.Logger.Error(
                     ConfigLoad.UnreadableMessage, "Pulse", path, loaded.FailureMessage,
-                    "Pulse is running on its built-in defaults (loopback bind)");
+                    "Pulse is running on its built-in defaults");
                 break;
         }
 

@@ -6,13 +6,16 @@ internal enum ConfigLoadStatus
     /// <summary>The file existed and was read. Safe to run <see cref="ConfigUpgrade.Upgrade{T}"/> on it.</summary>
     Loaded,
 
-    /// <summary>No file existed. <see cref="Config"/> is a fresh default; the caller still has to
-    /// write it.</summary>
+    /// <summary>No file existed, or the file's content deserialized to null without the loader
+    /// throwing at all: empty, whitespace only, and the literal JSON <c>null</c> all do this.
+    /// <see cref="ConfigLoadResult{T}.Config"/> is a fresh default; the caller still has to write
+    /// it.</summary>
     Absent,
 
-    /// <summary>The file existed but raised while being read or parsed. <see cref="Config"/> is a
-    /// fresh, in-memory default; the caller must not write it and must not run
-    /// <see cref="ConfigUpgrade"/> on it, or an admin's own edits are exactly what gets destroyed.</summary>
+    /// <summary>The file existed but raised while being read or parsed.
+    /// <see cref="ConfigLoadResult{T}.Config"/> is a fresh, in-memory default; the caller must not
+    /// write it and must not run <see cref="ConfigUpgrade"/> on it, or an admin's own edits are
+    /// exactly what gets destroyed.</summary>
     Unreadable,
 }
 

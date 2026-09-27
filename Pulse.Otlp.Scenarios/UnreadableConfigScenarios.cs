@@ -7,35 +7,25 @@ namespace Pulse.Otlp.Scenarios;
 
 /// <summary>A pulse-otlp.json an admin's editor left broken: present on disk, but not JSON a parser
 /// accepts. Exporting must stay off for this session rather than silently fall back to the mod's
-/// own default endpoint, and the file must never be touched. The collector listens on the OTLP
-/// default port, 4318: if a regression ever made the fallback config export instead of staying off,
-/// this is the address it would reach.</summary>
+/// own default endpoint, and the file must never be touched.</summary>
 [AtlasDataFiles("data/unreadable", TargetPath = "ModConfig")]
-public class UnreadableConfigScenarios : AtlasScenarioBase, IDisposable
+public class UnreadableConfigScenarios : AtlasScenarioBase
 {
     private const string ErrorMarker = "Pulse OTLP could not read";
-    private const int DefaultOtlpPort = 4318;
+
+    // Logged once, after every mod's StartServerSide has returned (RunModPhase in VintagestoryLib
+    // logs it right after the loop over every ModSystem). Waiting for it, rather than for a fixed
+    // number of ticks, means the OTLP mod has already decided whether to export or not by the time
+    // the log is read: "Pulse OTLP exporting ..." is logged synchronously from inside
+    // StartServerSide when a provider is built, never on the periodic export timer, so its absence
+    // here is not a race against the (60 second, by default) export interval.
+    private const string BootCompleteMarker = "systems on Server:";
 
     // Assembly.Location, not AppContext.BaseDirectory: Atlas repoints the latter at the embedded
     // server's own data path once it boots, which by the time a scenario method runs is no longer
     // where this test assembly (and the fixture AtlasDataFiles copied from) actually lives.
     private static readonly string TestAssemblyDirectory =
         Path.GetDirectoryName(typeof(UnreadableConfigScenarios).Assembly.Location)!;
-
-    private readonly FakeCollector collector;
-
-    public UnreadableConfigScenarios()
-    {
-        // xUnit builds the test class before Atlas boots the host, so the collector is already
-        // listening on the OTLP default port by the time StartServerSide would export to it.
-        collector = new FakeCollector(DefaultOtlpPort);
-    }
-
-    public void Dispose()
-    {
-        collector.Dispose();
-        GC.SuppressFinalize(this);
-    }
 
     [AtlasScenario]
     public async Task Server_Runs_WithExportingOff_AndLeavesTheBrokenFileAlone()
@@ -49,18 +39,18 @@ public class UnreadableConfigScenarios : AtlasScenarioBase, IDisposable
         Assert.Contains(ErrorMarker, log);
         Assert.Contains(configPath, log);
 
-        // A bounded wait with nothing arriving is the closest thing to proving a negative: no
-        // provider was ever built, so nothing on any timer ever reaches the collector.
-        await World.Ticks(60);
-        Assert.Null(collector.First);
+        // The mod only ever logs this line once it has actually built a provider, so its absence
+        // after boot has finished is proof exporting never started, not a timing guess.
+        Assert.DoesNotContain("Pulse OTLP exporting", log);
     }
 
     private async Task<string> ReadServerLog()
     {
         string path = Path.Combine(GamePaths.Logs, "server-main.log");
         string text = ReadShared(path);
-        for (int attempt = 0; attempt < 10 && !text.Contains(ErrorMarker); attempt++)
+        for (int attempt = 0; attempt < 10 && !text.Contains(BootCompleteMarker); attempt++)
         {
+            // The engine's logger writes on its own thread; pump the world instead of sleeping.
             await World.Ticks(10);
             text = ReadShared(path);
         }

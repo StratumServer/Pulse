@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Text.RegularExpressions;
 using OpenTelemetry.Exporter;
 
 namespace Pulse.Otlp;
@@ -99,4 +100,15 @@ public static class OtlpOptions
                 .Where(h => !string.IsNullOrWhiteSpace(h.Key))
                 .Select(h => Uri.EscapeDataString(h.Key.Trim()) + "=" + Uri.EscapeDataString(h.Value ?? string.Empty)));
     }
+
+    private static readonly Regex QuotedValue = new("\"[^\"]*\"", RegexOptions.Compiled);
+
+    /// <summary>Blanks every double-quoted span in a parser's error message, keeping everything
+    /// else. Newtonsoft quotes the offending value verbatim when a field is the wrong shape
+    /// ("Error converting value "..." to type ..."), and a misconfigured Headers field is exactly
+    /// where a real secret can end up quoted that way: the most likely mistake is typing the
+    /// OTEL_EXPORTER_OTLP_HEADERS environment variable's comma-separated "k=v,k2=v2" shape into the
+    /// config's own JSON object field. Path, line and position are reported in single quotes and
+    /// are left alone.</summary>
+    public static string RedactQuotedValues(string message) => QuotedValue.Replace(message, "<redacted>");
 }

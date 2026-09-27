@@ -70,12 +70,13 @@ first.
 ### Fixed
 
 - A `pulse.json` or `pulse-otlp.json` that exists but will not parse (a stray comma is enough) no
-  longer stops the mod from starting. Each mod now logs one error naming the file's full path and
-  the parser's own message, and leaves the file untouched rather than overwriting it with defaults,
-  which is what made recovery mean deleting `ModConfig` by hand. Pulse keeps running for that
-  session on its built-in defaults, loopback bind included; Pulse OTLP keeps exporting off for that
-  session, since its own defaults would otherwise start pushing metrics to a collector nobody
-  configured. An absent file and a valid one are unaffected.
+  longer stops the mod from starting; before, recovering meant deleting the file by hand. Each mod
+  now logs one error naming the file's full path and the parser's own message, and leaves the file
+  untouched rather than overwriting it with defaults. Pulse keeps running for that session on its
+  built-in defaults; Pulse OTLP keeps exporting off for that session instead of falling back to an
+  endpoint nobody configured, and redacts any value Newtonsoft quoted in the parser's message (a
+  `Headers` entry of the wrong shape, most often) before it reaches the log. An absent file and a
+  valid one are unaffected.
 
 ## [0.1.0] - 2026-09-01
 

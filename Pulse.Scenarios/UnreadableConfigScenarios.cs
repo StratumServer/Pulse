@@ -1,6 +1,4 @@
-using Atlas.Api;
 using Atlas.XUnit;
-using Vintagestory.API.Config;
 using Xunit;
 
 namespace Pulse.Scenarios;
@@ -16,6 +14,7 @@ public class UnreadableConfigScenarios : AtlasScenarioBase
     // The default: proof that a malformed file gets no configured values at all, defaults
     // included. Nothing else in either scenario suite binds this port.
     private const int DefaultPort = 9464;
+    private const string ServingMarker = "Pulse serving metrics on http://127.0.0.1:9464/metrics";
 
     // Assembly.Location, not AppContext.BaseDirectory: Atlas repoints the latter at the embedded
     // server's own data path once it boots, which by the time a scenario method runs is no longer
@@ -26,7 +25,7 @@ public class UnreadableConfigScenarios : AtlasScenarioBase
     [AtlasScenario]
     public async Task Server_Runs_OnDefaults_AndLeavesTheBrokenFileAlone()
     {
-        string log = await ReadServerLog();
+        string log = await ServerLog.WaitFor(World, ErrorMarker, ServingMarker);
 
         string seedPath = Path.Combine(TestAssemblyDirectory, "data", "unreadable", "pulse.json");
         string configPath = Path.Combine(World.Api.GetOrCreateDataPath("ModConfig"), "pulse.json");
@@ -35,34 +34,13 @@ public class UnreadableConfigScenarios : AtlasScenarioBase
         Assert.Contains(ErrorMarker, log);
         Assert.Contains(configPath, log);
 
+        // This server's own endpoint came up on the default bind and port, not just some process
+        // holding 9464 on a shared machine: a scrape answered by someone else's listener would
+        // otherwise let the next assertion pass for the wrong reason.
+        Assert.Contains(ServingMarker, log);
+
         // Defaults took over regardless: the endpoint is up on the port nothing in the broken file
         // could have named, because none of it was ever read.
         Assert.Contains("pulse_server_ticks_total", await Scrape.Metrics(DefaultPort));
-    }
-
-    private async Task<string> ReadServerLog()
-    {
-        string path = Path.Combine(GamePaths.Logs, "server-main.log");
-        string text = ReadShared(path);
-        for (int attempt = 0; attempt < 10 && !text.Contains(ErrorMarker); attempt++)
-        {
-            // The engine's logger writes on its own thread; pump the world instead of sleeping.
-            await World.Ticks(10);
-            text = ReadShared(path);
-        }
-
-        return text;
-    }
-
-    private static string ReadShared(string path)
-    {
-        if (!File.Exists(path))
-        {
-            return string.Empty;
-        }
-
-        using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        using StreamReader reader = new(stream);
-        return reader.ReadToEnd();
     }
 }
