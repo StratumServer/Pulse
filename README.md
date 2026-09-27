@@ -5,6 +5,9 @@ Prometheus scrape endpoint. It runs on the dedicated server only, ships as a sin
 bundled dependencies, and does not talk to anything on its own: something has to come and read
 `/metrics`. A separate optional mod pushes the same metrics over OTLP, described further down.
 
+New to Prometheus and Grafana? [`docs/getting-started.md`](docs/getting-started.md) walks
+through installing Pulse and getting your first dashboard, step by step.
+
 Grab both from the [ModDB page](https://mods.vintagestory.at/pulse) or from
 [GitHub releases](https://github.com/StratumServer/Pulse/releases).
 
@@ -22,6 +25,9 @@ Grab both from the [ModDB page](https://mods.vintagestory.at/pulse) or from
 - [License](#license)
 
 ## Install
+
+First time with Prometheus and Grafana? [`docs/getting-started.md`](docs/getting-started.md)
+covers install through your first dashboard, step by step.
 
 Drop `pulse_x.x.x.zip` into your server's `Mods/` folder and start the server. Add
 `pulseotlp_x.x.x.zip` beside it if you want OTLP push as well; the base mod works on its own and

@@ -27,11 +27,23 @@ point `rule_files` at the mounted path:
 docker run -d --rm --name pulse-prom --network host \
   -v "$PWD/contrib/grafana:/etc/pulse" \
   -v "$PWD/contrib/alerts:/etc/pulse-alerts" \
-  prom/prometheus --config.file=/etc/pulse/prometheus.yml
+  prom/prometheus --config.file=/etc/pulse/prometheus.yml --web.listen-address=127.0.0.1:9090
 ```
 
 with `rule_files: [/etc/pulse-alerts/pulse-alerts.yml]` added to `contrib/grafana/prometheus.yml`
 (left out of that file by default, so the grafana kit stays alerting-free until you ask for it).
+
+That bind is loopback only, same reasoning as `contrib/grafana/README.md`: `--network host` puts
+the container directly on the machine's own network, and Prometheus has no login of its own, so
+without it, its own UI and API, including `/alerts` and every metric it holds, would be
+reachable from anywhere that can reach this machine at all, not just from it. To check `/alerts`
+from another computer, tunnel over SSH instead of widening that bind:
+
+```sh
+ssh -L 9090:127.0.0.1:9090 user@your-server
+```
+
+then open http://localhost:9090/alerts on your own computer.
 
 Prometheus only reads `rule_files` at startup or on a reload: send it `SIGHUP`, hit
 `/-/reload` if it was started with `--web.enable-lifecycle`, or restart the container.
