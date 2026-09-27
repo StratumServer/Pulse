@@ -69,6 +69,14 @@ first.
 
 ### Fixed
 
+- A `pulse.json` or `pulse-otlp.json` that exists but will not parse (a stray comma is enough) no
+  longer stops the mod from starting; before, recovering meant deleting the file by hand. Each mod
+  now logs one error naming the file's full path and the parser's own message, and leaves the file
+  untouched rather than overwriting it with defaults. Pulse keeps running for that session on its
+  built-in defaults; Pulse OTLP keeps exporting off for that session instead of falling back to an
+  endpoint nobody configured, and redacts any value Newtonsoft quoted in the parser's message (a
+  `Headers` entry of the wrong shape, most often) before it reaches the log. An absent file and a
+  valid one are unaffected.
 - `pulse_mod_tick_share{modid}` no longer keeps serving the last completed burst's shares after
   attribution stops. It is now an observable gauge tied to the same `Attribution.Enabled` state as
   the duty cycle, so the family disappears from `/metrics` and from OTLP exports the moment

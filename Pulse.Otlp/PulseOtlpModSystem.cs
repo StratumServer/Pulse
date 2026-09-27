@@ -29,11 +29,30 @@ public sealed class PulseOtlpModSystem : ModSystem
 
     public override void StartServerSide(ICoreServerAPI api)
     {
-        PulseOtlpConfig? existing = api.LoadModConfig<PulseOtlpConfig>(ConfigFile);
-        PulseOtlpConfig config = existing ?? StoreDefaults(api);
-        if (existing != null)
+        ConfigLoadResult<PulseOtlpConfig> loaded = ConfigLoad.Resolve(
+            () => api.LoadModConfig<PulseOtlpConfig>(ConfigFile), () => new PulseOtlpConfig());
+        PulseOtlpConfig config = loaded.Config;
+        switch (loaded.Status)
         {
-            ConfigUpgrade.Upgrade(api, config, ConfigFile, "Pulse OTLP");
+            case ConfigLoadStatus.Absent:
+                api.StoreModConfig(config, ConfigFile);
+                break;
+            case ConfigLoadStatus.Loaded:
+                ConfigUpgrade.Upgrade(api, config, ConfigFile, "Pulse OTLP");
+                break;
+            case ConfigLoadStatus.Unreadable:
+                string unreadablePath = Path.Combine(api.GetOrCreateDataPath("ModConfig"), ConfigFile);
+
+                // Redacted, not the raw parser message: a Headers value of the wrong shape (most
+                // often OTEL_EXPORTER_OTLP_HEADERS's "k=v,k2=v2" string typed in where the config's
+                // own JSON object belongs) makes Newtonsoft quote the offending value verbatim, and
+                // that value can be a real bearer token or API key. The path, line and position
+                // that make the error findable are not quoted and survive the redaction.
+                string safeMessage = OtlpOptions.RedactQuotedValues(loaded.FailureMessage ?? string.Empty);
+                api.Logger.Error(
+                    ConfigLoad.UnreadableMessage, "Pulse OTLP", unreadablePath, safeMessage,
+                    "Pulse OTLP is not exporting");
+                return;
         }
 
         if (!config.Enabled)
@@ -121,12 +140,5 @@ public sealed class PulseOtlpModSystem : ModSystem
         // that holds whatever went wrong just before shutdown.
         provider?.Dispose();
         provider = null;
-    }
-
-    private static PulseOtlpConfig StoreDefaults(ICoreServerAPI api)
-    {
-        PulseOtlpConfig config = new();
-        api.StoreModConfig(config, ConfigFile);
-        return config;
     }
 }

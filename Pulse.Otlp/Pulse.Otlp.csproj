@@ -21,6 +21,7 @@
          (see the remarks on PulseOtlpModSystem), so each assembly compiles its own internal copy
          of the config upgrade rather than one of them depending on the other's dll. -->
     <Compile Include="../Pulse/ConfigUpgrade.cs" Link="ConfigUpgrade.cs" />
+    <Compile Include="../Pulse/ConfigLoad.cs" Link="ConfigLoad.cs" />
   </ItemGroup>
 
   <ItemGroup>
