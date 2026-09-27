@@ -1,0 +1,11 @@
+global:
+  scrape_interval: 2s
+  evaluation_interval: 10s
+
+scrape_configs:
+  - job_name: vintagestory
+    # Reach the host through Docker Desktop, but ask Pulse for 127.0.0.1: on Linux and macOS,
+    # Pulse's listener answers 404 to any other Host header, host.docker.internal included.
+    proxy_url: http://host.docker.internal:9464
+    static_configs:
+      - targets: ["127.0.0.1:9464"]

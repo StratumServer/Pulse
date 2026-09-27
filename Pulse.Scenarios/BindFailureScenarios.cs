@@ -2,7 +2,6 @@ using System.Net;
 using System.Net.Sockets;
 using Atlas.Api;
 using Atlas.XUnit;
-using Vintagestory.API.Config;
 using Vintagestory.API.MathTools;
 using Xunit;
 
@@ -43,32 +42,6 @@ public class BindFailureScenarios : AtlasScenarioBase, IDisposable
         await World.Ticks(30);
         Assert.Equal("game:chest-east", World.BlockAt(pos).Code.ToString());
 
-        Assert.Contains(BindFailureMarker, await ReadServerLog());
-    }
-
-    private async Task<string> ReadServerLog()
-    {
-        string path = Path.Combine(GamePaths.Logs, "server-main.log");
-        string text = ReadShared(path);
-        for (int attempt = 0; attempt < 10 && !text.Contains(BindFailureMarker); attempt++)
-        {
-            // The engine's logger writes on its own thread; pump the world instead of sleeping.
-            await World.Ticks(10);
-            text = ReadShared(path);
-        }
-
-        return text;
-    }
-
-    private static string ReadShared(string path)
-    {
-        if (!File.Exists(path))
-        {
-            return string.Empty;
-        }
-
-        using FileStream stream = new(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-        using StreamReader reader = new(stream);
-        return reader.ReadToEnd();
+        Assert.Contains(BindFailureMarker, await ServerLog.WaitFor(World, BindFailureMarker));
     }
 }

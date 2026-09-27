@@ -1,4 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
+using System.Text.RegularExpressions;
 using OpenTelemetry.Exporter;
 
 namespace Pulse.Otlp;
@@ -6,7 +7,9 @@ namespace Pulse.Otlp;
 /// <summary>Turns the config file into what the OTLP exporter actually wants. Every method here is
 /// pure, which is the point: the wiring in the mod system is trivial and this is where the sharp
 /// edges of the exporter's own option handling are dealt with.</summary>
-public static class OtlpOptions
+/// <remarks>Partial: <see cref="QuotedValue"/> is a source-generated regex, which requires the
+/// declaring type (and its method) to be partial.</remarks>
+public static partial class OtlpOptions
 {
     /// <summary>Shortest export interval accepted, in seconds. The exporter polls every observable
     /// instrument on each export, and a PeriodicExportingMetricReader rejects a zero interval
@@ -98,5 +101,42 @@ public static class OtlpOptions
             headers
                 .Where(h => !string.IsNullOrWhiteSpace(h.Key))
                 .Select(h => Uri.EscapeDataString(h.Key.Trim()) + "=" + Uri.EscapeDataString(h.Value ?? string.Empty)));
+    }
+
+    /// <summary>Stands in for the message when redaction itself could not finish in time. Fixed and
+    /// generic on purpose: the message that timed out is exactly the message most likely to be
+    /// pathological, and letting it through unredacted "just this once" would defeat the whole
+    /// point of redacting at all.</summary>
+    private const string RedactionTimedOut = "<could not check this message for secrets in time; withheld>";
+
+    /// <summary>A one second ceiling on matching a bounded, linear pattern against a log message:
+    /// generous for the real case and small enough that a pathological message cannot hold a log
+    /// call open. csharpsquid:S6444 requires an explicit timeout on every regex match.</summary>
+    [GeneratedRegex("\"[^\"]*\"", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
+    private static partial Regex QuotedValue();
+
+    /// <summary>Blanks every double-quoted span in a parser's error message, keeping everything
+    /// else. Newtonsoft quotes the offending value verbatim when a field is the wrong shape
+    /// ("Error converting value "..." to type ..."), and a misconfigured Headers field is exactly
+    /// where a real secret can end up quoted that way: the most likely mistake is typing the
+    /// OTEL_EXPORTER_OTLP_HEADERS environment variable's comma-separated "k=v,k2=v2" shape into the
+    /// config's own JSON object field. Path, line and position are reported in single quotes and
+    /// are left alone.</summary>
+    /// <remarks><see cref="QuotedValue"/> is <c>[^"]*</c> between two literal quotes: linear in the
+    /// input length, with no ambiguous repetition for the backtracker to stall on, so the timeout
+    /// is a defensive ceiling rather than something normal input is expected to reach. If it is
+    /// ever reached anyway, <see cref="RedactionTimedOut"/> stands in for the whole message rather
+    /// than the raw, unredacted text: on a timeout there is no way to know whether the very thing
+    /// that made matching slow is also the secret being protected against.</remarks>
+    public static string RedactQuotedValues(string message)
+    {
+        try
+        {
+            return QuotedValue().Replace(message, "<redacted>");
+        }
+        catch (RegexMatchTimeoutException)
+        {
+            return RedactionTimedOut;
+        }
     }
 }

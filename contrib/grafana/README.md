@@ -11,14 +11,21 @@ probe, which means they are blank on a server running in degraded mode. The attr
 the same kind of empty by default: it needs attribution switched on, either the config block or
 `/pulse attribution on`, and stays blank until then (see the main README's Attribution section).
 
+The easiest way to run this is `docker-compose.yml` in this folder (`docker-compose.desktop.yml`
+on Windows or macOS instead), covered step by step in `docs/getting-started.md`: one
+`docker compose up -d` instead of the two commands below. The commands here do the same thing
+by hand, one container at a time; both use `--rm`, so unlike the compose files, neither comes
+back on its own after a reboot.
+
 With a Pulse-equipped server running on the same host (default bind, port 9464):
 
 ```sh
 docker run -d --rm --name pulse-prom --network host \
   -v "$PWD/contrib/grafana:/etc/pulse" \
-  prom/prometheus --config.file=/etc/pulse/prometheus.yml
+  prom/prometheus --config.file=/etc/pulse/prometheus.yml --web.listen-address=127.0.0.1:9090
 
 docker run -d --rm --name pulse-graf --network host \
+  -e GF_SERVER_HTTP_ADDR=127.0.0.1 \
   -e GF_AUTH_ANONYMOUS_ENABLED=true \
   -e GF_AUTH_ANONYMOUS_ORG_ROLE=Admin \
   -e GF_AUTH_DISABLE_LOGIN_FORM=true \
@@ -30,8 +37,19 @@ Then open http://localhost:3000/d/pulse-overview. The datasource and the dashboa
 provisioned from the files here; there is nothing to click together. Stop it all with
 `docker stop pulse-graf pulse-prom`.
 
-The anonymous-admin settings are for a local look, not for anything reachable from outside;
-run Grafana properly if you keep it.
+Both commands bind loopback only (`--web.listen-address` and `GF_SERVER_HTTP_ADDR` above), on
+purpose. `--network host` puts both containers directly on the machine's own network, and
+Grafana's anonymous access has no password of its own, so without that bind, an unauthenticated
+admin account is one open port away from anyone who can reach this machine at all, not just from
+it. To look at the dashboard from another computer, tunnel over SSH instead of widening either
+bind:
+
+```sh
+ssh -L 3000:127.0.0.1:3000 -L 9090:127.0.0.1:9090 user@your-server
+```
+
+then open http://localhost:3000 on your own computer. Run Grafana properly (real accounts, a
+real org role) if you keep it running longer than a first look.
 
 Prometheus scrapes every 2 seconds here, which is pleasant for watching a test server live
 and far denser than a production setup needs; 15 seconds is plenty for a real host. The panels
@@ -40,8 +58,8 @@ you settle on instead of going ragged at 15 seconds and lying at 60.
 
 ## Importing it into a Grafana you already run
 
-Use `pulse-overview-shared.json`. In Grafana, go to Dashboards, then Import, upload that file,
-and pick your Prometheus datasource when it asks for one. That prompt is the entire difference
+Use `pulse-overview-shared.json`. In Grafana, go to Dashboards, then New, then Import dashboard,
+upload that file, and pick your Prometheus datasource when it asks for one. That prompt is the entire difference
 between the two dashboard files: the provisioned copy points at the datasource uid `pulse-prom`,
 which exists only on a Grafana provisioned from this directory, so importing that one anywhere
 else gets you a dashboard wired to nothing.

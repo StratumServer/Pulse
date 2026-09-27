@@ -142,6 +142,32 @@ public class OtlpOptionsTests
         Assert.Equal(headers, parsed);
     }
 
+    /// <summary>The exact shape Newtonsoft produces for a Headers value typed as
+    /// OTEL_EXPORTER_OTLP_HEADERS's "k=v,k2=v2" string instead of the config's own JSON object: the
+    /// offending value, a real bearer token here, travels inside the message in double quotes.</summary>
+    [Fact]
+    public void RedactQuotedValues_Blanks_ADoubleQuotedValue_ButKeepsThePathLineAndPosition()
+    {
+        const string message =
+            "Error converting value \"Authorization=Bearer abc123\" to type "
+            + "'System.Collections.Generic.Dictionary`2[System.String,System.String]'. "
+            + "Path 'Headers', line 4, position 42.";
+
+        string redacted = OtlpOptions.RedactQuotedValues(message);
+
+        Assert.DoesNotContain("abc123", redacted);
+        Assert.Contains("<redacted>", redacted);
+        Assert.Contains("Path 'Headers', line 4, position 42.", redacted);
+    }
+
+    [Fact]
+    public void RedactQuotedValues_Leaves_AMessageWithNoDoubleQuotedValue_Unchanged()
+    {
+        const string message = "Invalid property identifier character: ,. Path 'Enabled', line 2, position 18.";
+
+        Assert.Equal(message, OtlpOptions.RedactQuotedValues(message));
+    }
+
     /// <summary>OpenTelemetry.Exporter.OtlpExporterOptionsExtensions.GetHeaders, 1.18.0, reproduced
     /// because it is internal to the exporter assembly. Unescaping the whole string before the
     /// split is the detail that dictates how RenderHeaders encodes.</summary>

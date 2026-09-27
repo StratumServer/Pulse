@@ -10,6 +10,24 @@ first.
 
 ### Added
 
+- `docs/getting-started.md`, a walkthrough for a server owner who has never used Prometheus or
+  Grafana, routed by how their server is hosted: installing the base mod, then either a local
+  Prometheus and Grafana pair or Grafana Cloud's free tier over OTLP, ending at the shared
+  dashboard either way. `contrib/grafana` gains `docker-compose.yml` for a Linux machine (host
+  networking, one `docker compose up -d` instead of the two `docker run` commands the README
+  also shows) and `docker-compose.desktop.yml` plus `prometheus.desktop.yml` for Windows and
+  macOS. The Windows and macOS file reaches Pulse through `host.docker.internal` with a
+  Prometheus `proxy_url`, still addressing Pulse itself as `127.0.0.1`: on Linux and macOS,
+  Pulse's listener answers 404 to any other Host header, `localhost` included, now called out in
+  the guide's troubleshooting too. Grafana shares Prometheus's network namespace so the
+  provisioned datasource needs no change between the two files. All three, plus the README's own
+  `docker run` commands in both `contrib/grafana` and `contrib/alerts`, bind Grafana and
+  Prometheus to 127.0.0.1: with host networking an unbound, unauthenticated Grafana admin
+  account and an unbound Prometheus are reachable from anywhere that can reach the machine, not
+  just from it, so the guides cover an SSH tunnel for viewing a remote server instead. The guide
+  also lists, by panel title, which nine Grafana Cloud dashboard panels do not yet render over
+  OTLP, tracked in [issue #77](https://github.com/StratumServer/Pulse/issues/77) pending a
+  decision between fixing the dashboard's queries or the OTLP mod's reported units.
 - A dashboard row, `Attribution, only when turned on`, placed right after tick health: a stacked
   time series of `pulse_mod_tick_share` by mod, a bar gauge for the current share, attributed tick
   time per mod using the main README's own seconds-per-profiled-tick recipe, and a small panel for
@@ -69,6 +87,14 @@ first.
 
 ### Fixed
 
+- A `pulse.json` or `pulse-otlp.json` that exists but will not parse (a stray comma is enough) no
+  longer stops the mod from starting; before, recovering meant deleting the file by hand. Each mod
+  now logs one error naming the file's full path and the parser's own message, and leaves the file
+  untouched rather than overwriting it with defaults. Pulse keeps running for that session on its
+  built-in defaults; Pulse OTLP keeps exporting off for that session instead of falling back to an
+  endpoint nobody configured, and redacts any value Newtonsoft quoted in the parser's message (a
+  `Headers` entry of the wrong shape, most often) before it reaches the log. An absent file and a
+  valid one are unaffected.
 - `pulse_mod_tick_share{modid}` no longer keeps serving the last completed burst's shares after
   attribution stops. It is now an observable gauge tied to the same `Attribution.Enabled` state as
   the duty cycle, so the family disappears from `/metrics` and from OTLP exports the moment

@@ -5,6 +5,9 @@ Prometheus scrape endpoint. It runs on the dedicated server only, ships as a sin
 bundled dependencies, and does not talk to anything on its own: something has to come and read
 `/metrics`. A separate optional mod pushes the same metrics over OTLP, described further down.
 
+New to Prometheus and Grafana? [`docs/getting-started.md`](docs/getting-started.md) walks
+through installing Pulse and getting your first dashboard, step by step.
+
 Grab both from the [ModDB page](https://mods.vintagestory.at/pulse) or from
 [GitHub releases](https://github.com/StratumServer/Pulse/releases).
 
@@ -22,6 +25,9 @@ Grab both from the [ModDB page](https://mods.vintagestory.at/pulse) or from
 - [License](#license)
 
 ## Install
+
+First time with Prometheus and Grafana? [`docs/getting-started.md`](docs/getting-started.md)
+covers install through your first dashboard, step by step.
 
 Drop `pulse_x.x.x.zip` into your server's `Mods/` folder and start the server. Add
 `pulseotlp_x.x.x.zip` beside it if you want OTLP push as well; the base mod works on its own and
@@ -66,6 +72,13 @@ read-only or keep it under version control.
 Pulse and the OTLP mod each keep their settings in their own file under `ModConfig/`, written
 with their defaults on first boot. Both files pick up new keys the same way an upgrade adds
 them to a file that predates those keys; see the paragraph on that in [Install](#install).
+
+A file that exists but will not parse is left exactly as it is: the mod logs the full path and
+the parser's own message, and Pulse runs that session on its built-in defaults rather than
+failing to start. Pulse OTLP does the same for `pulse-otlp.json`, except exporting stays off for
+that session instead of falling back to its own default endpoint, and any value Newtonsoft
+quoted in its message, a misconfigured `Headers` entry most often, is redacted before it reaches
+the log.
 
 **`ModConfig/pulse.json`**
 
