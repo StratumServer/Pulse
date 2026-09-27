@@ -181,9 +181,9 @@ public sealed class PulseModSystem : ModSystem
         PublishSnapshot();
 
         // The errorHandler overload is not optional. Without it an exception from this listener
-        // aborts the remainder of the whole server tick and logs Fatal, and Fatal entries count
-        // toward the engine's DieAboveErrorCount self-shutdown. Metrics must not be able to stop
-        // a server: log and swallow.
+        // aborts the remainder of the whole server tick and logs Fatal, and the engine's
+        // DieAboveErrorCount self-shutdown counts both Error and Fatal entries toward its
+        // threshold. Metrics must not be able to stop a server: log and swallow.
         listenerId = api.Event.RegisterGameTickListener(OnTick, OnTickError, 0);
 
         // AllLoadedChunks clones the whole loaded-chunk dictionary under the chunk lock on every
@@ -235,17 +235,22 @@ public sealed class PulseModSystem : ModSystem
     private void StartEndpoint(ICoreServerAPI api, PulseConfig config)
     {
         MetricsAggregator collector = aggregator!;
-        MetricsHttpServer server = new(
-            config.Bind, config.Port, () => PrometheusText.Render(collector.Collect()), api.Logger);
+        MetricsHttpServer? server = null;
         try
         {
+            // Construction itself can throw, on a Bind value that does not parse to an address,
+            // so it has to sit inside this same try: a throw out here, before StartServerSide
+            // returns, would leave the rest of the mod (already fully registered above) running
+            // without ever logging why the endpoint alone did not come up.
+            server = new MetricsHttpServer(
+                config.Bind, config.Port, () => PrometheusText.Render(collector.Collect()), api.Logger);
             server.Start();
             http = server;
             api.Logger.Notification("Pulse serving metrics on http://{0}:{1}/metrics", config.Bind, config.Port);
         }
         catch (Exception e)
         {
-            server.Dispose();
+            server?.Dispose();
             api.Logger.Error(
                 "Pulse could not bind http://{0}:{1}/ ({2}). No metrics will be served; the game server is unaffected.",
                 config.Bind, config.Port, e.Message);

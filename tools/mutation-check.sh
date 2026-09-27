@@ -122,6 +122,14 @@ mutate Pulse/MetricsHttpServer.cs \
     's/now - lastErrorLogMs < ErrorLogIntervalMs/false/' \
     "http server: error log rate limit never suppresses a repeat failure"
 
+mutate Pulse/MetricsHttpServer.cs \
+    's/request\.Path != "\/metrics"/request.Path == "\/metrics"/' \
+    "http server: the metrics path match inverts, so the one real path 404s and every other path would serve it"
+
+mutate Pulse/MetricsHttpServer.cs \
+    's/MaxHeadBytes = 8192;/MaxHeadBytes = 65536;/' \
+    "http server: the request head size limit widened, no longer rejecting a header the tests expect it to reject"
+
 mutate Pulse/TickBookkeeper.cs \
     's/sinceSnapshotSeconds < snapshotIntervalSeconds/sinceSnapshotSeconds <= snapshotIntervalSeconds/' \
     "tick bookkeeper: snapshot cadence boundary made inclusive, delaying the due tick that lands exactly on it"
