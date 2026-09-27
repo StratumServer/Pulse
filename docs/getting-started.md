@@ -16,8 +16,9 @@ Grafana's own free hosted service (path B).
 - **A Linux server you rent or administer.** Install the mod (step 1), then path A on the server
   itself. View the dashboard from your own computer through an SSH tunnel, covered in path A.
 - **A home PC running the game server, on Windows, macOS or Linux.** Install the mod, then path
-  A: the Linux compose file if that PC is Linux, or the Docker Desktop variant if it is Windows
-  or macOS.
+  A: the Docker Desktop variant if it is Windows or macOS, and on Linux, whichever compose file
+  matches what you installed: the Linux one for plain Docker Engine (the usual choice), the
+  Docker Desktop one if you specifically installed Docker Desktop for Linux instead.
 - **A Windows Server host, or a panel-only host with no shell access** (many rented game panels
   are like this). Skip straight to path B, Grafana Cloud: it needs nothing installed besides the
   mod itself.
@@ -78,13 +79,19 @@ the server.
 
 ### Before you start
 
-- You need Docker installed: see [Docker's own install instructions](https://docs.docker.com/get-started/get-docker/)
-  for your platform.
-- Every command below starts with `docker compose` (two words). On Debian or Ubuntu, that needs
-  the `docker-compose-plugin` package; installing Docker through the distribution's own older
-  `docker-compose` package (one word) instead gives you a `docker-compose` command, older and no
-  longer maintained, that takes the same commands with a hyphen instead of a space.
-  [Docker's install guide](https://docs.docker.com/engine/install/) covers getting the current one.
+- You need Docker installed. On Windows or macOS that always means Docker Desktop; see
+  [Docker's own install instructions](https://docs.docker.com/get-started/get-docker/). On
+  Linux, that same page also offers Docker Desktop for Linux, a different product aimed at
+  desktop use: it needs the Docker Desktop compose file below, not the plain Linux one. For the
+  plain Linux one, install Docker Engine instead, from
+  [Docker's Engine install guide](https://docs.docker.com/engine/install/) for your distribution.
+- Every command below starts with `docker compose` (two words), which needs the current compose
+  plugin. Installing from Docker's own repository, as the guides above do, gives you that
+  directly. From your distribution's own repository instead, package names vary: Ubuntu calls it
+  `docker-compose-v2`, and on Debian 13 (trixie) the plainly-named `docker-compose` package is
+  already the current one, not the old, deprecated tool some other distributions still ship
+  under that same name. If what you end up with only answers to a hyphenated `docker-compose`,
+  the commands below work identically with a hyphen instead of a space.
 - If a command below fails with "permission denied" talking to the Docker daemon, either put
   `sudo` in front of it, or add yourself to the `docker` group once, so future commands do not
   need `sudo` at all, following
@@ -98,8 +105,10 @@ the server.
   cd Pulse/contrib/grafana
   ```
 
-  No `git`? On the repository's GitHub page, switch the branch selector to `dev`, then use
-  Code, Download ZIP, or go straight to the
+  No `git` on a headless server? Installing it is usually simpler than the alternative:
+  `sudo apt install git` (Debian or Ubuntu) or your distribution's equivalent, then the commands
+  above. Otherwise, on the repository's GitHub page, switch the branch selector to `dev`, then
+  use Code, Download ZIP, or go straight to the
   [dev branch zip](https://github.com/StratumServer/Pulse/archive/refs/heads/dev.zip). Extract
   it and open a terminal in the extracted `contrib/grafana` folder.
 - The first `docker compose up -d` downloads the Prometheus and Grafana images, a few hundred
@@ -166,36 +175,41 @@ elsewhere instead of widening that bind.
    docker compose -f docker-compose.desktop.yml down
    ```
 
-This file scrapes `host.docker.internal:9464`, the address Docker Desktop provides for reaching
-the machine it runs on from inside a container, since Desktop cannot use host networking the way
-Linux does. Use it when Pulse runs directly on this same Windows or macOS machine. Docker
-Desktop is not available on Windows Server; use path B there instead. Both ports are published
-to `127.0.0.1` only here too, for the same reason as the Linux file above.
+This file reaches Pulse through `host.docker.internal`, the address Docker Desktop provides for
+reaching the machine it runs on from inside a container, since Desktop cannot use host networking
+the way Linux does. It still asks Pulse for `127.0.0.1` once it gets there (see the comment in
+`prometheus.desktop.yml`): on Linux and macOS, Pulse's listener answers 404 to any other address
+in the request, `host.docker.internal` included; Windows does not have this problem. Use this
+file when Pulse runs directly on this same Windows or macOS machine. Docker Desktop is not
+available on Windows Server; use path B there instead. Both ports are published to `127.0.0.1`
+only here too, for the same reason as the Linux file above.
 
 ## Path B: Grafana Cloud, if you would rather host nothing
 
 Use this path if you do not want to run Prometheus or Grafana yourself, or your host will not
-let you. Grafana Cloud is Grafana's own hosted service, with a free tier (see
-[Grafana Cloud's free tier page](https://grafana.com/products/cloud/free-tier/) for current
-limits). This path needs a second, optional mod, because nobody is coming to read `/metrics` for
-you; instead, the server pushes its numbers out over the internet, using a protocol called OTLP.
+let you. Grafana Cloud is Grafana's own hosted service, with a free tier: see
+[Grafana's pricing page](https://grafana.com/pricing/) for the current limits (10,000 metric
+series, 14 day retention and 3 users, as of writing). This path needs a second, optional mod,
+because nobody is coming to read `/metrics` for you; instead, the server pushes its numbers out
+over the internet, using a protocol called OTLP.
 
 Create a Grafana Cloud account yourself at [grafana.com](https://grafana.com/) if you do not
 have one already.
 
 1. In the Grafana Cloud portal at grafana.com (not the Grafana app itself), open your stack and
-   find its OpenTelemetry tile. Click its "Generate now" button (the exact wording may vary a
-   little) to create an access policy token; it prints ready-to-use values, including
+   find its OpenTelemetry tile. Click Configure, then "Generate now" (the exact wording may vary
+   a little) to create an access policy token; it prints ready-to-use values, including
    `OTEL_EXPORTER_OTLP_ENDPOINT` and `OTEL_EXPORTER_OTLP_HEADERS`. Use the endpoint as printed,
    something like `https://otlp-gateway-<region>.grafana.net/otlp`.
 
    From `OTEL_EXPORTER_OTLP_HEADERS`, take everything after `Authorization=`, but change any
    `%20` back into an actual space. That printed value is itself encoded for use as an
-   environment variable, and Pulse encodes header values its own way before sending them, so a
-   pasted `%20` would be encoded a second time and arrive as a literal `%2520` instead of a
-   space. If you ever need the instance ID by itself, read it from this same OpenTelemetry tile,
-   not the separate Prometheus connection tile: Grafana Cloud gives each of them their own
-   instance ID.
+   environment variable; Pulse encodes header values its own way before sending them, and the
+   exporter decodes them again once they arrive, a round trip that leaves a real space
+   untouched, but leaves a pasted `%20` exactly as pasted too, a literal `%20` instead of a
+   space, which is not the header Grafana Cloud expects. If you ever need the instance ID by
+   itself, read it from this same OpenTelemetry tile, not the separate Prometheus connection
+   tile: Grafana Cloud gives each of them their own instance ID.
 2. Download `pulseotlp_x.x.x.zip` next to `pulse_x.x.x.zip`, from the same
    [ModDB page](https://mods.vintagestory.at/pulse) or
    [GitHub releases](https://github.com/StratumServer/Pulse/releases), and drop it into `Mods/`
@@ -208,7 +222,7 @@ have one already.
      "Endpoint": "https://otlp-gateway-<region>.grafana.net/otlp",
      "Protocol": "http/protobuf",
      "Headers": {
-       "Authorization": "Basic <the value from step 1, with a real space after Basic>"
+       "Authorization": "<everything after Authorization= from step 1>"
      }
    }
    ```
@@ -236,13 +250,17 @@ Once the numbers are flowing, bring in the dashboard:
 4. Open the imported dashboard. It is the same "Pulse server overview" dashboard as path A, with
    one difference, covered next.
 
-A few panels stay empty on this dashboard when the data arrives over OTLP instead of a direct
+Nine panels stay empty on this dashboard when the data arrives over OTLP instead of a direct
 scrape, even though the numbers behind them exist. Grafana Cloud's own translation from OTLP
-into Prometheus-style names renames some series on the way in, and the dashboard's queries do
-not know the new names yet: both network rate panels (bytes per second and packets per second,
-by channel), both attribution share panels, and five of the runtime panels (working set, GC heap
-allocated, heap size, GC pause time, CPU time). A fix for the dashboard itself is being worked on
-separately. Everything else, including tick health, players, world and worldgen, reads normally.
+into Prometheus-style names adds a unit suffix to some series on the way in, and the dashboard's
+queries do not know the translated names yet: "Bytes per second by channel" and "Packets per
+second by channel" in the Network row, "Tick share by mod" and "Current share by mod" in
+Attribution, and "GC pause time", "Allocation rate", "Managed heap after last collection",
+"Process memory" and "CPU time" in the Runtime row. A decision on the fix, either the dashboard's
+queries or how the OTLP mod reports units, is tracked in
+[issue #77](https://github.com/StratumServer/Pulse/issues/77); nothing in the dashboard JSON
+changes here. Everything else, including tick health, players, world and worldgen, reads
+normally.
 
 ## Troubleshooting
 
@@ -254,12 +272,22 @@ separately. Everything else, including tick health, players, world and worldgen,
   already in use" on port 9090 is usually something else already listening there; on Rocky
   Linux, AlmaLinux or RHEL, that is often Cockpit's own web console, worth checking first. On
   the Docker Desktop variant, a taken port does show up as "port is already allocated" at
-  startup instead, since those ports are published rather than shared directly.
+  startup instead, since those ports are published rather than shared directly. Either way, the
+  remedy is the same as any port clash: stop whatever else is using it, or, on the Docker
+  Desktop variant only, change the left-hand number in that service's `ports:` entry (for
+  example `"127.0.0.1:9091:9090"`) and open that new port instead; the Linux file has no such
+  mapping to edit, so there the fix is always to free up the port.
 - **Pulse's own port, 9464, will not bind.** That is unrelated to Docker: Pulse itself logs an
   error at startup and runs without the metrics endpoint until you fix it. Either free up port
-  9464, or set a different `Port` in `ModConfig/pulse.json`, restart the server, and update the
-  target address in `prometheus.yml` (or `prometheus.desktop.yml`) to match; Prometheus only
-  scrapes the address that file names.
+  9464, or set a different `Port` in `ModConfig/pulse.json`, restart the server, and update
+  `prometheus.yml` to match: the target address for the Linux file, or both the `proxy_url` and
+  the target address in `prometheus.desktop.yml`, since that one file names the port twice.
+  Prometheus only scrapes the address its config file names.
+- **`http://localhost:9464/metrics` answers 404, but `127.0.0.1` works.** Use `127.0.0.1`, not
+  `localhost`, whenever you address Pulse directly: on Linux and macOS, Pulse's listener
+  currently answers 404 to anything but the exact address it was told to bind, `localhost`
+  included, even though both names reach the same machine. A fix for this is being looked at
+  separately; for now, always use the literal IP from `Bind` in `ModConfig/pulse.json`.
 - **Grafana opens, but the dashboard has no data at all.** In Prometheus, open
   `http://localhost:9090/targets` (through your SSH tunnel if this is a remote server). If the
   `vintagestory` target is not `UP`, Prometheus cannot reach Pulse: check that the server is
@@ -273,8 +301,10 @@ separately. Everything else, including tick health, players, world and worldgen,
 - **Path B: numbers never show up, and the server logs nothing about it.** That is expected, not
   a sign something crashed: today, an OTLP push that Grafana Cloud rejects (a wrong token gets a
   401, for example) costs nothing on the game side and logs nothing either; it just quietly does
-  not arrive. Double check `Endpoint`, the instance ID and the token in `pulse-otlp.json` against
-  step 1 of path B.
+  not arrive. `pulse-otlp.json` only holds the already-encoded `Authorization` value, not a
+  separate instance ID and token to eyeball, so the quickest check is to go back to the
+  OpenTelemetry tile, generate a fresh value, and paste it in again exactly as in step 1 of
+  path B.
 - **Nothing outside the server can reach `/metrics` at all.** That is by design, not a bug: the
   endpoint has no login of its own, so Pulse only listens on the server itself (`127.0.0.1`)
   unless you deliberately widen it. See the main README's

@@ -58,8 +58,8 @@ you settle on instead of going ragged at 15 seconds and lying at 60.
 
 ## Importing it into a Grafana you already run
 
-Use `pulse-overview-shared.json`. In Grafana, go to Dashboards, then Import, upload that file,
-and pick your Prometheus datasource when it asks for one. That prompt is the entire difference
+Use `pulse-overview-shared.json`. In Grafana, go to Dashboards, then New, then Import dashboard,
+upload that file, and pick your Prometheus datasource when it asks for one. That prompt is the entire difference
 between the two dashboard files: the provisioned copy points at the datasource uid `pulse-prom`,
 which exists only on a Grafana provisioned from this directory, so importing that one anywhere
 else gets you a dashboard wired to nothing.

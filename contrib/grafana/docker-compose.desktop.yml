@@ -3,19 +3,17 @@
 # is an opt-in this file does not rely on. Run with:
 #   docker compose -f docker-compose.desktop.yml up -d
 #
-# Prometheus scrapes host.docker.internal:9464 (prometheus.desktop.yml), the address Docker
-# Desktop provides for reaching the machine it runs on from inside a container. Use this file
-# when the Pulse-equipped server runs directly on this same Windows or macOS machine, not inside
-# another container of its own (see docs/getting-started.md, "Which path is yours").
+# Prometheus reaches the host through host.docker.internal, the address Docker Desktop provides
+# from inside a container, but still asks Pulse for 127.0.0.1 once it gets there (see the
+# comment in prometheus.desktop.yml): on Linux and macOS, Pulse's listener answers 404 to any
+# other Host header, host.docker.internal included; Windows does not have this problem. Use this
+# file when the Pulse-equipped server runs directly on this same Windows or macOS machine, not
+# inside another container of its own (see docs/getting-started.md, "Which path is yours").
 #
 # Both ports are published to 127.0.0.1 only, same reasoning as docker-compose.yml: an
 # unauthenticated Grafana and Prometheus should not be reachable from outside this machine.
 # Grafana runs inside Prometheus's own network namespace (network_mode below), so Grafana's
 # provisioned datasource, which points at http://127.0.0.1:9090, keeps working unchanged.
-#
-# extra_hosts below is Docker's own documented way to make host.docker.internal resolve on plain
-# Docker Engine on Linux too, where it otherwise would not; it does nothing extra on real Docker
-# Desktop, which already provides the name on its own.
 #
 # Both services restart automatically, including after this machine reboots, until you run
 # `docker compose -f docker-compose.desktop.yml down` yourself.
@@ -26,8 +24,6 @@ services:
     ports:
       - "127.0.0.1:9090:9090"
       - "127.0.0.1:3000:3000"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     volumes:
       - ./:/etc/pulse
     command: ["--config.file=/etc/pulse/prometheus.desktop.yml"]
