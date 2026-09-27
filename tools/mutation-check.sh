@@ -47,7 +47,7 @@ mutate() { # <file> <sed -E expression> <label>
     git checkout -- "$file"
 }
 
-MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse/EngineSample.cs Pulse/PingSummary.cs Pulse/EntityBreakdown.cs Pulse/SuspendBookkeeper.cs Pulse/TickAttribution.cs Pulse/ModOwners.cs Pulse/ConfigUpgrade.cs Pulse/PulseCommands.cs Pulse/AttributionMetrics.cs Pulse.Otlp/OtlpOptions.cs"
+MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse/EngineSample.cs Pulse/PingSummary.cs Pulse/EntityBreakdown.cs Pulse/SuspendBookkeeper.cs Pulse/TickAttribution.cs Pulse/ModOwners.cs Pulse/ConfigUpgrade.cs Pulse/ConfigLoad.cs Pulse/PulseCommands.cs Pulse/AttributionMetrics.cs Pulse.Otlp/OtlpOptions.cs"
 
 if ! git diff --quiet -- $MUTATED; then
     echo "One of $MUTATED has uncommitted changes; refusing to mutate over them."
@@ -203,6 +203,17 @@ mutate Pulse/ConfigUpgrade.cs \
 mutate Pulse/ConfigUpgrade.cs \
     's/return null;/return new JsonObject();/' \
     "config upgrade: a file that does not parse is treated as an empty one and rewritten over"
+
+# Loading a config file has the same two ways to be wrong as upgrading one: an unreadable file is
+# the one this whole fix exists for, so mistaking it for a loaded or an absent one is exactly the
+# regression that would bring back the original bug (an admin's broken file getting overwritten).
+mutate Pulse/ConfigLoad.cs \
+    's/existing != null$/existing == null/' \
+    "config load: a file that loaded fine is treated as though it were absent"
+
+mutate Pulse/ConfigLoad.cs \
+    's/ConfigLoadStatus\.Unreadable, e\.Message\)/ConfigLoadStatus.Absent, e.Message)/' \
+    "config load: an unreadable file is treated as absent, so the caller would overwrite it"
 
 # Switching attribution from a command is a promise about a live server: that a server which never
 # asked for it is not paying for it, that a reload names only what it could not apply, and that a

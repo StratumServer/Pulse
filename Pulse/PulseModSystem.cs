@@ -85,11 +85,23 @@ public sealed class PulseModSystem : ModSystem
     {
         sapi = api;
 
-        PulseConfig? existing = api.LoadModConfig<PulseConfig>(ConfigFile);
-        PulseConfig config = existing ?? StoreDefaults(api);
-        if (existing != null)
+        ConfigLoadResult<PulseConfig> loaded = ConfigLoad.Resolve(
+            () => api.LoadModConfig<PulseConfig>(ConfigFile), () => new PulseConfig());
+        PulseConfig config = loaded.Config;
+        switch (loaded.Status)
         {
-            ConfigUpgrade.Upgrade(api, config, ConfigFile, "Pulse");
+            case ConfigLoadStatus.Absent:
+                api.StoreModConfig(config, ConfigFile);
+                break;
+            case ConfigLoadStatus.Loaded:
+                ConfigUpgrade.Upgrade(api, config, ConfigFile, "Pulse");
+                break;
+            case ConfigLoadStatus.Unreadable:
+                string path = Path.Combine(api.GetOrCreateDataPath("ModConfig"), ConfigFile);
+                api.Logger.Error(
+                    ConfigLoad.UnreadableMessage, "Pulse", path, loaded.FailureMessage,
+                    "Pulse is running on its built-in defaults (loopback bind)");
+                break;
         }
 
         if (!config.Enabled)
@@ -218,13 +230,6 @@ public sealed class PulseModSystem : ModSystem
         // worldgen list until shutdown wipes it, and does nothing once the meter below is gone.
         aggregator?.Dispose();
         meter?.Dispose();
-    }
-
-    private static PulseConfig StoreDefaults(ICoreServerAPI api)
-    {
-        PulseConfig config = new();
-        api.StoreModConfig(config, ConfigFile);
-        return config;
     }
 
     private void StartEndpoint(ICoreServerAPI api, PulseConfig config)

@@ -29,11 +29,23 @@ public sealed class PulseOtlpModSystem : ModSystem
 
     public override void StartServerSide(ICoreServerAPI api)
     {
-        PulseOtlpConfig? existing = api.LoadModConfig<PulseOtlpConfig>(ConfigFile);
-        PulseOtlpConfig config = existing ?? StoreDefaults(api);
-        if (existing != null)
+        ConfigLoadResult<PulseOtlpConfig> loaded = ConfigLoad.Resolve(
+            () => api.LoadModConfig<PulseOtlpConfig>(ConfigFile), () => new PulseOtlpConfig());
+        PulseOtlpConfig config = loaded.Config;
+        switch (loaded.Status)
         {
-            ConfigUpgrade.Upgrade(api, config, ConfigFile, "Pulse OTLP");
+            case ConfigLoadStatus.Absent:
+                api.StoreModConfig(config, ConfigFile);
+                break;
+            case ConfigLoadStatus.Loaded:
+                ConfigUpgrade.Upgrade(api, config, ConfigFile, "Pulse OTLP");
+                break;
+            case ConfigLoadStatus.Unreadable:
+                string unreadablePath = Path.Combine(api.GetOrCreateDataPath("ModConfig"), ConfigFile);
+                api.Logger.Error(
+                    ConfigLoad.UnreadableMessage, "Pulse OTLP", unreadablePath, loaded.FailureMessage,
+                    "Pulse OTLP is not exporting");
+                return;
         }
 
         if (!config.Enabled)
@@ -121,12 +133,5 @@ public sealed class PulseOtlpModSystem : ModSystem
         // that holds whatever went wrong just before shutdown.
         provider?.Dispose();
         provider = null;
-    }
-
-    private static PulseOtlpConfig StoreDefaults(ICoreServerAPI api)
-    {
-        PulseOtlpConfig config = new();
-        api.StoreModConfig(config, ConfigFile);
-        return config;
     }
 }
