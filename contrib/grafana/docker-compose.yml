@@ -1,24 +1,19 @@
-# Prometheus and Grafana, wired exactly like the two `docker run` commands in this folder's
-# README, as one `docker compose up -d` instead of two commands run by hand.
+# Prometheus and Grafana for a Linux machine you administer (a rented server, or a Linux
+# desktop running the game server), wired exactly like the two `docker run` commands in this
+# folder's README, as one `docker compose up -d`. On Windows or macOS, use
+# docker-compose.desktop.yml instead: host networking below only works on Linux.
 #
-# Host networking (below) only works on Linux, where a container shares the host's network
-# stack and can reach a Pulse endpoint at 127.0.0.1:9464 same as anything else on the host. On
-# Docker Desktop for Windows or macOS, host networking does not reach the host at all, so this
-# file needs two changes there:
+# Both services bind to 127.0.0.1 only (GF_SERVER_HTTP_ADDR and --web.listen-address below), on
+# purpose. Host networking puts a container directly on the machine's own network, and Grafana's
+# anonymous access has no password of its own, so without an explicit bind, anyone who can reach
+# this machine at all, not just log into it, could administer Grafana, including pointing its
+# data sources at addresses of their own choosing. To look at the dashboard from another
+# computer, tunnel over SSH instead of widening either bind:
+#   ssh -L 3000:127.0.0.1:3000 -L 9090:127.0.0.1:9090 user@your-server
+# then open http://localhost:3000 on your own computer. docs/getting-started.md covers this.
 #
-#   1. Delete the `network_mode: host` line from both services, and add instead:
-#        prometheus:
-#          ports: ["9090:9090"]
-#        grafana:
-#          ports: ["3000:3000"]
-#   2. In prometheus.yml, change the scrape target from "127.0.0.1:9464" to
-#      "host.docker.internal:9464", the hostname Docker Desktop provides for reaching the host
-#      from inside a container.
-#
-# Grafana's anonymous access below is enabled with admin rights, same as the plain `docker run`
-# setup this replaces: fine for a local look on your own machine, not for anything reachable
-# from outside it. Run Grafana properly (real accounts, a real org role) if you keep this beyond
-# a first look.
+# Both services restart automatically, including after this machine reboots, until you run
+# `docker compose down` yourself.
 services:
   prometheus:
     image: prom/prometheus
@@ -26,7 +21,9 @@ services:
     network_mode: host
     volumes:
       - ./:/etc/pulse
-    command: ["--config.file=/etc/pulse/prometheus.yml"]
+    command:
+      - --config.file=/etc/pulse/prometheus.yml
+      - --web.listen-address=127.0.0.1:9090
     restart: unless-stopped
 
   grafana:
@@ -34,6 +31,7 @@ services:
     container_name: pulse-graf
     network_mode: host
     environment:
+      GF_SERVER_HTTP_ADDR: "127.0.0.1"
       GF_AUTH_ANONYMOUS_ENABLED: "true"
       GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
       GF_AUTH_DISABLE_LOGIN_FORM: "true"
