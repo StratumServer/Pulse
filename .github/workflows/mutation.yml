@@ -112,10 +112,13 @@ jobs:
         project: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["Pulse","Pulse.Otlp"]') || fromJSON('["Pulse"]') }}
 
     steps:
-      # A pull request needs the base branch's history to diff against for --since below; the
-      # default shallow checkout only has the merge commit itself. workflow_dispatch and the
-      # scheduled full run mutate everything regardless of history, so the full clone costs them
-      # nothing they need but does not hurt either.
+      # A pull request needs the base commit's history to diff against for --since below; the
+      # default shallow checkout only has the merge commit itself, and even with full history
+      # actions/checkout never registers the base branch as a local origin/<branch> ref (it only
+      # fetches refs/pull/<n>/merge), so --since below targets the base commit's SHA rather than
+      # its branch name. workflow_dispatch and the scheduled full run mutate everything
+      # regardless of history, so the full clone costs them nothing they need but does not hurt
+      # either.
       - uses: actions/checkout@v7
         with:
           fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
@@ -156,7 +159,7 @@ jobs:
         run: dotnet tool restore
 
       # --since scopes this run to mutants in files that changed relative to the pull request's
-      # base branch; --break-at 0 keeps a small, noisy sample from failing the build (the real
+      # base commit; --break-at 0 keeps a small, noisy sample from failing the build (the real
       # threshold lives on the full run below). Stryker exits 0 when since finds nothing to
       # mutate, which is the common case for a pull request that only touches this workflow or
       # the other non-code paths it also watches.
@@ -164,7 +167,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           dotnet dotnet-stryker -f stryker/${{ matrix.project }}.json --skip-version-check \
-            --since:origin/${{ github.base_ref }} --break-at 0 \
+            --since:${{ github.event.pull_request.base.sha }} --break-at 0 \
             --output StrykerOutput/${{ matrix.project }}
 
       # The full run, at the thresholds in stryker/Pulse.json and stryker/Pulse.Otlp.json. Each
