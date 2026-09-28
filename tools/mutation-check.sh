@@ -419,6 +419,10 @@ mutate Pulse.Otlp/OtlpOptions.cs \
     's/query\.Length > 1/false/' \
     "otlp: the endpoint's query values are no longer added to the secrets list, so a signed-URL secret could leak through an echoing backend"
 
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/^        yield return candidate;$//' \
+    "otlp: a userinfo or query secret is only added to the secrets list unescaped, so the percent-escaped form a raw echoed request target actually carries leaks through"
+
 mutate Pulse.Otlp/PulseOtlpModSystem.cs \
     's/failureReason = ex\.GetType\(\)\.Name;/failureReason = null;/' \
     "otlp: TryStoreDefaults stops reporting what failed when writing the default config throws"

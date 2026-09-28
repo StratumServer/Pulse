@@ -110,12 +110,19 @@ public static partial class OtlpOptions
     }
 
     /// <summary>Every secret <paramref name="endpoint"/> itself carries: its userinfo, user and
-    /// password both where both are present, and every one of its query parameter values.
-    /// <see cref="LoggableEndpoint"/> already keeps both out of every log line Pulse writes on
-    /// its own, but a 4xx body that echoes the request target back (a reverse proxy's own error
-    /// page, say) would otherwise put either straight into the log through <see
-    /// cref="ExportFailureLog"/>'s redaction of the backend's own words, which only ever knew
-    /// about the configured header values until now. Not floored or ordered here: <see
+    /// password both where both are present, every one of its query parameter values, and a
+    /// value-less query parameter's own name (a bare "?BareKeySecret777" carries the secret in
+    /// the key, since there is no value to hold it). <see cref="LoggableEndpoint"/> already keeps
+    /// all of this out of every log line Pulse writes on its own, but a 4xx body that echoes the
+    /// request target back (a reverse proxy's own error page, say) would otherwise put it
+    /// straight into the log through <see cref="ExportFailureLog"/>'s redaction of the backend's
+    /// own words, which only ever knew about the configured header values until now. Both the
+    /// escaped form (what <see cref="Uri.UserInfo"/> and <see cref="Uri.Query"/> return, and so
+    /// what a raw request target on the wire, and any echo of it, actually carries) and the
+    /// unescaped one are yielded: a real signed URL (an Azure SAS "sig", an AWS
+    /// X-Amz-Credential or X-Amz-Security-Token) is base64 and always carries '+', '/' or '='
+    /// escaped as %2B, %2F or %3D, so redacting only the unescaped form leaves the form that
+    /// actually appears on the wire unmatched. Not floored or ordered here: <see
     /// cref="ExportFailureLog"/> applies <c>MinimumSecretLength</c> and longest-first ordering
     /// once every source's secrets are merged into one list, the same as it already does for a
     /// header value.</summary>
@@ -126,9 +133,9 @@ public static partial class OtlpOptions
         {
             foreach (string part in userInfo.Split(':', 2))
             {
-                if (part.Length > 0)
+                foreach (string secret in EscapedAndUnescaped(part))
                 {
-                    yield return Uri.UnescapeDataString(part);
+                    yield return secret;
                 }
             }
         }
@@ -139,12 +146,35 @@ public static partial class OtlpOptions
             foreach (string pair in query[1..].Split('&'))
             {
                 int equals = pair.IndexOf('=');
-                string value = equals >= 0 ? pair[(equals + 1)..] : string.Empty;
-                if (value.Length > 0)
+
+                // A value-less parameter ("?BareKeySecret777") carries the secret in its own
+                // name, since there is nothing after an '=' to hold it; otherwise only the
+                // value is a candidate secret, never an ordinary parameter name like "token".
+                string candidate = equals >= 0 ? pair[(equals + 1)..] : pair;
+                foreach (string secret in EscapedAndUnescaped(candidate))
                 {
-                    yield return Uri.UnescapeDataString(value);
+                    yield return secret;
                 }
             }
+        }
+    }
+
+    /// <summary>A URL-escaped candidate exactly as it sits on the wire, plus its unescaped form
+    /// when unescaping actually changes it. Yielding only one used to be the bug: a collector's
+    /// echo of the raw request target carries whichever form was actually sent.</summary>
+    private static IEnumerable<string> EscapedAndUnescaped(string candidate)
+    {
+        if (candidate.Length == 0)
+        {
+            yield break;
+        }
+
+        yield return candidate;
+
+        string unescaped = Uri.UnescapeDataString(candidate);
+        if (unescaped != candidate)
+        {
+            yield return unescaped;
         }
     }
 

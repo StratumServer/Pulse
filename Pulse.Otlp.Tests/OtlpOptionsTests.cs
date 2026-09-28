@@ -304,6 +304,41 @@ public class OtlpOptionsTests
     public void EndpointSecrets_IsEmpty_ForAPlainEndpointWithNoUserinfoOrQuery()
         => Assert.Empty(OtlpOptions.EndpointSecrets(new Uri("http://localhost:4318/v1/metrics")));
 
+    /// <summary>The escaped form is what a raw request target on the wire, and so any echo of it,
+    /// actually carries: a real signed URL is base64 and always has '+', '/' or '=' escaped as
+    /// %2B, %2F or %3D. Yielding only Uri.UnescapeDataString's output, as this used to, leaves the
+    /// form that actually appears on the wire unmatched.</summary>
+    [Fact]
+    public void EndpointSecrets_Returns_BothTheEscapedAndUnescapedFormOfAQueryValue()
+    {
+        Uri endpoint = new("https://host/otlp?sig=q8Wf3kL2%2BxYzAbCdEfGh%3D");
+
+        Assert.Equal(
+            ["q8Wf3kL2%2BxYzAbCdEfGh%3D", "q8Wf3kL2+xYzAbCdEfGh="],
+            OtlpOptions.EndpointSecrets(endpoint).ToArray());
+    }
+
+    [Fact]
+    public void EndpointSecrets_Returns_BothFormsOfAnEscapedUserinfoPassword()
+    {
+        Uri endpoint = new("https://reporter:p%40ssw0rd12@host/otlp");
+
+        Assert.Equal(
+            ["reporter", "p%40ssw0rd12", "p@ssw0rd12"],
+            OtlpOptions.EndpointSecrets(endpoint).ToArray());
+    }
+
+    /// <summary>A value-less query parameter ("?BareKeySecret777", no '=') carries the secret in
+    /// its own name: there is no value to hold it, but the key is still exactly what a
+    /// signed-URL-style backend might echo back.</summary>
+    [Fact]
+    public void EndpointSecrets_Returns_AValueLessQueryParametersOwnName()
+    {
+        Uri endpoint = new("https://host/otlp?BareKeySecret777");
+
+        Assert.Equal(["BareKeySecret777"], OtlpOptions.EndpointSecrets(endpoint).ToArray());
+    }
+
     /// <summary>OpenTelemetry.Exporter.OtlpExporterOptionsExtensions.GetHeaders, 1.18.0, reproduced
     /// because it is internal to the exporter assembly. Unescaping the whole string before the
     /// split is the detail that dictates how RenderHeaders encodes.</summary>

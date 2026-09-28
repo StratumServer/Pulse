@@ -767,6 +767,32 @@ public class ExportFailureLogTests
         Assert.Contains("\"error\":\"no route for /v1/metrics?token=***\"", line);
     }
 
+    /// <summary>A real signed URL's query value is base64 and carries '+', '/' or '=' escaped as
+    /// %2B, %2F or %3D; the raw request target on the wire, and so a reverse proxy's own echo of
+    /// it, carries exactly that escaped form, never the unescaped one. OtlpOptions.EndpointSecrets
+    /// used to yield only Uri.UnescapeDataString's output, which left this shape, the one every
+    /// real Azure SAS or AWS-style signature is actually in, unredacted.</summary>
+    [Fact]
+    public void Failure_RedactsTheEndpointsQueryValue_WhenTheEchoCarriesThePercentEscapedForm()
+    {
+        int port = FreePort();
+        const string escapedSecret = "q8Wf3kL2%2BxYzAbCdEfGh%3D";
+        const string unescapedSecret = "q8Wf3kL2+xYzAbCdEfGh=";
+        string endpoint = $"http://127.0.0.1:{port}/v1/metrics?sig={escapedSecret}";
+        using FakeCollector collector = new(
+            port, _ => (404, $"{{\"error\":\"no route for /v1/metrics?sig={escapedSecret}\"}}"));
+        using Rig rig = BuildRig(endpoint, secrets: [.. OtlpOptions.EndpointSecrets(new Uri(endpoint))]);
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+
+        string line = Assert.Single(failures);
+        Assert.DoesNotContain(escapedSecret, line);
+        Assert.DoesNotContain(unescapedSecret, line);
+        Assert.Contains("\"error\":\"no route for /v1/metrics?sig=***\"", line);
+    }
+
     /// <summary>The userinfo half of EndpointSecrets: a backend that authenticates a signed URL
     /// through the user:password form rather than a query parameter must be redacted the same way.
     /// The configured endpoint carries the userinfo straight through into what the exporter dials

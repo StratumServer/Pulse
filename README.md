@@ -527,12 +527,18 @@ secret some other way, hashing it or splitting it across two fields, could still
 log, so treat the log itself as sensitive before sharing it regardless. The backend's answer, once
 redacted, is clipped to 200 characters.
 
-A malformed `Endpoint`, an `IntervalSeconds` so large it would overflow once converted to
-milliseconds, and a `Headers` entry the exporter cannot accept are all cases Pulse checks itself,
-because each of those would otherwise throw while the exporter is being built rather than fail
-gracefully: it logs one error, naming the problem and never the value, and registers nothing. For
-anything these lines do not explain, the SDK's own, far more verbose self-diagnostics turn on by
-dropping an `OTEL_DIAGNOSTICS.json` file next to the server.
+A malformed `Endpoint`, and a `Headers` entry with a comma in its value or a name that collides
+with another once trimmed, are cases Pulse checks itself before the exporter is ever built: it
+logs one error, naming the problem and never the value, and registers nothing. An `IntervalSeconds`
+so large it would once have overflowed the millisecond conversion is not one of those cases any
+more: it is silently clamped to 86,400 seconds (24 hours) and exported at that rate instead, with
+no error at all. A `Headers` shape neither check above names, such as a comma inside a header
+*name* rather than its value, or a header called `User-Agent` (which collides with one the
+exporter sets on its own), still reaches the OpenTelemetry SDK's own option validation, which
+throws; Pulse catches that too, so nothing crashes and nothing is exported, but the log line only
+names the exception type, not the header. For anything these lines do not explain, the SDK's own,
+far more verbose self-diagnostics turn on by dropping an `OTEL_DIAGNOSTICS.json` file next to the
+server.
 
 ## Building and testing
 
@@ -571,7 +577,7 @@ aggregates, the entity top-ten with its series retirement rule, and the suspend 
 them needs a server. `Pulse.Otlp.Tests` covers the config translation, which is where the OTLP
 mod's only non-obvious logic lives.
 
-Mutation testing runs at two depths. `tools/mutation-check.sh` applies seventy-nine representative
+Mutation testing runs at two depths. `tools/mutation-check.sh` applies eighty-six representative
 mutations one at a time and requires the suite to fail on every one; CI runs it on every push,
 deterministic and under a minute. `.github/workflows/mutation.yml` runs dotnet-stryker
 incrementally on pull requests touching `Pulse/`: it mutates only the files the pull request
