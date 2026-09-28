@@ -48,8 +48,11 @@ internal sealed class MetricsHttpServer : IDisposable
     private long lastErrorLogMs = -ErrorLogIntervalMs;
     private volatile bool stopping;
 
-    // Read back through reflection by the accept-loop-backoff test; nothing production reads.
     private int acceptFailures;
+
+    /// <summary>How many times AcceptTcpClient has failed outright, backoff included; read back
+    /// by the accept-loop-backoff test, nothing in production reads it.</summary>
+    internal int AcceptFailures => acceptFailures;
 
     public MetricsHttpServer(string bind, int port, Func<string> render, ILogger logger)
         : this(bind, port, render, logger, IoTimeoutMs)
@@ -125,8 +128,15 @@ internal sealed class MetricsHttpServer : IDisposable
             {
                 client = listener.AcceptTcpClient();
             }
-            catch (Exception e) when (!stopping)
+            catch (Exception e)
             {
+                if (stopping)
+                {
+                    // Dispose stopped the listener out from under AcceptTcpClient. Normal
+                    // shutdown.
+                    continue;
+                }
+
                 // A one-off failure and a persistent one (the process out of file descriptors,
                 // for instance) look identical from here, so both back off: nothing else stands
                 // between a persistent failure and a full core spent re-failing as fast as
@@ -136,11 +146,6 @@ internal sealed class MetricsHttpServer : IDisposable
                 acceptFailures++;
                 Thread.Sleep(acceptBackoffMs);
                 acceptBackoffMs = Math.Min(acceptBackoffMs * 2, MaxAcceptBackoffMs);
-                continue;
-            }
-            catch
-            {
-                // Dispose stopped the listener out from under AcceptTcpClient. Normal shutdown.
                 continue;
             }
 
@@ -153,13 +158,14 @@ internal sealed class MetricsHttpServer : IDisposable
                     client.SendTimeout = IoTimeoutMs;
                     Handle(client.GetStream(), Environment.TickCount64 + requestTimeoutMs);
                 }
-                catch (Exception e) when (!stopping)
+                catch (Exception e)
                 {
-                    LogOccasionally(e);
-                }
-                catch
-                {
-                    // Dispose evicted this connection's socket mid-request. Normal shutdown.
+                    // Otherwise Dispose evicted this connection's socket mid-request, normal
+                    // shutdown, nothing to log.
+                    if (!stopping)
+                    {
+                        LogOccasionally(e);
+                    }
                 }
             }
         }

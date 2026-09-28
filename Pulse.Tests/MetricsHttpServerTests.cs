@@ -400,7 +400,7 @@ public class MetricsHttpServerTests
     /// would run into the tens of thousands of failures within half a second; a low count proves
     /// the loop is sleeping between attempts instead.</summary>
     [Fact]
-    public void PersistentAcceptFailure_BacksOff_InsteadOfBusySpinning()
+    public async Task PersistentAcceptFailure_BacksOff_InsteadOfBusySpinning()
     {
         int port = FreePort();
         MetricsHttpServer server = new("127.0.0.1", port, () => "x", new FakeLogger());
@@ -410,12 +410,9 @@ public class MetricsHttpServerTests
         TcpListener listener = (TcpListener)listenerField.GetValue(server)!;
         listener.Stop();
 
-        Thread.Sleep(500);
+        await Task.Delay(500);
 
-        FieldInfo failuresField = typeof(MetricsHttpServer).GetField("acceptFailures", BindingFlags.NonPublic | BindingFlags.Instance)!;
-        int failures = (int)failuresField.GetValue(server)!;
-
-        Assert.InRange(failures, 1, 50);
+        Assert.InRange(server.AcceptFailures, 1, 50);
 
         server.Dispose();
     }
