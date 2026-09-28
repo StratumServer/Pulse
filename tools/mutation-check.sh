@@ -335,7 +335,7 @@ mutate Pulse.Otlp/ExportFailureLog.cs \
     "otlp failure log: every exporter in the process is read as Pulse's own"
 
 mutate Pulse.Otlp/ExportFailureLog.cs \
-    's/result\.Replace\(target, Redacted, StringComparison\.Ordinal\)/result/' \
+    's/result\.Replace\(target, Redacted, StringComparison\.OrdinalIgnoreCase\)/result/' \
     "otlp failure log: a configured header value survives into the log verbatim"
 
 mutate Pulse.Otlp/ExportFailureLog.cs \
@@ -343,8 +343,12 @@ mutate Pulse.Otlp/ExportFailureLog.cs \
     "otlp failure log: a real grpc export of Pulse's own is never recognised as its own"
 
 mutate Pulse.Otlp/ExportFailureLog.cs \
-    's/space > 0 && space < trimmed\.Length - 1/false/' \
+    's/if \(space > 0\)/if (false)/' \
     "otlp failure log: a credential echoed back without its scheme is never redacted"
+
+mutate Pulse.Otlp/ExportFailureLog.cs \
+    's/\.OrderByDescending\(target => target\.Length\)//' \
+    "otlp failure log: redaction targets are no longer applied longest first, so a short value can gnaw a hole in a longer one"
 
 mutate Pulse.Otlp/OtlpOptions.cs \
     's/headers\?\.Values\.Where/headers.Values.Where/' \

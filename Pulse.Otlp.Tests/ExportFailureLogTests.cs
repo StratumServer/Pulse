@@ -146,6 +146,41 @@ public class ExportFailureLogTests
         Assert.Empty(failures);
     }
 
+    /// <summary>The exporter's own path join collapses only a single trailing slash on the base
+    /// into the grpc export path's own leading one; a base kept with two by a config typo still
+    /// reaches an address ownGrpcExportPath has to match exactly, or every export against it,
+    /// failing or succeeding, goes unrecognised.</summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData("/prefix")]
+    public void Grpc_MatchesOwnExport_ForAFailure_WhenTheConfiguredBaseKeepsATrailingDoubleSlash(string basePath)
+    {
+        int port = FreePort();
+        using FakeGrpcFailureCollector collector = new(port);
+        using Rig rig = BuildRig($"http://127.0.0.1:{port}{basePath}//", protocol: OtlpExportProtocol.Grpc);
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+        Assert.Contains("Unauthenticated", Assert.Single(failures));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("/prefix")]
+    public void Grpc_MatchesOwnExport_ForASuccess_WhenTheConfiguredBaseKeepsATrailingDoubleSlash(string basePath)
+    {
+        int port = FreePort();
+        using FakeGrpcFailureCollector collector = new(port, grpcStatus: 0);
+        using Rig rig = BuildRig($"http://127.0.0.1:{port}{basePath}//", protocol: OtlpExportProtocol.Grpc);
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, List<string> successes) = DrainAll(rig.Log);
+        Assert.Empty(failures);
+        Assert.Contains("succeeded", Assert.Single(successes));
+    }
+
     /// <summary>Event 40's declared response size is not part of its key: three different sizes
     /// (a real backend's error body length varies export to export) must still read as the same
     /// kind, not three, contradicting the rate limit and the cap alike.</summary>
@@ -535,6 +570,139 @@ public class ExportFailureLogTests
 
         string line = Assert.Single(failures);
         Assert.DoesNotContain(SecretHeaderValue, line);
+    }
+
+    /// <summary>A short, unrelated value configured before a longer secret (a tenant or org id
+    /// ahead of the real credential, say) used to redact value by value in that same order: the
+    /// short value's own pass landed inside the longer secret's own exact text first, and the
+    /// longer value's own, more specific match then found nothing left to match, leaving a
+    /// fragment of the real secret in the log.</summary>
+    [Theory]
+    [InlineData(
+        "1", "Bearer tok1en+x/yZ9q==",
+        "{\"X-Scope-OrgID\":\"1\",\"Authorization\":\"Bearer tok1en+x/yZ9q==\"}",
+        "\"X-Scope-OrgID\":\"1\"", "\"Authorization\":\"***\"")]
+    [InlineData(
+        "a", "k3ya1b2c9zQ",
+        "{\"tenant\":\"a\",\"x-api-key\":\"k3ya1b2c9zQ\"}",
+        "\"tenant\":\"a\"", "\"x-api-key\":\"***\"")]
+    public void Failure_RedactsTheLongerSecret_EvenWhenAShorterUnrelatedValuePrecedesItInConfig(
+        string shortValue, string longSecret, string body, string untouchedFragment, string redactedFragment)
+    {
+        int port = FreePort();
+        string endpoint = $"http://127.0.0.1:{port}/v1/metrics";
+        using FakeCollector collector = new(port, _ => (401, body));
+        using Rig rig = BuildRig(endpoint, secrets: [shortValue, longSecret]);
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+
+        string line = Assert.Single(failures);
+        Assert.Contains(untouchedFragment, line);
+        Assert.Contains(redactedFragment, line);
+    }
+
+    /// <summary>The length floor alone is not what fixes ordering: even once both configured
+    /// values clear it, a shorter one whose own literal text happens to sit inside a longer
+    /// secret's text must still not be replaced first, or the longer secret's own, more specific
+    /// match finds nothing left in the text to match against.</summary>
+    [Fact]
+    public void Failure_RedactsTheLongerSecret_EvenWhenAShorterSecretsOwnTextSitsInsideIt()
+    {
+        int port = FreePort();
+        string endpoint = $"http://127.0.0.1:{port}/v1/metrics";
+        const string body = "{\"X-Scope-OrgID\":\"shortid\",\"Authorization\":\"Bearer shortid-rest-of-token\"}";
+        using FakeCollector collector = new(port, _ => (401, body));
+        using Rig rig = BuildRig(endpoint, secrets: ["shortid", "Bearer shortid-rest-of-token"]);
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+
+        Assert.Contains("\"Authorization\":\"***\"", Assert.Single(failures));
+    }
+
+    /// <summary>A configured value under 6 characters reads as an ordinary id, not a credential: it
+    /// must never stamp "***" over an unrelated character it happens to share with ordinary text,
+    /// the "a" in "indicate" here, part of HttpClient's own exception message and present with no
+    /// backend response body involved at all.</summary>
+    [Fact]
+    public void Failure_ShortConfiguredValue_NeverStampsOverOrdinaryCauseText()
+    {
+        int port = FreePort();
+        string endpoint = $"http://127.0.0.1:{port}/v1/metrics";
+        using FakeCollector collector = new(port, _ => (401, string.Empty));
+        using Rig rig = BuildRig(endpoint, secrets: ["a"]);
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+
+        Assert.Contains("does not indicate success: 401", Assert.Single(failures));
+    }
+
+    /// <summary>The fallback regex requires a real credential's length, not just the word "bearer"
+    /// or "basic": ordinary prose that merely mentions either, with no secret configured at all,
+    /// must come through unredacted.</summary>
+    [Theory]
+    [InlineData("missing bearer token")]
+    [InlineData("Basic auth required")]
+    public void Failure_OrdinaryProseMentioningAScheme_IsNeverRedacted_WhenNoSecretIsConfigured(string body)
+    {
+        int port = FreePort();
+        string endpoint = $"http://127.0.0.1:{port}/v1/metrics";
+        using FakeCollector collector = new(port, _ => (401, body));
+        using Rig rig = BuildRig(endpoint, secrets: []);
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+        Assert.Contains(body, Assert.Single(failures));
+    }
+
+    /// <summary>The other side of the length floor: a real credential, unconfigured, still has to
+    /// be caught the moment it clears 8 characters.</summary>
+    [Fact]
+    public void Failure_RedactsAnUnconfiguredBearerCredential_AtLeast8CharactersLong()
+    {
+        int port = FreePort();
+        string endpoint = $"http://127.0.0.1:{port}/v1/metrics";
+        const string body = "{\"hint\":\"Bearer eight888\"}";
+        using FakeCollector collector = new(port, _ => (401, body));
+        using Rig rig = BuildRig(endpoint, secrets: []);
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+
+        string line = Assert.Single(failures);
+        Assert.DoesNotContain("eight888", line);
+        Assert.Contains("Bearer ***", line);
+    }
+
+    /// <summary>JSON allows either letter case in a \uXXXX escape; System.Text.Json's own encoder
+    /// always writes the uppercase form (confirmed against 1.19.1's own dependency: '+' becomes
+    /// "+"), but nothing says a backend's own encoder picks the same one this mod's escaped
+    /// target was built with. Case-insensitive matching is what catches this, not a second,
+    /// lowercase target.</summary>
+    [Fact]
+    public void Failure_RedactsACredential_EscapedWithLowercaseHexDigits()
+    {
+        int port = FreePort();
+        string endpoint = $"http://127.0.0.1:{port}/v1/metrics";
+        const string secret = "tok1en+x/yZ9q==";
+        const string body = "{\"got\":\"tok1en\\u002bx/yZ9q==\"}";
+        using FakeCollector collector = new(port, _ => (401, body));
+        using Rig rig = BuildRig(endpoint, secrets: [secret]);
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+
+        string line = Assert.Single(failures);
+        Assert.DoesNotContain("tok1en", line);
+        Assert.Contains("\"got\":\"***\"", line);
     }
 
     /// <summary>Mirrors OtlpOptions.SecretValues(null) and SecretValues of a Headers block holding

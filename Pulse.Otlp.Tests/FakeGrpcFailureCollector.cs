@@ -4,10 +4,11 @@ using System.Text;
 
 namespace Pulse.Otlp.Tests;
 
-/// <summary>Just enough of an OTLP/gRPC collector to answer one export with a non-OK gRPC status:
-/// settings, no data back, then a trailer naming status 16 (UNAUTHENTICATED) and the given detail
-/// text. Adapted from Pulse.Otlp.Scenarios/FakeGrpcCollector.cs, which answers OK instead; see that
-/// file's remarks for why this is hand-rolled rather than a real HTTP/2 server.</summary>
+/// <summary>Just enough of an OTLP/gRPC collector to answer one export with a chosen gRPC status:
+/// settings, no data back, then a trailer naming the status (16, UNAUTHENTICATED, by default) and,
+/// for a non-OK one, the given detail text. Adapted from Pulse.Otlp.Scenarios/FakeGrpcCollector.cs,
+/// which only ever answers OK; see that file's remarks for why this is hand-rolled rather than a
+/// real HTTP/2 server.</summary>
 internal sealed class FakeGrpcFailureCollector : IDisposable
 {
     private const int PrefaceLength = 24;
@@ -33,18 +34,22 @@ internal sealed class FakeGrpcFailureCollector : IDisposable
     private readonly TcpListener listener;
     private readonly CancellationTokenSource closing = new();
 
-    /// <summary>"grpc-status: 16" and "grpc-message: {detail}" as trailer literals with new names.
-    /// 16 is UNAUTHENTICATED; a real status is what proves the exporter's own status parsing,
-    /// rather than only its network error handling.</summary>
-    private readonly byte[] unauthenticatedTrailer;
+    /// <summary>"grpc-status: N" and, for a non-OK status, "grpc-message: {detail}" as trailer
+    /// literals with new names. Defaults to 16, UNAUTHENTICATED, a real status proving the
+    /// exporter's own status parsing rather than only its network error handling; grpcStatus: 0
+    /// answers OK instead, the shape a successful export needs to reach the SDK's own success
+    /// event.</summary>
+    private readonly byte[] statusTrailer;
 
-    public FakeGrpcFailureCollector(int port, string detail = "invalid token")
+    public FakeGrpcFailureCollector(int port, string detail = "invalid token", int grpcStatus = 16)
     {
-        unauthenticatedTrailer =
-        [
-            0x00, 0x0b, .. "grpc-status"u8, 0x02, .. "16"u8,
-            0x00, 0x0c, .. "grpc-message"u8, .. HpackLiteralString(detail),
-        ];
+        statusTrailer = grpcStatus == 0
+            ? [0x00, 0x0b, .. "grpc-status"u8, 0x01, .. "0"u8]
+            :
+            [
+                0x00, 0x0b, .. "grpc-status"u8, 0x02, .. "16"u8,
+                0x00, 0x0c, .. "grpc-message"u8, .. HpackLiteralString(detail),
+            ];
         listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
         Task.Run(Accept);
@@ -145,7 +150,7 @@ internal sealed class FakeGrpcFailureCollector : IDisposable
         [
             .. Frame(Headers, EndHeaders, streamId, ResponseHeaders),
             .. Frame(Data, 0, streamId, EmptyResponseMessage),
-            .. Frame(Headers, EndHeaders | EndStream, streamId, unauthenticatedTrailer),
+            .. Frame(Headers, EndHeaders | EndStream, streamId, statusTrailer),
         ];
 
         await stream.WriteAsync(response, token);

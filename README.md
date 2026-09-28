@@ -490,14 +490,17 @@ A matching line reports the first successful export after a failure, so recovery
 a healthy server that has never failed still logs exactly one such line, at Notification rather
 than Warning, right after its first delivery.
 
-Neither line is meant to carry a header value. Before a line is queued, each configured value, the
-credential half of it when the value has a "scheme credential" shape (a Bearer token echoed without
-its "Bearer ", say), and the JSON-escaped form of both, are redacted out of the backend's answer and
-out of a gRPC failure's status detail; anything else shaped like a bearer or basic credential is
-redacted too, whether or not it matches a configured value. This is not exhaustive: a backend that
-transforms a secret some other way, hashing it or splitting it across two fields, could still get it
-into the log, so treat the log itself as sensitive before sharing it regardless. The backend's
-answer, once redacted, is clipped to 200 characters. A malformed `Endpoint` is still the one case
+Neither line is meant to carry a header value. Before a line is queued, each configured value of at
+least 6 characters (shorter than that reads as an ordinary id, not a credential), the credential
+half of it when the value has a "scheme credential" shape (a Bearer token echoed without its
+"Bearer ", say), and the JSON-escaped form of both, are matched case-insensitively and redacted out
+of the backend's answer and out of a gRPC failure's status detail, longest value first so a short
+one can never land inside a longer one's own match. Anything else shaped like a bearer or basic
+credential of at least 8 characters is redacted too, whether or not it matches a configured value.
+This is not exhaustive: a backend that transforms a secret some other way, hashing it or splitting
+it across two fields, could still get it into the log, so treat the log itself as sensitive before
+sharing it regardless. The backend's answer, once redacted, is clipped to 200 characters. A
+malformed `Endpoint` is still the one case
 Pulse checks itself, because that one would throw while the exporter is being built: it logs an
 error and registers nothing. For anything these lines do not explain, the SDK's own, far more
 verbose self-diagnostics turn on by dropping an `OTEL_DIAGNOSTICS.json` file next to the server.
