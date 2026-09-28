@@ -281,7 +281,7 @@ public class MetricsHttpServerTests
     public async Task ScrapeQueuedBehindAFullCap_SucceedsOnceAShortDeadlineFreesASlot()
     {
         int port = FreePort();
-        using MetricsHttpServer server = new("127.0.0.1", port, () => "x", new FakeLogger(), requestTimeoutMs: 500);
+        using MetricsHttpServer server = new("127.0.0.1", port, () => "x", new FakeLogger(), requestTimeoutMs: 1000);
         server.Start();
 
         List<TcpClient> idle = [];
@@ -295,7 +295,9 @@ public class MetricsHttpServerTests
             }
 
             // Lets the accept thread actually pick up all sixteen before the seventeenth connects.
-            await Task.Delay(200);
+            // Well short of their 1 s deadline, so most of that second is still ahead of the
+            // scrape below, leaving a wide margin either side of its expected wait.
+            await Task.Delay(100);
 
             using HttpClient http = new();
             using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
@@ -303,9 +305,9 @@ public class MetricsHttpServerTests
             using HttpResponseMessage response = await http.GetAsync($"http://127.0.0.1:{port}/metrics", cts.Token);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            Assert.True(watch.Elapsed > TimeSpan.FromMilliseconds(300),
+            Assert.True(watch.Elapsed > TimeSpan.FromMilliseconds(400),
                 $"the scrape succeeded in {watch.Elapsed}, suspiciously fast for one actually queued behind a full cap");
-            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), $"queued scrape took {watch.Elapsed}");
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), $"queued scrape took {watch.Elapsed}");
         }
         finally
         {

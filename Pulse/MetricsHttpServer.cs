@@ -204,13 +204,20 @@ internal sealed class MetricsHttpServer : IDisposable
                 break;
             }
 
-            TcpClient client;
+            // The slot acquired above is released either here, on anything that keeps this
+            // connection from actually being handled, or inside HandleConnection's own finally
+            // once a handler thread has fully taken over: exactly one of the two runs for every
+            // acquired slot, never neither.
+            TcpClient? client = null;
             try
             {
                 client = listener.AcceptTcpClient();
+                StartHandler(client);
+                acceptBackoff.Reset();
             }
             catch (Exception e)
             {
+                client?.Dispose();
                 connectionSlots.Release();
                 if (stopping)
                 {
@@ -220,16 +227,12 @@ internal sealed class MetricsHttpServer : IDisposable
                 // A one-off failure and a persistent one (the process out of file descriptors,
                 // for instance) look identical from here, so both back off: nothing else stands
                 // between a persistent failure and a full core spent re-failing as fast as
-                // AcceptTcpClient can throw, invisible behind a log line rate-limited to once a
-                // minute.
+                // AcceptTcpClient, or starting a thread for it, can throw, invisible behind a log
+                // line rate-limited to once a minute.
                 LogOccasionally(e);
                 acceptFailures++;
                 Thread.Sleep(acceptBackoff.NextMs());
-                continue;
             }
-
-            acceptBackoff.Reset();
-            StartHandler(client);
         }
     }
 
@@ -241,13 +244,29 @@ internal sealed class MetricsHttpServer : IDisposable
             IsBackground = true,
             Name = "pulse-metrics-request",
         };
+        ActiveConnection connection = new(handler, client);
 
         lock (activeConnectionsGate)
         {
-            activeConnections.Add(new ActiveConnection(handler, client));
+            activeConnections.Add(connection);
         }
 
-        handler.Start();
+        try
+        {
+            handler.Start();
+        }
+        catch
+        {
+            // The thread never actually started, so HandleConnection's own finally will never
+            // run to remove this entry; remove it here instead, and let the caller release the
+            // slot and dispose the client the same way it would for a failed accept.
+            lock (activeConnectionsGate)
+            {
+                activeConnections.Remove(connection);
+            }
+
+            throw;
+        }
     }
 
     private void HandleConnection(TcpClient client, long deadline)
