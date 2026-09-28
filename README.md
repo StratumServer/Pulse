@@ -518,10 +518,10 @@ mod's only non-obvious logic lives.
 Mutation testing runs at two depths. `tools/mutation-check.sh` applies sixty representative
 mutations one at a time and requires the suite to fail on every one; CI runs it on every push,
 deterministic and under a minute. `.github/workflows/mutation.yml` runs dotnet-stryker
-incrementally on pull requests touching `Pulse/`, scoped to the mutants in files the pull request
-changed and reporting rather than gating; the full project run, mutating the whole project except
-the files that only run under a live server, about 88 percent, break at 83, moves to a weekly
-schedule and `workflow_dispatch`. Pulse.Otlp's own Stryker lane is `workflow_dispatch` only,
+incrementally on pull requests touching `Pulse/`: it mutates only the files the pull request
+changed and reports without gating. The full run mutates the whole project except the files that
+only run under a live server, scores 86 to 88 percent in recent runs, fails below 83, and runs
+weekly and on `workflow_dispatch`. Pulse.Otlp's own Stryker lane is `workflow_dispatch` only,
 because Stryker launches the wrong project's test host for it and the score swings too much
 between runs to gate a pull request on.
 

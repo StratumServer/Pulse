@@ -45,8 +45,9 @@ jobs:
     runs-on: ubuntu-latest
     # Short on a pull request, where the run is scoped to a handful of changed files; generous
     # on workflow_dispatch and the weekly schedule, where it mutates the whole project (Pulse
-    # alone has taken 20 to 53 minutes on a shared runner, and 60 was not always enough).
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 20 || 90 }}
+    # alone has taken anywhere from 20 to 87 minutes on a shared runner, so 150 leaves room for a
+    # slow one).
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 20 || 150 }}
     strategy:
       # A weak spot in one project should not hide the other.
       fail-fast: false
@@ -60,7 +61,7 @@ jobs:
         # This matrix also behaves differently depending on how the workflow was triggered. On
         # a pull request, the step below scopes Stryker to the mutants in files the pull request
         # changed (--since) and never breaks the build (--break-at 0): the full Pulse project
-        # takes 20 to 53 minutes on a shared runner, too slow and too variable to gate every
+        # takes 20 to 87 minutes on a shared runner, too slow and too variable to gate every
         # pull request, and a score over a handful of changed-file mutants is too noisy to
         # threshold on its own. The full project still runs, at the real thresholds below, on
         # workflow_dispatch and the weekly schedule; that is the actual ratchet, and tools/
@@ -105,28 +106,28 @@ jobs:
         # reproduced the original all-mutants-survived failure from issue #2 (restorable from
         # dcc17ad if that needs re-proving), so the fix is not a config change available today. In
         # the meantime OtlpOptions.cs stays covered deterministically: tools/mutation-check.sh's
-        # 44 hand-mutations run on every push in ci.yml, drive dotnet test directly, and never go
+        # hand-mutations run on every push in ci.yml, drive dotnet test directly, and never go
         # through Stryker's coverage capture or host reuse.
         #
         # Raising a threshold is a deliberate commit, not a side effect of adding tests elsewhere.
         project: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["Pulse","Pulse.Otlp"]') || fromJSON('["Pulse"]') }}
 
     steps:
-      # A pull request needs the base branch's history to diff against for --since below; the
-      # default shallow checkout only has the merge commit itself. workflow_dispatch and the
-      # scheduled full run mutate everything regardless of history, so the full clone costs them
-      # nothing they need but does not hurt either.
+      # The default shallow checkout is enough for --since below: Stryker compares the checked
+      # out tree with the base branch's tree, which the next step fetches by name.
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
 
-      # actions/checkout only ever registers refs/pull/<n>/merge locally, never the base branch
-      # itself, so Stryker has nothing named to resolve below even once the history is there
-      # (its object is fetched, just unreachable by name). This points a real origin/<branch> ref
-      # at it; the commit is already local from the fetch above, so this costs nothing extra.
+      # actions/checkout only registers refs/pull/<n>/merge locally, never the base branch
+      # itself, so Stryker would have nothing named to resolve below. This fetches the base
+      # branch under a real origin/<branch> name. The branch name reaches the script through an
+      # environment variable rather than an inline expression, the usual guard against
+      # expression injection, although the pull_request filter above already limits it to main
+      # or dev.
       - name: Register the base branch for --since
         if: github.event_name == 'pull_request'
-        run: git fetch origin ${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}
+        env:
+          BASE_REF: ${{ github.base_ref }}
+        run: git fetch origin "$BASE_REF:refs/remotes/origin/$BASE_REF"
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v6
@@ -170,9 +171,11 @@ jobs:
       # the other non-code paths it also watches.
       - name: Mutation test ${{ matrix.project }} (incremental)
         if: github.event_name == 'pull_request'
+        env:
+          BASE_REF: ${{ github.base_ref }}
         run: |
           dotnet dotnet-stryker -f stryker/${{ matrix.project }}.json --skip-version-check \
-            --since:origin/${{ github.base_ref }} --break-at 0 \
+            --since:"origin/$BASE_REF" --break-at 0 \
             --output StrykerOutput/${{ matrix.project }}
 
       # The full run, at the thresholds in stryker/Pulse.json and stryker/Pulse.Otlp.json. Each
