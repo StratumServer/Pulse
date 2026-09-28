@@ -16,6 +16,14 @@ public static partial class OtlpOptions
     /// outright, so a config typo cannot be allowed through.</summary>
     public const int MinimumIntervalSeconds = 5;
 
+    /// <summary>Longest export interval accepted, in seconds: 24 hours, far past any real use of a
+    /// push exporter and comfortably below the point (a little over 24.8 days) where multiplying by
+    /// 1000 would overflow a 32-bit millisecond count. A config value above this used to overflow
+    /// silently instead: 3,000,000 seconds, typed for "a lot less often", became a negative
+    /// millisecond count the reader's own validation then rejected with an unhandled
+    /// ArgumentOutOfRangeException.</summary>
+    public const int MaximumIntervalSeconds = 86_400;
+
     private const string MetricsPath = "/v1/metrics";
 
     /// <summary>Fallback service.name when the config key is blank. Distinct from the SDK's own
@@ -23,9 +31,11 @@ public static partial class OtlpOptions
     /// would recognise even before anyone edits the config.</summary>
     public const string DefaultServiceName = "vintagestory";
 
-    /// <summary>Export interval in milliseconds, floored.</summary>
+    /// <summary>Export interval in milliseconds, clamped to <see cref="MinimumIntervalSeconds"/> and
+    /// <see cref="MaximumIntervalSeconds"/> before the multiply, so neither end of a config typo can
+    /// reach the reader unvalidated or overflow on the way there.</summary>
     public static int IntervalMilliseconds(int intervalSeconds)
-        => Math.Max(MinimumIntervalSeconds, intervalSeconds) * 1000;
+        => Math.Clamp(intervalSeconds, MinimumIntervalSeconds, MaximumIntervalSeconds) * 1000;
 
     /// <summary>Resolves the service.name to export, falling back to <see
     /// cref="DefaultServiceName"/> on a blank config value rather than exporting an empty resource
@@ -97,6 +107,83 @@ public static partial class OtlpOptions
     {
         string safe = endpoint.GetComponents(UriComponents.SchemeAndServer | UriComponents.Path, UriFormat.UriEscaped);
         return endpoint.Query.Length > 0 ? safe + " (query string kept, not logged)" : safe;
+    }
+
+    /// <summary>Every secret <paramref name="endpoint"/> itself carries: its userinfo, user and
+    /// password both where both are present, and every one of its query parameter values.
+    /// <see cref="LoggableEndpoint"/> already keeps both out of every log line Pulse writes on
+    /// its own, but a 4xx body that echoes the request target back (a reverse proxy's own error
+    /// page, say) would otherwise put either straight into the log through <see
+    /// cref="ExportFailureLog"/>'s redaction of the backend's own words, which only ever knew
+    /// about the configured header values until now. Not floored or ordered here: <see
+    /// cref="ExportFailureLog"/> applies <c>MinimumSecretLength</c> and longest-first ordering
+    /// once every source's secrets are merged into one list, the same as it already does for a
+    /// header value.</summary>
+    public static IEnumerable<string> EndpointSecrets(Uri endpoint)
+    {
+        string userInfo = endpoint.UserInfo;
+        if (userInfo.Length > 0)
+        {
+            foreach (string part in userInfo.Split(':', 2))
+            {
+                if (part.Length > 0)
+                {
+                    yield return Uri.UnescapeDataString(part);
+                }
+            }
+        }
+
+        string query = endpoint.Query;
+        if (query.Length > 1) // more than just the leading '?'
+        {
+            foreach (string pair in query[1..].Split('&'))
+            {
+                int equals = pair.IndexOf('=');
+                string value = equals >= 0 ? pair[(equals + 1)..] : string.Empty;
+                if (value.Length > 0)
+                {
+                    yield return Uri.UnescapeDataString(value);
+                }
+            }
+        }
+    }
+
+    /// <summary>Whether <paramref name="headers"/> is safe to hand the exporter: no value carries a
+    /// comma, and no two names collide once trimmed. Both shapes reach the exporter's own option
+    /// validation otherwise and throw there instead of here: a comma cannot survive
+    /// <see cref="RenderHeaders"/>'s round trip (see its own remarks) and corrupts the rendered
+    /// string at whatever pair follows it, and two names equal after trimming both render to the
+    /// same key, which the exporter's own header parser rejects as a duplicate. <paramref
+    /// name="offendingHeader"/> is the trimmed name of the first header either check does not
+    /// like, never its value, so the log line this drives can name what to fix without repeating a
+    /// credential into it. An entry with no name is skipped, the same as <see cref="RenderHeaders"/>
+    /// already skips one.</summary>
+    public static bool TryValidateHeaders(
+        IDictionary<string, string>? headers, [NotNullWhen(false)] out string? offendingHeader)
+    {
+        offendingHeader = null;
+        if (headers == null)
+        {
+            return true;
+        }
+
+        HashSet<string> seenNames = new(StringComparer.Ordinal);
+        foreach (KeyValuePair<string, string> header in headers)
+        {
+            if (string.IsNullOrWhiteSpace(header.Key))
+            {
+                continue;
+            }
+
+            string name = header.Key.Trim();
+            if (!seenNames.Add(name) || (header.Value?.Contains(',') ?? false))
+            {
+                offendingHeader = name;
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>The header values ExportFailureLog should treat as secrets: null-safe against

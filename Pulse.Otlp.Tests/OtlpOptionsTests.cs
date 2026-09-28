@@ -237,6 +237,73 @@ public class OtlpOptionsTests
         Assert.Equal(message, OtlpOptions.RedactQuotedValues(message));
     }
 
+    [Fact]
+    public void TryValidateHeaders_Accepts_NullOrOrdinaryHeaders()
+    {
+        Assert.True(OtlpOptions.TryValidateHeaders(null, out string? offending));
+        Assert.Null(offending);
+
+        Assert.True(OtlpOptions.TryValidateHeaders(
+            new Dictionary<string, string> { ["Authorization"] = "Bearer abc", ["x-scope-orgid"] = "t1" },
+            out offending));
+        Assert.Null(offending);
+    }
+
+    /// <summary>The shape RenderHeaders's own remarks describe: a comma cannot survive the
+    /// exporter's unescape-then-split round trip, whatever this mod does to encode it going in, so
+    /// it has to be refused before it ever reaches the exporter rather than silently corrupting
+    /// whatever header follows it.</summary>
+    [Fact]
+    public void TryValidateHeaders_Rejects_ACommaInAValue_AndNamesTheHeaderNotTheValue()
+    {
+        Dictionary<string, string> headers = new() { ["Authorization"] = "Bearer a,b" };
+
+        Assert.False(OtlpOptions.TryValidateHeaders(headers, out string? offending));
+
+        Assert.Equal("Authorization", offending);
+    }
+
+    /// <summary>Two config keys that differ only by whitespace both render to the same trimmed
+    /// name; the exporter's own header parser then rejects the second as a duplicate key with no
+    /// mention of which config entry caused it. This catches it first, by name.</summary>
+    [Fact]
+    public void TryValidateHeaders_Rejects_TwoNamesEqualAfterTrimming()
+    {
+        Dictionary<string, string> headers = new() { ["Authorization"] = "Bearer abc" };
+        headers[" Authorization "] = "Bearer def";
+
+        Assert.False(OtlpOptions.TryValidateHeaders(headers, out string? offending));
+
+        Assert.Equal("Authorization", offending);
+    }
+
+    [Fact]
+    public void TryValidateHeaders_Skips_AnEntryWithNoName()
+    {
+        Dictionary<string, string> headers = new() { ["  "] = "orphan", ["Authorization"] = "Bearer abc" };
+
+        Assert.True(OtlpOptions.TryValidateHeaders(headers, out string? offending));
+        Assert.Null(offending);
+    }
+
+    [Fact]
+    public void EndpointSecrets_Returns_TheUserinfoAndEveryQueryValue()
+    {
+        Uri endpoint = new("https://user1234:p4ssw0rd12@host/otlp?token=verysecrettoken&other=xyz");
+
+        Assert.Equal(
+            ["user1234", "p4ssw0rd12", "verysecrettoken", "xyz"],
+            OtlpOptions.EndpointSecrets(endpoint).ToArray());
+    }
+
+    [Fact]
+    public void EndpointSecrets_HandlesAUserOnlyUserinfo_WithNoPassword()
+        => Assert.Equal(["justauser"], OtlpOptions.EndpointSecrets(new Uri("https://justauser@host/otlp")));
+
+    [Fact]
+    public void EndpointSecrets_IsEmpty_ForAPlainEndpointWithNoUserinfoOrQuery()
+        => Assert.Empty(OtlpOptions.EndpointSecrets(new Uri("http://localhost:4318/v1/metrics")));
+
     /// <summary>OpenTelemetry.Exporter.OtlpExporterOptionsExtensions.GetHeaders, 1.18.0, reproduced
     /// because it is internal to the exporter assembly. Unescaping the whole string before the
     /// split is the detail that dictates how RenderHeaders encodes.</summary>
