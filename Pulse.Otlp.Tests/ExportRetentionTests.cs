@@ -18,7 +18,25 @@ public class ExportRetentionTests
 {
     private const int WarmUpExports = 500;
     private const int MeasuredExports = 10_000;
-    private const long MaxRetainedBytes = 1_000_000;
+
+    /// <summary>Bound for the collector-backed variant below, which runs on every OS through
+    /// <see cref="FakeCollector"/>'s <see cref="HttpListener"/>. That type is backed by the
+    /// native http.sys driver on Windows and by a fully managed socket implementation on Linux
+    /// and macOS (dotnet/runtime carries separate Windows and Unix sources for it), and the two
+    /// paths measurably retain different amounts per request. Measured on 1.19.1: up to about
+    /// 520 KB across five runs on Linux, and 2,075,072 bytes on the one Windows CI run that first
+    /// exercised this test (StratumServer/Pulse PR #98, "Unit tests (Windows)", 2026-09-28). This
+    /// bound keeps roughly double that Windows figure as headroom for run-to-run variance while
+    /// staying about a thousand times under where the leak once suspected here (about 1 MB per
+    /// export, so 10 GB over 10 000) would land.</summary>
+    private const long MaxRetainedBytesFailingCollector = 4_000_000;
+
+    /// <summary>Bound for the refused-connection variant below, which only ever runs on Linux and
+    /// macOS. 1 MB over 10 000 exports is 100 B each. Measured on 1.19.1: a one-time step of
+    /// about 250 KB in the first seconds of exporting, then a few hundred bytes per 10 000
+    /// exports. The leak once suspected here (about 1 MB per export) would show as
+    /// gigabytes.</summary>
+    private const long MaxRetainedBytesRefusedConnection = 1_000_000;
 
     /// <summary>The main guard, run on every OS: a local collector answers each export with an
     /// HTTP 503 immediately, so the exporter's failure path and <see cref="ExportFailureLog"/> run
@@ -35,7 +53,7 @@ public class ExportRetentionTests
         Uri endpoint = new($"http://127.0.0.1:{port}/v1/metrics");
 
         using FakeCollector collector = new(port, _ => (503, "unavailable"));
-        Measure(endpoint);
+        Measure(endpoint, MaxRetainedBytesFailingCollector);
     }
 
     /// <summary>The path a user with an unreachable endpoint actually hits, kept as its own test
@@ -54,10 +72,10 @@ public class ExportRetentionTests
         probe.Stop();
         Uri endpoint = new($"http://127.0.0.1:{port}/v1/metrics");
 
-        Measure(endpoint);
+        Measure(endpoint, MaxRetainedBytesRefusedConnection);
     }
 
-    private static void Measure(Uri endpoint)
+    private static void Measure(Uri endpoint, long maxRetainedBytes)
     {
         using Meter meter = new($"Pulse.Otlp.Tests.{Guid.NewGuid()}");
         Counter<long> counter = meter.CreateCounter<long>("test_counter");
@@ -90,11 +108,8 @@ public class ExportRetentionTests
         log.Drain(failures.Add, _ => { });
         Assert.Single(failures); // the failure path really ran, rate-limited to one line
 
-        // 1 MB over 10 000 exports is 100 B each. Measured on 1.19.1: a one-time step of about
-        // 250 KB in the first seconds of exporting, then a few hundred bytes per 10 000 exports.
-        // The leak once suspected here (about 1 MB per export) would show as gigabytes.
         Assert.True(
-            after - before < MaxRetainedBytes,
+            after - before < maxRetainedBytes,
             $"live heap grew {after - before:N0} bytes over {MeasuredExports:N0} failed exports");
     }
 
