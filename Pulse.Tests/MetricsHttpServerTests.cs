@@ -997,17 +997,18 @@ public class MetricsHttpServerTests
         try
         {
             Stopwatch watch = Stopwatch.StartNew();
-            Task joinTask = Task.Run(() => MetricsHttpServer.JoinStarted([first, second], 500));
-            await Task.Delay(300);
-            firstCanFinish.Set(); // first finishes now; a fresh budget would let second run ~500 ms more
+            Task joinTask = Task.Run(() => MetricsHttpServer.JoinStarted([first, second], 2000));
+            await Task.Delay(1400);
+            firstCanFinish.Set(); // first finishes now; a fresh budget would let second run ~2000 ms more
 
             await joinTask;
 
-            // Shared budget: ~200 ms left for second once first is done, total call time ~500 ms.
-            // A fresh budget per thread would instead cost another ~500 ms on top of the 300
-            // already spent, a ~300 ms gap comfortably wider than any scheduling jitter this
-            // should see.
-            Assert.True(watch.Elapsed < TimeSpan.FromMilliseconds(650),
+            // Shared budget: ~600 ms left for second once first is done, total call time ~2000 ms.
+            // A fresh budget per thread would instead cost another ~2000 ms on top of the 1400
+            // already spent (~3400 ms). The 2700 ms ceiling sits roughly halfway between the two,
+            // a ~700 ms margin either side well past ordinary scheduling jitter or the extra
+            // overhead a coverage-instrumented run adds.
+            Assert.True(watch.Elapsed < TimeSpan.FromMilliseconds(2700),
                 $"JoinStarted took {watch.Elapsed}: the shared budget was not honoured");
             Assert.True(second.IsAlive, "second never got a chance to keep waiting under its own fresh budget");
         }
