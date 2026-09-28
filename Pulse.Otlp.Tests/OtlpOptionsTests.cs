@@ -37,10 +37,24 @@ public class OtlpOptionsTests
     [InlineData("https://otlp.example.com/otlp", "https://otlp.example.com/otlp/v1/metrics")]
     [InlineData("http://localhost:4318/v1/metrics", "http://localhost:4318/v1/metrics")]
     [InlineData("http://localhost:4318/v1/metrics/", "http://localhost:4318/v1/metrics")]
+    // Starts with, but does not end with, the metrics path: distinct from the "already has it"
+    // case above, and the one shape that tells an EndsWith check apart from a StartsWith one.
+    [InlineData("http://localhost:4318/v1/metrics/extra", "http://localhost:4318/v1/metrics/extra/v1/metrics")]
     public void TryResolveEndpoint_Appends_TheMetricsPath_ForHttpProtobuf(string endpoint, string expected)
     {
         Assert.True(OtlpOptions.TryResolveEndpoint(endpoint, OtlpExportProtocol.HttpProtobuf, out Uri? uri));
         Assert.Equal(expected, uri.AbsoluteUri);
+    }
+
+    /// <summary>A backend that authenticates through a signed URL puts its own secret in the query
+    /// string. Appending the signal path to the endpoint as a whole, rather than to its path alone,
+    /// would land "/v1/metrics" after that query instead of before it.</summary>
+    [Fact]
+    public void TryResolveEndpoint_AppendsTheMetricsPath_BeforeAnExistingQueryString()
+    {
+        Assert.True(OtlpOptions.TryResolveEndpoint(
+            "https://host/otlp?key=abc", OtlpExportProtocol.HttpProtobuf, out Uri? uri));
+        Assert.Equal("https://host/otlp/v1/metrics?key=abc", uri.AbsoluteUri);
     }
 
     [Fact]
@@ -83,6 +97,49 @@ public class OtlpOptionsTests
     {
         Assert.Equal(string.Empty, OtlpOptions.RenderHeaders(null));
         Assert.Equal(string.Empty, OtlpOptions.RenderHeaders(new Dictionary<string, string>()));
+    }
+
+    [Fact]
+    public void LoggableEndpoint_NeverIncludes_UserinfoOrAQueryString()
+    {
+        Uri endpoint = new("https://user:s3cret@host:8443/otlp/path?api_key=alsosecret");
+
+        string loggable = OtlpOptions.LoggableEndpoint(endpoint);
+
+        Assert.DoesNotContain("user", loggable);
+        Assert.DoesNotContain("s3cret", loggable);
+        Assert.DoesNotContain("alsosecret", loggable);
+        Assert.DoesNotContain("api_key", loggable);
+        Assert.StartsWith("https://host:8443/otlp/path", loggable, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LoggableEndpoint_SaysAQueryStringExists_WithoutIncludingIt()
+    {
+        Assert.Equal(
+            "https://host/otlp",
+            OtlpOptions.LoggableEndpoint(new Uri("https://host/otlp")));
+        Assert.Equal(
+            "https://host/otlp (query string kept, not logged)",
+            OtlpOptions.LoggableEndpoint(new Uri("https://host/otlp?key=abc")));
+    }
+
+    /// <summary>Newtonsoft accepts "Headers": null, and a null value for any one key inside it,
+    /// despite PulseOtlpConfig.Headers's own non-nullable C# type; a null value used to make
+    /// ExportFailureLog.Redact throw at secret.Length, silently losing every failure line for the
+    /// rest of the session.</summary>
+    [Fact]
+    public void SecretValues_IsNullSafe_ForANullHeadersDictionaryOrANullOrEmptyValueWithinIt()
+    {
+        Assert.Empty(OtlpOptions.SecretValues(null));
+
+        Dictionary<string, string> headers = new()
+        {
+            ["x-api-key"] = null!,
+            ["x-empty"] = string.Empty,
+            ["Authorization"] = "Bearer abc",
+        };
+        Assert.Equal(["Bearer abc"], OtlpOptions.SecretValues(headers));
     }
 
     [Fact]

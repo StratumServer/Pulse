@@ -474,12 +474,39 @@ permissions your server's umask gave it. On a shared or rented host, `chmod 600`
 it is owned by the account the server runs as. It is also worth keeping out of any config backup
 you push somewhere public.
 
-A collector that is down, refusing, or answering 401 costs you nothing on the game side. The
-OpenTelemetry SDK exports from its own background thread and swallows the failure into its
-internal event source, so the tick loop never sees it. You get no metrics until the collector
-comes back, and the server does not notice either way. A malformed `Endpoint` is the one case
+A collector that is down, refusing, or answering 401 still costs you nothing on the game side: the
+OpenTelemetry SDK exports from its own background thread and the tick loop never sees the
+failure. It no longer stays invisible, though. Pulse OTLP listens to the SDK's own diagnostic
+event source and turns the first failure of each kind into one line in the server log, repeated at
+most every ten minutes and logged at Warning rather than Error so a struggling backend can never
+count toward `DieAboveErrorCount`:
+
+```
+Pulse OTLP export to https://otlp-gateway-prod-eu-west-2.grafana.net/otlp/v1/metrics failed:
+Response status code does not indicate success: 401 (Unauthorized). The backend answered:
+{"status":"error","error":"authentication error: invalid token"} Metrics are not reaching the
+backend; check Endpoint and Headers in pulse-otlp.json. This is logged again at most every 10
+minutes.
+```
+
+A matching line reports the first successful export after a failure, so recovery shows up too, and
+a healthy server that has never failed still logs exactly one such line, at Notification rather
+than Warning, right after its first delivery.
+
+Neither line is meant to carry a header value. Before a line is queued, each configured value of at
+least 6 characters (shorter than that reads as an ordinary id, not a credential), the credential
+half of it when the value has a "scheme credential" shape (a Bearer token echoed without its
+"Bearer ", say), and the JSON-escaped form of both, are matched case-insensitively and redacted out
+of the backend's answer and out of a gRPC failure's status detail, longest value first so a short
+one can never land inside a longer one's own match. Anything else shaped like a bearer or basic
+credential of at least 8 characters is redacted too, whether or not it matches a configured value.
+This is not exhaustive: a backend that transforms a secret some other way, hashing it or splitting
+it across two fields, could still get it into the log, so treat the log itself as sensitive before
+sharing it regardless. The backend's answer, once redacted, is clipped to 200 characters. A
+malformed `Endpoint` is still the one case
 Pulse checks itself, because that one would throw while the exporter is being built: it logs an
-error and registers nothing.
+error and registers nothing. For anything these lines do not explain, the SDK's own, far more
+verbose self-diagnostics turn on by dropping an `OTEL_DIAGNOSTICS.json` file next to the server.
 
 ## Building and testing
 

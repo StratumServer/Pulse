@@ -10,6 +10,31 @@ first.
 
 ### Added
 
+- Export failures no longer pass silently. Pulse OTLP now listens to the OpenTelemetry SDK's own
+  diagnostic event source, filtered to Pulse's own configured endpoint (exact match; two exporters
+  that happen to send to the very same collector URL are inherently indistinguishable from here, a
+  known and accepted limit) so another mod's exporter sharing the same process-wide source is not
+  logged as Pulse's, and turns the first failure of each kind (a rejected push, a refused or
+  unreachable collector, a timeout, and so on) into one line in the server log, repeated at most
+  every ten minutes: `Pulse OTLP export to <endpoint> failed: <why>. The backend answered: <clipped
+  to 200 characters>. Metrics are not reaching the backend; check Endpoint and Headers in
+  pulse-otlp.json. This is logged again at most every 10 minutes.` A matching line reports the
+  first successful export after a failure, or the first export overall on a server that has never
+  failed, at Notification rather than Warning. Every failure line is logged at Warning, never
+  Error, so a struggling backend cannot push a server toward `DieAboveErrorCount`. Neither line is
+  meant to carry a header value: each configured value of at least 6 characters (shorter than that
+  reads as an ordinary id, not a credential), the credential half of it when the value has a
+  "scheme credential" shape, and the JSON-escaped form of both, are matched case-insensitively and
+  redacted out of the backend's own response body and gRPC status detail before a line is queued,
+  longest value first so a short one can never land inside a longer one's own match. Anything else
+  shaped like a bearer or basic credential of at least 8 characters is redacted too, whether or not
+  it matches a configured value; that length floor spares short words after either scheme word,
+  though a longer one ("Basic authentication required") can still come out masked. None of this
+  is exhaustive, so the log itself is still worth treating as sensitive. The listener is read off the export thread only to classify and queue; a five second
+  tick listener drains it into the game logger on the main thread. Up to 32 distinct failure kinds
+  are tracked at once; once the cap is reached, every kind whose own ten-minute window has already
+  passed is evicted first, so a server old enough to have once seen that many, all since resolved,
+  never loses a genuinely new one to it.
 - `docs/getting-started.md`, a walkthrough for a server owner who has never used Prometheus or
   Grafana, routed by how their server is hosted: installing the base mod, then either a local
   Prometheus and Grafana pair or Grafana Cloud's free tier over OTLP, ending at the shared
@@ -144,6 +169,19 @@ first.
   `pulse_mod_tick_seconds_total`, `pulse_attribution_ticks_total` and
   `pulse_attribution_dropped_samples_total` are unaffected: they are cumulative counters and simply
   stop moving.
+- The startup `Pulse OTLP exporting ...` log line no longer names the full configured `Endpoint`.
+  Userinfo or a query string in it (a backend that authenticates through a signed URL, say) had no
+  business there; only scheme, host, port and path are logged now, the same components every
+  export failure or success line already named.
+- `TryResolveEndpoint` no longer mangles a configured `Endpoint` that already carries a query
+  string: `https://host/otlp?key=abc` used to become `https://host/otlp?key=abc/v1/metrics`,
+  landing the signal path after the query instead of before it. It now builds the result from the
+  endpoint's path alone, through `UriBuilder`, so the query survives in its rightful place:
+  `https://host/otlp/v1/metrics?key=abc`.
+- The error logged for an `Endpoint` `TryResolveEndpoint` cannot parse used to repeat the configured
+  value back whole, the same problem as the two entries above: userinfo or a query string in it
+  went straight into the log. The line now names the config key and the file instead of the value:
+  `Pulse OTLP's 'Endpoint' in pulse-otlp.json is not an absolute http or https URL.`
 - On an OTLP-fed dashboard, five panels could stay empty on an idle server no matter how long it
   ran: `pulse_engine_warnings_total`, `pulse_player_deaths_total`, `pulse_server_suspends_total`,
   `pulse_server_suspend_seconds_total` and `pulse_worldgen_columns_generated_total` reached

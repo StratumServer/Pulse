@@ -1,0 +1,11 @@
+{
+  "Enabled": true,
+  "Endpoint": "http://127.0.0.1:39479",
+  "Protocol": "http/protobuf",
+  "Headers": {
+    "Authorization": "Bearer scenario-secret-token"
+  },
+  "IntervalSeconds": 5,
+  "IncludeRuntimeMetrics": false,
+  "ServiceName": "pulse-atlas-failure-test"
+}

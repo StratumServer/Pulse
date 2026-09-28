@@ -296,13 +296,24 @@ dashboard or alert you built against the old names still needs updating.
   section), and a handful of engine-level panels (busy time, per-second network rates, the
   connection queue) go blank if Pulse is running in degraded mode, also covered in the main
   README. Both apply the same way on path B.
-- **Path B: numbers never show up, and the server logs nothing about it.** That is expected, not
-  a sign something crashed: today, an OTLP push that Grafana Cloud rejects (a wrong token gets a
-  401, for example) costs nothing on the game side and logs nothing either; it just quietly does
-  not arrive. `pulse-otlp.json` only holds the already-encoded `Authorization` value, not a
-  separate instance ID and token to eyeball, so the quickest check is to go back to the
-  OpenTelemetry tile, generate a fresh value, and paste it in again exactly as in step 1 of
-  path B.
+- **Path B: numbers never show up.** An OTLP push that Grafana Cloud rejects costs nothing on the
+  game side, but it no longer stays quiet: check the server's log, the console or
+  `Logs/server-main.log` from step 4 of installing the mod above, for a line starting `Pulse OTLP
+  export to`. A wrong or expired token reads like this:
+
+  ```
+  Pulse OTLP export to https://otlp-gateway-<region>.grafana.net/otlp/v1/metrics failed:
+  Response status code does not indicate success: 401 (Unauthorized). The backend answered:
+  {"code":16,"message":"authentication error: invalid scope provided"} Metrics are not reaching
+  the backend; check Endpoint and Headers in pulse-otlp.json. This is logged again at most every
+  10 minutes.
+  ```
+
+  `pulse-otlp.json` only holds the already-encoded `Authorization` value, not a separate instance
+  ID and token to eyeball, so the quickest fix is to go back to the OpenTelemetry tile, generate a
+  fresh value, and paste it in again exactly as in step 1 of path B. No such line at all, this
+  soon after starting the server, most likely just means the first push has not happened yet;
+  give it one minute, the default `IntervalSeconds`, and check again.
 - **Nothing outside the server can reach `/metrics` at all.** That is by design, not a bug: the
   endpoint has no login of its own, so Pulse only listens on the server itself (`127.0.0.1`)
   unless you deliberately widen it. See the main README's
