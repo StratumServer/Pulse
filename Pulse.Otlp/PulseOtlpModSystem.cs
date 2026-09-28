@@ -27,6 +27,16 @@ public sealed class PulseOtlpModSystem : ModSystem
 
     public override bool ShouldLoad(EnumAppSide forSide) => forSide == EnumAppSide.Server;
 
+    /// <summary>Runs before ModSystem's own default of 0.1, which PulseModSystem does not override.
+    /// ModLoader sorts every enabled mod's systems by this value after resolving dependency order,
+    /// so without an override here the two mods keep whatever order dependency resolution happened
+    /// to produce. This mod's MeterProvider has to be built, and therefore already listening for
+    /// the "Pulse.Server" meter by name, before PulseModSystem creates that meter and seeds its
+    /// counters: a System.Diagnostics.Metrics.Counter.Add call is a no-op when nothing is listening
+    /// at the moment it runs, so a seed recorded first is simply gone, not merely delayed. See
+    /// PulseModSystem.SeedCounters for the call this protects.</summary>
+    public override double ExecuteOrder() => 0.05;
+
     public override void StartServerSide(ICoreServerAPI api)
     {
         ConfigLoadResult<PulseOtlpConfig> loaded = ConfigLoad.Resolve(
