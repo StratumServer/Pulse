@@ -508,11 +508,15 @@ Unit tests in `Pulse.Tests` cover the aggregator, the exposition writer, the log
 the small classes behind the wave of engine and world metrics: the busy-time average, the ping
 aggregates, the entity top-ten with its series retirement rule, and the suspend window. None of
 them needs a server. `Pulse.Otlp.Tests` covers the config translation, which is where the OTLP
-mod's only non-obvious logic lives. Mutation verification over those files runs through
-`tools/mutation-check.sh`, which applies representative mutations one at a time and requires the
-suite to fail on every one; CI runs it on each push. Stryker itself is parked: on the .NET 10 SDK
-it finds the tests but runs every mutant against the unmutated assembly, so the script stays
-until a release of it reports a real score here (tracked in the issues).
+mod's only non-obvious logic lives.
+
+Mutation testing runs at two depths. `tools/mutation-check.sh` applies forty-four representative
+mutations one at a time and requires the suite to fail on every one; CI runs it on every push,
+deterministic and under a minute. `.github/workflows/mutation.yml` runs dotnet-stryker on pull
+requests touching `Pulse/`, mutating the whole project except the files that only run under a
+live server, about 88 percent, break at 83. Pulse.Otlp's own Stryker lane is `workflow_dispatch`
+only, because Stryker launches the wrong project's test host for it and the score swings too
+much between runs to gate a pull request on.
 
 ## Where this is going
 
