@@ -207,10 +207,7 @@ first.
   one that last turned the flag on, and writes it only on its own transitions (turning off what it
   primed at startup, every tick a burst is running so another mod cannot fold a stale tick tree
   into it, giving up, and shutting down), never clearing it while `/debug logticks` has asked for
-  it. `/pulse attribution off` and a reload that turns attribution off now turn the profiler off on
-  the very next tick even in the middle of a burst, instead of leaving it running, at close to a
-  quarter of the tick budget, for the rest of the run: restarting the duty cycle between ticks used
-  to go unnoticed by a write keyed on comparing its state only before and after one tick.
+  it.
 - A server that already has a `/pulse` chat command from another mod could start Pulse with the
   frame profiler stuck on for the whole run, at close to a quarter of the tick budget, with no
   Pulse metrics to show for it. Registering `/pulse` used to be able to throw partway through
@@ -238,8 +235,9 @@ first.
   rather than claiming one replaces the other, since the config loader merges the former and keeps
   every one of the latter's colliding keys. A block duplicated this way is also no longer misread
   as missing the field only one of its spellings set. This warning is compiled into Pulse OTLP too,
-  where it used to print the duplicated value itself; an OTLP header written under two casings no
-  longer puts either header's value, a credential in the common case, into the server log.
+  covering `pulse-otlp.json`'s own duplicate keys, and it never prints the colliding value: an OTLP
+  header written under two casings does not put either header's value, a credential in the common
+  case, into the server log.
 - `ChunksRefreshSeconds` set to an extreme value (above roughly 2.147 million seconds) no longer
   overflows into a negative tick listener period, which made the engine run the loaded-chunk read
   it guards on every single tick instead of never. The value is now clamped to at most a day.

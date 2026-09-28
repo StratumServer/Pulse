@@ -481,6 +481,66 @@ public class AttributionMetricsTests
         Assert.True(profiler.Enabled);
     }
 
+    /// <summary>The release review's missing case: every other "another writer" probe above sets
+    /// <c>PrintSlowTicks</c>, which is <c>/debug logticks</c>'s own signature. A mod that just turns
+    /// the profiler on for its own reasons, without that flag, is a different writer, and the guard
+    /// in <see cref="AttributionMetrics.SetProfilerEnabled"/> is not what protects it while
+    /// attribution is off: <c>profilerEnabledLastWritten</c> staying false is. Comparing against
+    /// <c>attribution.Profiling</c> instead of that field would have skipped this write anyway on an
+    /// idle tick, so only mutating the comparison itself (see <c>tools/mutation-check.sh</c>) tells
+    /// these two apart.</summary>
+    [Fact]
+    public void Tick_LeavesAnotherNonLogticksWritersProfilerEnabled_WhileAttributionIsOff()
+    {
+        using Meter meter = new(UniqueMeterName());
+        FrameProfilerUtil profiler = new("test") { Enabled = true };
+        profiler.Begin("tick");
+        profiler.End();
+        profiler.Enabled = false;
+        AttributionMetrics metrics = Metrics(meter, profiler, [], enabled: false);
+
+        // Primes on this tick; attribution never turns on, so Pulse's own write leaves the flag
+        // off, same as the profiler already was.
+        metrics.Tick(1.0);
+
+        // A non-logticks mod turns the profiler on afterwards, on its own account.
+        profiler.Enabled = true;
+
+        for (int i = 0; i < 5; i++)
+        {
+            metrics.Tick(1.0);
+        }
+
+        Assert.True(profiler.Enabled);
+    }
+
+    /// <summary>The same guarantee while attribution is enabled but has not started a burst yet:
+    /// idle ticks below the interval must not touch a flag attribution never wrote.</summary>
+    [Fact]
+    public void Tick_LeavesAnotherNonLogticksWritersProfilerEnabled_WhileAttributionIsIdle()
+    {
+        using Meter meter = new(UniqueMeterName());
+        FrameProfilerUtil profiler = new("test") { Enabled = true };
+        profiler.Begin("tick");
+        profiler.End();
+        profiler.Enabled = false;
+        AttributionMetrics metrics = Metrics(meter, profiler, []);
+
+        // Primes on this tick, well under the burst helper's one second interval, so the duty
+        // cycle stays idle rather than starting a burst.
+        metrics.Tick(0.1);
+
+        // A non-logticks mod turns the profiler on afterwards, on its own account.
+        profiler.Enabled = true;
+
+        for (int i = 0; i < 5; i++)
+        {
+            metrics.Tick(0.1);
+        }
+
+        Assert.True(profiler.Enabled);
+    }
+
     /// <summary>The guard must not cost attribution its own measurements: a burst folds and
     /// publishes exactly as it would with <c>PrintSlowTicks</c> off, and the flag it leaves alone
     /// throughout is proof the skipped write was the only thing skipped.</summary>

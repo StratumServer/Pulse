@@ -339,6 +339,10 @@ mutate Pulse/AttributionMetrics.cs \
     's/else if \(profilerEnabledLastWritten\)/else if (false)/' \
     "attribution: switching off mid-burst never turns the profiler back off, the release review's regression"
 
+mutate Pulse/AttributionMetrics.cs \
+    's/else if \(profilerEnabledLastWritten\)/else/' \
+    "attribution: an idle tick claws back another mod's own Enabled=true, not just logticks's"
+
 mutate Pulse/PulseCommands.cs \
     's/\.Where\(key => key\.Changed\)/.Where(key => true)/' \
     "commands: a reload names every startup-only key as needing a restart, whether or not it moved"
