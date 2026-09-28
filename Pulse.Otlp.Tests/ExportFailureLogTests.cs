@@ -642,6 +642,23 @@ public class ExportFailureLogTests
         Assert.Contains("does not indicate success: 401", Assert.Single(failures));
     }
 
+    /// <summary>The same floor holds for the credential half of a "scheme credential" shaped value:
+    /// "tenant 1" clears it as a whole, but its "1" alone must not stamp over the status code.</summary>
+    [Fact]
+    public void Failure_ShortCredentialHalf_NeverStampsOverOrdinaryCauseText()
+    {
+        int port = FreePort();
+        string endpoint = $"http://127.0.0.1:{port}/v1/metrics";
+        using FakeCollector collector = new(port, _ => (401, string.Empty));
+        using Rig rig = BuildRig(endpoint, secrets: ["tenant 1"]);
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+
+        Assert.Contains("does not indicate success: 401", Assert.Single(failures));
+    }
+
     /// <summary>The fallback regex requires a real credential's length, not just the word "bearer"
     /// or "basic": ordinary prose that merely mentions either, with no secret configured at all,
     /// must come through unredacted.</summary>

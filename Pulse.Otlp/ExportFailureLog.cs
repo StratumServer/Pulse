@@ -318,9 +318,9 @@ internal sealed partial class ExportFailureLog(IReadOnlyCollection<string> secre
     /// sending (the SDK trims a header value; this reads the raw configured one), the credential
     /// alone when the value has an "scheme credential" shape (an echo can drop the scheme), and the
     /// JSON-escaped form of each, since a backend's own JSON error body is exactly where an echo
-    /// shows up. Nothing shorter than <see cref="MinimumSecretLength"/>: a value that short reads
-    /// as an ordinary id, not a credential, and is far more likely to collide with unrelated text
-    /// than to ever be echoed back.</summary>
+    /// shows up. Nothing shorter than <see cref="MinimumSecretLength"/>, the credential half
+    /// included: a value that short reads as an ordinary id, not a credential, and is far more
+    /// likely to collide with unrelated text than to ever be echoed back.</summary>
     private static IEnumerable<string> RedactionTargets(string configuredValue)
     {
         string trimmed = configuredValue.Trim();
@@ -338,7 +338,7 @@ internal sealed partial class ExportFailureLog(IReadOnlyCollection<string> secre
         if (space > 0)
         {
             string credential = trimmed[(space + 1)..].Trim();
-            if (credential.Length > 0)
+            if (credential.Length >= MinimumSecretLength)
             {
                 foreach (string variant in EscapedForms(credential))
                 {

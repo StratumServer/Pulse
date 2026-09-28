@@ -28,9 +28,9 @@ first.
   redacted out of the backend's own response body and gRPC status detail before a line is queued,
   longest value first so a short one can never land inside a longer one's own match. Anything else
   shaped like a bearer or basic credential of at least 8 characters is redacted too, whether or not
-  it matches a configured value, the length floor keeping ordinary prose that merely mentions one
-  of the two words intact; this is not exhaustive, so the log itself is still worth treating as
-  sensitive. The listener is read off the export thread only to classify and queue; a five second
+  it matches a configured value; that length floor spares short words after either scheme word,
+  though a longer one ("Basic authentication required") can still come out masked. None of this
+  is exhaustive, so the log itself is still worth treating as sensitive. The listener is read off the export thread only to classify and queue; a five second
   tick listener drains it into the game logger on the main thread. Up to 32 distinct failure kinds
   are tracked at once; once the cap is reached, every kind whose own ten-minute window has already
   passed is evicted first, so a server old enough to have once seen that many, all since resolved,
