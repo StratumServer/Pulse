@@ -199,6 +199,39 @@ first.
   is seeded with at startup, plus the handful of log lines the two mods can log between the base
   mod starting and the OTLP mod finishing its own startup. The OTLP mod now starts before the base
   mod, so its exporter is already listening when these counters are seeded.
+- Pulse no longer turns the engine's own frame profiler off on every tick. It used to write
+  `FrameProfilerUtil.Enabled` unconditionally each tick, even with `Attribution.Enabled` false (the
+  default), which broke `/debug logticks` on every 0.2 server: the report lost its per-system and
+  per-listener lines, off-thread reports stopped printing altogether, and any other mod that turns
+  the profiler on had its own setting clobbered a tick later. Pulse now writes that flag only on
+  its own transitions (turning off what it primed at startup, the start and end of a burst, giving
+  up, and shutting down), and never clears it while `/debug logticks` has asked for it.
+- A server that already has a `/pulse` chat command from another mod could start Pulse with the
+  frame profiler stuck on for the whole run, at close to a quarter of the tick budget, with no
+  Pulse metrics to show for it. Registering `/pulse` used to be able to throw partway through
+  `AttributionMetrics`'s own startup, after the profiler had already been armed to turn on at the
+  next tick but before Pulse's tick listener existed to turn it back off; nothing then ever did. A
+  clashing command name is now caught and logged once instead of aborting the mod, and the
+  profiler is armed only once Pulse's tick listener is registered and able to manage it.
+- Attribution and its frame-profiler priming now degrade the same way the engine probe already
+  does: if a future game version reshapes the profiler in a way Pulse does not expect, this logs
+  one warning and turns attribution off for the session instead of crashing the server at startup
+  or logging an error on every tick for the rest of the run (which, left unaddressed, would have
+  driven the server into its own `DieAboveErrorCount` shutdown well within an hour).
+- Config keys are now compared case-insensitively when Pulse rewrites `pulse.json` or
+  `pulse-otlp.json` to add new keys, matching how the file is actually loaded. A key written with
+  different casing than Pulse's own (`port` for `Port`, say) used to be logged as both a default
+  Pulse silently added and a value the rewrite silently dropped, even though the admin's own value
+  was kept the whole time. The same key written twice under different casing is now reported as a
+  duplicate, naming which spelling's value is the one actually in effect, rather than one spelling
+  reading as a match and the other as an unrelated unknown key doing nothing.
+- `ChunksRefreshSeconds` set to an extreme value (above roughly 2.147 million seconds) no longer
+  overflows into a negative tick listener period, which made the engine run the loaded-chunk read
+  it guards on every single tick instead of never. The value is now clamped to at most a day.
+- A `pulse.json` that does not exist yet, on a ModConfig folder the server process cannot write to
+  (a read-only mount, most commonly), no longer stops Pulse from starting. It now logs one warning
+  and runs the session on its built-in defaults, the same as it already does for a file that exists
+  but will not parse.
 
 ## [0.1.0] - 2026-09-01
 

@@ -2,10 +2,10 @@ using Xunit;
 
 namespace Pulse.Tests;
 
-/// <summary>Resolve is the one piece of a config load that touches nothing but a delegate: no
-/// ICoreServerAPI, no file system. The wiring around it (calling LoadModConfig, writing defaults,
-/// running ConfigUpgrade, logging) is exercised by the Atlas scenarios instead, the same split as
-/// ConfigUpgrade.Compare against ConfigUpgrade.Upgrade.</summary>
+/// <summary>Resolve and TryRun are the pieces of a config load that touch nothing but a delegate:
+/// no ICoreServerAPI, no file system. The wiring around them (calling LoadModConfig, writing
+/// defaults, running ConfigUpgrade, logging) is exercised by the Atlas scenarios instead, the same
+/// split as ConfigUpgrade.Compare against ConfigUpgrade.Upgrade.</summary>
 public class ConfigLoadTests
 {
     private sealed class FakeConfig
@@ -68,6 +68,45 @@ public class ConfigLoadTests
 
         Assert.Equal(ConfigLoadStatus.Unreadable, result.Status);
         Assert.Equal("broken", result.FailureMessage);
+    }
+
+    [Fact]
+    public void TryRun_ReturnsNull_WhenTheActionSucceeds()
+    {
+        bool ran = false;
+
+        string? failure = ConfigLoad.TryRun(() => ran = true);
+
+        Assert.Null(failure);
+        Assert.True(ran);
+    }
+
+    /// <summary>What a read-only ModConfig folder does to a default-config write, and what a
+    /// command name another mod already claimed does to <c>ChatCommands.Create</c>: both throw
+    /// rather than fail quietly, and neither must be allowed to stop the rest of the mod from
+    /// starting.</summary>
+    [Theory]
+    [InlineData(typeof(UnauthorizedAccessException))]
+    [InlineData(typeof(IOException))]
+    public void TryRun_ReturnsTheMessage_WhenTheActionThrows(Type exceptionType)
+    {
+        Exception thrown = (Exception)Activator.CreateInstance(exceptionType, "denied")!;
+
+        string? failure = ConfigLoad.TryRun(() => throw thrown);
+
+        Assert.Equal("denied", failure);
+    }
+
+    /// <summary><c>ChatCommands.Create</c> raises this exact exception, with this exact message,
+    /// when another mod already registered the same command name (confirmed against
+    /// ChatCommandImpl.WithName in VintagestoryLib).</summary>
+    [Fact]
+    public void TryRun_ReturnsTheMessage_ForACommandNameAlreadyClaimedByAnotherMod()
+    {
+        string? failure = ConfigLoad.TryRun(
+            () => throw new InvalidOperationException("Command with such name already exists"));
+
+        Assert.Equal("Command with such name already exists", failure);
     }
 
     [Fact]

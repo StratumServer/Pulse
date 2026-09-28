@@ -5,10 +5,11 @@ using Vintagestory.API.Server;
 
 namespace Pulse;
 
-/// <summary>Keys the config file on disk does not carry, and keys it carries that the mod knows
-/// nothing about. Dotted paths, so a key inside a nested block reads
-/// <c>Attribution.BurstTicks</c>.</summary>
-internal readonly record struct ConfigDiff(IReadOnlyList<string> Missing, IReadOnlyList<string> Unknown);
+/// <summary>Keys the config file on disk does not carry, keys it carries that the mod knows
+/// nothing about, and keys it carries more than once under different casing. Dotted paths, so a
+/// key inside a nested block reads <c>Attribution.BurstTicks</c>.</summary>
+internal readonly record struct ConfigDiff(
+    IReadOnlyList<string> Missing, IReadOnlyList<string> Unknown, IReadOnlyList<string> Duplicated);
 
 /// <summary>Keeps the config file an admin already has in step with the keys a newer version of the
 /// mod introduced.</summary>
@@ -26,6 +27,11 @@ internal static class ConfigUpgrade
 
     private const string IgnoredKeys =
         "{0} does not know these keys in {1}: {2}. They do nothing; check them for typos.";
+
+    private const string DuplicateKeys =
+        "{0} found the same key written more than once, cased differently, in {1}: {2}. The "
+        + "spelling that comes last in the file is the value actually in effect; remove the "
+        + "others to stop this warning.";
 
     private const string UpgradeFailed =
         "{0} could not bring {1} up to date ({2}). The server runs on the values the file does "
@@ -74,47 +80,89 @@ internal static class ConfigUpgrade
                 diff.Missing.Count > 0 ? DroppedKeys : IgnoredKeys,
                 modName, filename, string.Join(", ", diff.Unknown));
         }
+
+        if (diff.Duplicated.Count > 0)
+        {
+            api.Logger.Warning(DuplicateKeys, modName, filename, string.Join("; ", diff.Duplicated));
+        }
     }
 
     /// <summary>Which keys of <paramref name="loaded"/> are absent from <paramref name="onDisk"/>,
-    /// and which keys of <paramref name="onDisk"/> are absent from <paramref name="loaded"/>.</summary>
-    /// <remarks>Keys only, never values, so key order and formatting make no difference. A missing
-    /// block is reported by its own name and not walked: naming its children would only pad the log
-    /// line with keys the admin never had. Text that does not parse as a JSON object reports
-    /// nothing, which leaves the file alone rather than rewriting something unreadable.</remarks>
+    /// which keys of <paramref name="onDisk"/> are absent from <paramref name="loaded"/>, and which
+    /// keys of <paramref name="onDisk"/> repeat the same key under different casing.</summary>
+    /// <remarks>Keys only, never values, so key order and formatting make no difference, other than
+    /// deciding which of a duplicated key's spellings a rewrite would keep. A missing block is
+    /// reported by its own name and not walked: naming its children would only pad the log line
+    /// with keys the admin never had. Text that does not parse as a JSON object reports nothing,
+    /// which leaves the file alone rather than rewriting something unreadable.
+    /// <para>Keys are matched case-insensitively throughout, the same way Newtonsoft binds
+    /// <c>LoadModConfig</c>'s keys onto the config object: an ordinal comparison here would report
+    /// a key spelled with different casing as both missing and unknown, when Newtonsoft already
+    /// applied it exactly as written.</para></remarks>
     public static ConfigDiff Compare(string onDisk, string loaded)
     {
         List<string> missing = [];
         List<string> unknown = [];
+        List<string> duplicated = [];
         if (Parse(onDisk) is { } file && Parse(loaded) is { } config)
         {
-            Walk(file, config, string.Empty, missing, unknown);
+            Walk(file, config, string.Empty, missing, unknown, duplicated);
         }
 
-        return new ConfigDiff(missing, unknown);
+        return new ConfigDiff(missing, unknown, duplicated);
     }
 
     private static void Walk(
-        JsonObject file, JsonObject config, string prefix, List<string> missing, List<string> unknown)
+        JsonObject file, JsonObject config, string prefix,
+        List<string> missing, List<string> unknown, List<string> duplicated)
     {
+        // Grouped case-insensitively, so a key merely spelled with different casing is not also
+        // reported as unknown just because its exact casing does not appear in config.
+        ILookup<string, KeyValuePair<string, JsonNode?>> byKey =
+            file.ToLookup(entry => entry.Key, StringComparer.OrdinalIgnoreCase);
+        HashSet<string> known = new(config.Select(entry => entry.Key), StringComparer.OrdinalIgnoreCase);
+
         // This level before the blocks under it, so both lists read outermost key first.
-        foreach (KeyValuePair<string, JsonNode?> entry in file.Where(entry => !config.ContainsKey(entry.Key)))
+        foreach (IGrouping<string, KeyValuePair<string, JsonNode?>> group in byKey)
         {
-            unknown.Add(prefix + entry.Key);
+            if (!known.Contains(group.Key))
+            {
+                foreach (KeyValuePair<string, JsonNode?> entry in group)
+                {
+                    unknown.Add(prefix + entry.Key);
+                }
+            }
         }
 
         foreach (KeyValuePair<string, JsonNode?> entry in config)
         {
-            if (!file.TryGetPropertyValue(entry.Key, out JsonNode? theirs))
+            List<KeyValuePair<string, JsonNode?>> matches = byKey[entry.Key].ToList();
+            if (matches.Count == 0)
             {
                 missing.Add(prefix + entry.Key);
+                continue;
             }
-            else if (entry.Value is JsonObject nested && theirs is JsonObject nestedFile)
+
+            if (matches.Count > 1)
             {
-                Walk(nestedFile, nested, prefix + entry.Key + ".", missing, unknown);
+                // The last spelling in document order is the one Newtonsoft actually applied: it
+                // populates the same bound property again for every later occurrence it reads.
+                (string winnerKey, JsonNode? winnerValue) = matches[^1];
+                string others = string.Join(
+                    ", ", matches.Take(matches.Count - 1).Select(m => $"\"{m.Key}\" ({Literal(m.Value)})"));
+                duplicated.Add(
+                    $"{prefix}{entry.Key}: \"{winnerKey}\" ({Literal(winnerValue)}) wins over {others}");
+            }
+
+            (_, JsonNode? theirs) = matches[^1];
+            if (entry.Value is JsonObject nested && theirs is JsonObject nestedFile)
+            {
+                Walk(nestedFile, nested, prefix + entry.Key + ".", missing, unknown, duplicated);
             }
         }
     }
+
+    private static string Literal(JsonNode? value) => value?.ToJsonString() ?? "null";
 
     private static JsonObject? Parse(string json)
     {

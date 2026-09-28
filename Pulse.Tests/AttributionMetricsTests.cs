@@ -331,6 +331,107 @@ public class AttributionMetricsTests
         Assert.False(profiler.Enabled);
     }
 
+    /// <summary>The bug this suite exists to catch: Tick used to write
+    /// <c>FrameProfilerUtil.Enabled</c> unconditionally on every call, even while it stayed false
+    /// the whole time, which clobbered <c>/debug logticks</c>'s own <c>Enabled = true</c> a tick
+    /// after it was set. An idle tick (below the burst interval, so the duty cycle itself never
+    /// changes state) is the simplest case: nothing about attribution should touch the flag at
+    /// all.</summary>
+    [Fact]
+    public void Tick_LeavesAnotherWritersProfilerEnabled_ThroughAnIdleTick()
+    {
+        using Meter meter = new(UniqueMeterName());
+        FrameProfilerUtil profiler = new("test") { Enabled = true, PrintSlowTicks = true };
+        profiler.Begin("tick");
+        profiler.End();
+        AttributionMetrics metrics = Metrics(meter, profiler, []);
+
+        // Well under the burst helper's one second interval: the duty cycle stays idle.
+        metrics.Tick(0.1);
+
+        Assert.True(profiler.Enabled);
+    }
+
+    /// <summary>The same guarantee across an entire burst: the flag must survive the transition
+    /// that starts profiling, every tick folded during it, and the transition that ends it, which
+    /// is exactly where the old unconditional write broke it (Profiling flips back to false the
+    /// instant <c>Take()</c> closes the burst).</summary>
+    [Fact]
+    public void Tick_LeavesAnotherWritersProfilerEnabled_ThroughAWholeBurst()
+    {
+        using Meter meter = new(UniqueMeterName());
+        FrameProfilerUtil profiler = new("test") { Enabled = true, PrintSlowTicks = true };
+        AttributionMetrics metrics = Metrics(meter, profiler, []);
+
+        RunWholeBurst(metrics, profiler, new ProfileEntryRange { ElapsedTicks = 1000 });
+
+        Assert.True(profiler.Enabled);
+    }
+
+    /// <summary>The exact probe from the release review: a primed profiler, attribution off (the
+    /// default), and another writer (<c>/debug logticks</c>) setting <c>PrintSlowTicks</c> and
+    /// <c>Enabled</c> the way <c>CmdDebug</c> does. One tick used to be enough to clear
+    /// <c>Enabled</c> even though nothing about attribution ever asked for that.</summary>
+    [Fact]
+    public void Tick_LeavesAnotherWritersProfilerEnabled_WhileAttributionIsOff()
+    {
+        using Meter meter = new(UniqueMeterName());
+        // Primed first, the way a real server would have already done long before an operator
+        // ever runs /debug logticks: Begin/End need Enabled or PrintSlowTicks set to build a tree
+        // at all, which is exactly why PrevRootEntry is what proves "primed", not either flag.
+        FrameProfilerUtil profiler = new("test") { Enabled = true };
+        profiler.Begin("tick");
+        profiler.End();
+        profiler.Enabled = false;
+
+        // What CmdDebug does for /debug logticks, after the fact.
+        profiler.PrintSlowTicks = true;
+        profiler.Enabled = true;
+        AttributionMetrics metrics = Metrics(meter, profiler, [], enabled: false);
+
+        metrics.Tick(1.0);
+
+        Assert.True(profiler.Enabled);
+    }
+
+    /// <summary>The guard must not cost attribution its own measurements: a burst folds and
+    /// publishes exactly as it would with <c>PrintSlowTicks</c> off, and the flag it leaves alone
+    /// throughout is proof the skipped write was the only thing skipped.</summary>
+    [Fact]
+    public void Tick_StillMeasuresABurstCorrectly_WhileLogticksIsOn()
+    {
+        using Meter meter = new(UniqueMeterName());
+        using MetricsAggregator aggregator = new(meter.Name);
+        FrameProfilerUtil profiler = new("test") { Enabled = true, PrintSlowTicks = true };
+        AttributionMetrics metrics = Metrics(meter, profiler, []);
+
+        RunWholeBurst(metrics, profiler, new ProfileEntryRange
+        {
+            ElapsedTicks = 1000,
+            Marks = new Dictionary<string, ProfileEntry> { ["gmleSome.Mod.Thing"] = new ProfileEntry(1000, 1) },
+        });
+
+        List<MetricSample> shares = aggregator.Collect().Where(s => s.Name == "pulse_mod_tick_share").ToList();
+        Assert.Equal(2, shares.Count);
+        Assert.Equal(1.0, Assert.Single(shares, s => s.Labels.Any(l => l.Value == "unattributed")).Value);
+        Assert.True(profiler.Enabled);
+    }
+
+    /// <summary>Stop is one of the transitions this class itself writes the flag on, and it is
+    /// bound by the same rule as every other one: not while another writer has asked to keep
+    /// profiling running.</summary>
+    [Fact]
+    public void Stop_LeavesAnotherWritersProfilerEnabled_WhileItIsSet()
+    {
+        using Meter meter = new(UniqueMeterName());
+        FrameProfilerUtil profiler = new("test") { Enabled = true, PrintSlowTicks = true };
+        AttributionMetrics metrics = Metrics(meter, profiler, []);
+
+        metrics.Stop();
+
+        Assert.True(profiler.Enabled);
+    }
+
     /// <summary>Seed() is also called from Switch(true), which only ever calls it once attribution
     /// is already enabled; nothing previously drove the guard's own early return while attribution
     /// was still off.</summary>

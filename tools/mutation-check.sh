@@ -294,7 +294,7 @@ mutate Pulse/ConfigUpgrade.cs \
     "config upgrade: a key inside a block is reported without the block it lives in"
 
 mutate Pulse/ConfigUpgrade.cs \
-    's/entry => !config\.ContainsKey\(entry\.Key\)/entry => false/' \
+    's/if \(!known\.Contains\(group\.Key\)\)/if (false)/' \
     "config upgrade: a key the config does not know goes unreported and is dropped in silence"
 
 mutate Pulse/ConfigUpgrade.cs \
@@ -322,6 +322,10 @@ mutate Pulse/TickAttribution.cs \
 mutate Pulse/AttributionMetrics.cs \
     's/\+\+unprimedTicks > UnprimedTickLimit/++unprimedTicks >= UnprimedTickLimit/' \
     "attribution: the unprimed-tick give-up trips one tick before its own documented threshold"
+
+mutate Pulse/AttributionMetrics.cs \
+    's/if \(enabled \|\| !profiler\.PrintSlowTicks\)/if (true)/' \
+    "attribution: the profiler flag is written on every call again, clobbering /debug logticks"
 
 mutate Pulse/PulseCommands.cs \
     's/\.Where\(key => key\.Changed\)/.Where(key => true)/' \

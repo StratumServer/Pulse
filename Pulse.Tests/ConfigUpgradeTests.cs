@@ -64,6 +64,10 @@ public class ConfigUpgradeTests
         Assert.Empty(diff.Unknown);
     }
 
+    /// <summary>"Burstticks" is not a typo Compare should catch: Newtonsoft binds LoadModConfig's
+    /// keys case-insensitively, so this file's value reaches BurstTicks exactly as the admin wrote
+    /// it. Only "Colour", which matches no key at all regardless of casing, is genuinely
+    /// unknown.</summary>
     [Fact]
     public void Compare_Reports_AKeyTheConfigDoesNotKnow_AtEitherDepth()
     {
@@ -83,8 +87,75 @@ public class ConfigUpgradeTests
 
         ConfigDiff diff = ConfigUpgrade.Compare(file, config);
 
-        Assert.Equal(["Attribution.BurstTicks"], diff.Missing);
-        Assert.Equal(["Colour", "Attribution.Burstticks"], diff.Unknown);
+        Assert.Empty(diff.Missing);
+        Assert.Equal(["Colour"], diff.Unknown);
+        Assert.Empty(diff.Duplicated);
+    }
+
+    /// <summary>The probe from the release review: a file spelled entirely in whatever casing an
+    /// admin's editor produced still carries every one of its own values, because Newtonsoft binds
+    /// LoadModConfig's keys case-insensitively. None of that is missing, dropped or a typo.</summary>
+    [Fact]
+    public void Compare_Ignores_Casing_WhenAKeyIsSpelledDifferently()
+    {
+        const string file = """
+            {
+              "port": 9100,
+              "bind": "0.0.0.0",
+              "Attribution": { "burstticks": 5 }
+            }
+            """;
+        const string config = """
+            {
+              "Port": 9464,
+              "Bind": "127.0.0.1",
+              "Attribution": { "BurstTicks": 30 }
+            }
+            """;
+
+        ConfigDiff diff = ConfigUpgrade.Compare(file, config);
+
+        Assert.Empty(diff.Missing);
+        Assert.Empty(diff.Unknown);
+        Assert.Empty(diff.Duplicated);
+    }
+
+    /// <summary>The other half of the probe: the same key written twice, cased differently.
+    /// Newtonsoft applies whichever spelling comes last while reading the document, so that is
+    /// the value in effect, not "port" doing nothing the way a case-sensitive diff used to
+    /// report it.</summary>
+    [Fact]
+    public void Compare_Reports_ADuplicateKey_AndWhichSpellingWon()
+    {
+        const string file = """{"Port": 9464, "port": 9100}""";
+        const string config = """{"Port": 9100}""";
+
+        ConfigDiff diff = ConfigUpgrade.Compare(file, config);
+
+        Assert.Empty(diff.Missing);
+        Assert.Empty(diff.Unknown);
+        string duplicate = Assert.Single(diff.Duplicated);
+        Assert.Contains("\"port\"", duplicate);
+        Assert.Contains("9100", duplicate);
+        Assert.Contains("\"Port\"", duplicate);
+        Assert.Contains("9464", duplicate);
+    }
+
+    /// <summary>The same duplicate-key rule applies inside a nested block, and it must not also be
+    /// misreported as a key the config does not know.</summary>
+    [Fact]
+    public void Compare_Reports_ADuplicateKey_InsideANestedBlock()
+    {
+        const string file = """{"Attribution": {"BurstTicks": 30, "burstticks": 5}}""";
+        const string config = """{"Attribution": {"BurstTicks": 5}}""";
+
+        ConfigDiff diff = ConfigUpgrade.Compare(file, config);
+
+        Assert.Empty(diff.Missing);
+        Assert.Empty(diff.Unknown);
+        string duplicate = Assert.Single(diff.Duplicated);
+        Assert.StartsWith("Attribution.BurstTicks:", duplicate);
+        Assert.Contains("\"burstticks\"", duplicate);
     }
 
     /// <summary>Key order and whitespace are the serializer's business, not the admin's, and a
