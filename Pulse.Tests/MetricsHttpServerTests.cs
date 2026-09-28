@@ -67,6 +67,20 @@ public class MetricsHttpServerTests
         return Encoding.ASCII.GetString(received.ToArray());
     }
 
+    /// <summary>Read back by reflection, the same way ServeThreadAlive reads the serve thread:
+    /// the field is private, and this is what proves the "one interval in the past" comment is
+    /// actually what the field starts at, deterministically, rather than something only
+    /// observable by waiting out a real interval.</summary>
+    [Fact]
+    public void Constructor_SeedsTheErrorLogTimestamp_OneIntervalInThePast()
+    {
+        MetricsHttpServer server = new("127.0.0.1", FreePort(), () => "x", new FakeLogger());
+
+        FieldInfo field = typeof(MetricsHttpServer).GetField("lastErrorLogMs", BindingFlags.NonPublic | BindingFlags.Instance)!;
+
+        Assert.Equal(-60_000L, (long)field.GetValue(server)!);
+    }
+
     [Fact]
     public async Task Metrics_Returns200_WithTheExpositionContentType_AndTheRenderedBody()
     {
@@ -99,6 +113,25 @@ public class MetricsHttpServerTests
         Assert.Equal(ExpositionContentType, response.Content.Headers.GetValues("Content-Type").Single());
         Assert.Equal(Encoding.UTF8.GetByteCount(body), response.Content.Headers.ContentLength);
         Assert.Empty(await response.Content.ReadAsStringAsync());
+    }
+
+    /// <summary>The test above goes through HttpClient, which already knows a HEAD response
+    /// carries no body per RFC 9110 and simply never reads one, whatever the server actually put
+    /// on the wire after the headers. This reads the raw bytes instead, so a body written despite
+    /// the HEAD guard cannot hide behind the client's own leniency.</summary>
+    [Fact]
+    public async Task Head_Writes_NoBodyBytes_OnTheWireItself()
+    {
+        const string body = "# HELP x X.\n# TYPE x counter\nx 1\n";
+        int port = FreePort();
+        using MetricsHttpServer server = new("127.0.0.1", port, () => body, new FakeLogger());
+        server.Start();
+
+        string response = await RawRequestAsync(port, "HEAD /metrics HTTP/1.1\r\nHost: x\r\n\r\n");
+
+        int headerEnd = response.IndexOf("\r\n\r\n", StringComparison.Ordinal);
+        Assert.True(headerEnd >= 0, $"no header terminator in: {response}");
+        Assert.Equal(string.Empty, response[(headerEnd + 4)..]);
     }
 
     [Theory]
@@ -213,6 +246,23 @@ public class MetricsHttpServerTests
 
         string response = await RawRequestAsync(
             port, "GET ", "/metrics ", "HTTP/1.1\r\n", "Host: ", "127.0.0.1\r\n", "\r\n");
+
+        Assert.StartsWith("HTTP/1.1 200", response);
+    }
+
+    /// <summary>The blank-line scan keeps a 3 byte lookback specifically so a terminator split
+    /// across two reads is not missed; this splits one even tighter, inside the request line's
+    /// own line ending rather than at the final blank line, landing a lone \r with no \n yet at
+    /// the very end of the first chunk.</summary>
+    [Fact]
+    public async Task RequestSplit_WithALoneCarriageReturn_BeforeItsLineFeedArrives_IsStillParsed()
+    {
+        int port = FreePort();
+        using MetricsHttpServer server = new("127.0.0.1", port, () => "x", new FakeLogger());
+        server.Start();
+
+        string response = await RawRequestAsync(
+            port, "GET /metrics HTTP/1.1\r", "\nHost: x\r\n\r\n");
 
         Assert.StartsWith("HTTP/1.1 200", response);
     }
@@ -420,6 +470,36 @@ public class MetricsHttpServerTests
 
         Assert.Equal((HttpStatusCode)503, response.StatusCode);
         Assert.False(rendered, "render was called even though stopping was already set");
+    }
+
+    /// <summary>A connection closed before it ever sent a byte makes the very first Read return 0
+    /// (a graceful close, not an error). ReadRequestLine has to recognise that and return null
+    /// promptly; the alternative is a tight loop of zero-byte reads that never advances length
+    /// and never reaches MaxHeadBytes either, pinning the handler thread and its concurrency slot
+    /// forever.</summary>
+    [Fact]
+    public async Task ConnectionClosedWithNothingSent_EndsTheHandlerThread_Promptly()
+    {
+        int port = FreePort();
+        using MetricsHttpServer server = new("127.0.0.1", port, () => "x", new FakeLogger());
+        server.Start();
+
+        using (TcpClient client = new())
+        {
+            await client.ConnectAsync(IPAddress.Loopback, port);
+            // Lets the accept thread hand this off to its own handler thread first.
+            await Task.Delay(100);
+        } // Disposing closes the connection with nothing sent: the handler's Read returns 0.
+
+        Stopwatch watch = Stopwatch.StartNew();
+        while (server.GetActiveHandlerThreads().Count > 0 && watch.Elapsed < TimeSpan.FromSeconds(2))
+        {
+            await Task.Delay(20);
+        }
+
+        Assert.Empty(server.GetActiveHandlerThreads());
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2),
+            $"the handler thread was still alive {watch.Elapsed} after the connection closed with nothing sent");
     }
 
     [Fact]
@@ -648,7 +728,8 @@ public class MetricsHttpServerTests
         await TryGet(client, port);
         await TryGet(client, port);
 
-        Assert.Single(logger.Entries, e => e.Type == EnumLogType.Warning);
+        (EnumLogType Type, string Message) entry = Assert.Single(logger.Entries, e => e.Type == EnumLogType.Warning);
+        Assert.Equal("Pulse metrics request failed: boom", entry.Message);
 
         // The serve thread kept looping through both failures: a request made once the callback
         // heals still gets answered.
@@ -737,6 +818,68 @@ public class MetricsHttpServerTests
         Assert.False(renderedAfterDispose, "render ran after Dispose returned");
     }
 
+    /// <summary>Every slot taken means the accept loop itself is blocked in
+    /// connectionSlots.Wait(stoppingSource.Token), not in AcceptTcpClient: listener.Stop() alone
+    /// cannot reach that wait, only cancelling its token can. Reuses the same sixteen-connection
+    /// setup ScrapeQueuedBehindAFullCap_... already pays for elsewhere in this file.</summary>
+    [Fact]
+    public async Task Dispose_WhileTheServeThreadIsBlockedOnAFullConnectionCap_ReturnsPromptly()
+    {
+        int port = FreePort();
+        MetricsHttpServer server = new("127.0.0.1", port, () => "x", new FakeLogger());
+        server.Start();
+
+        List<TcpClient> idle = [];
+        try
+        {
+            for (int i = 0; i < MetricsHttpServer.MaxConcurrentConnections; i++)
+            {
+                TcpClient client = new();
+                await client.ConnectAsync(IPAddress.Loopback, port);
+                idle.Add(client);
+            }
+
+            // Lets the accept thread take all sixteen and block waiting for a slot on the next one.
+            await Task.Delay(200);
+
+            Stopwatch watch = Stopwatch.StartNew();
+            server.Dispose();
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(1),
+                $"Dispose took {watch.Elapsed} with the serve thread blocked on a full connection cap");
+        }
+        finally
+        {
+            foreach (TcpClient client in idle)
+            {
+                client.Dispose();
+            }
+        }
+    }
+
+    /// <summary>Thread names and background status matter for the same reason the accept thread's
+    /// own name does: a hung or CPU-heavy handler is something an operator has to be able to spot
+    /// in a thread dump, and a foreground thread would keep the whole process alive against its
+    /// own shutdown.</summary>
+    [Fact]
+    public async Task ConnectionHandlerThread_IsNamed_AndRunsInTheBackground()
+    {
+        int port = FreePort();
+        using MetricsHttpServer server = new("127.0.0.1", port, () => "x", new FakeLogger());
+        server.Start();
+
+        FieldInfo acceptThreadField = typeof(MetricsHttpServer).GetField("thread", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        Thread acceptThread = (Thread)acceptThreadField.GetValue(server)!;
+        Assert.Equal("pulse-metrics", acceptThread.Name);
+
+        using TcpClient stalled = new();
+        await stalled.ConnectAsync(IPAddress.Loopback, port);
+        await Task.Delay(200);
+
+        Thread handlerThread = Assert.Single(server.GetActiveHandlerThreads());
+        Assert.Equal("pulse-metrics-request", handlerThread.Name);
+        Assert.True(handlerThread.IsBackground);
+    }
+
     /// <summary>Before connectionSlots and stoppingSource stopped being disposed, a handler
     /// thread still running its render callback when Dispose's own join timed out would call
     /// Release on an already-disposed SemaphoreSlim from its finally block once that render
@@ -766,7 +909,13 @@ public class MetricsHttpServerTests
 
         Assert.True(renderStarted.Wait(TimeSpan.FromSeconds(2)), "the request never reached render");
 
+        // The render (1.5 s) outlasts JoinStarted's own 1 s budget for it, so Dispose has to
+        // wait close to that whole second before giving up on it, not return as soon as the
+        // sockets are closed: proof that connections are actually joined, not merely closed.
+        Stopwatch watch = Stopwatch.StartNew();
         server.Dispose();
+        Assert.True(watch.Elapsed > TimeSpan.FromMilliseconds(700),
+            $"Dispose returned in {watch.Elapsed}, suspiciously fast for one that should wait up to a second for a slow handler");
 
         // Well past the 1.5 s render, so its handler thread has certainly finished (or, on the
         // old code, certainly crashed the process) by now.
@@ -803,6 +952,121 @@ public class MetricsHttpServerTests
         Assert.Null(thrown);
     }
 
+    /// <summary>The integration-level Dispose tests only prove JoinStarted eventually returns;
+    /// they cannot tell a real join from one that gave up on arrival. Driven from another thread
+    /// so the test body can observe it still blocked partway through, the same technique the
+    /// timing tests above use for a still-open connection.</summary>
+    [Fact]
+    public async Task JoinStarted_WaitsForARunningThread_WithinItsBudget()
+    {
+        using ManualResetEventSlim canFinish = new();
+        Thread worker = new(() => canFinish.Wait()) { IsBackground = true };
+        worker.Start();
+
+        try
+        {
+            Task joinTask = Task.Run(() => MetricsHttpServer.JoinStarted([worker], 2000));
+            await Task.Delay(150);
+            Assert.False(joinTask.IsCompleted, "JoinStarted returned before the thread it was joining finished");
+
+            canFinish.Set();
+            Task completed = await Task.WhenAny(joinTask, Task.Delay(TimeSpan.FromSeconds(2)));
+            Assert.True(completed == joinTask, "JoinStarted did not return once the thread finished");
+            Assert.False(worker.IsAlive);
+        }
+        finally
+        {
+            canFinish.Set();
+            worker.Join(TimeSpan.FromSeconds(1));
+        }
+    }
+
+    /// <summary>All within one shared budget, per JoinStarted's own doc comment: a thread that
+    /// outlives the budget must not give every thread after it a fresh one, or a handful of stuck
+    /// handlers could each cost Dispose their own full budget in turn.</summary>
+    [Fact]
+    public async Task JoinStarted_Shares_OneBudget_AcrossSeveralThreads_RatherThanRestartingItForEach()
+    {
+        using ManualResetEventSlim firstCanFinish = new();
+        using ManualResetEventSlim secondCanFinish = new();
+        Thread first = new(() => firstCanFinish.Wait()) { IsBackground = true };
+        Thread second = new(() => secondCanFinish.Wait()) { IsBackground = true };
+        first.Start();
+        second.Start();
+
+        try
+        {
+            Stopwatch watch = Stopwatch.StartNew();
+            Task joinTask = Task.Run(() => MetricsHttpServer.JoinStarted([first, second], 500));
+            await Task.Delay(300);
+            firstCanFinish.Set(); // first finishes now; a fresh budget would let second run ~500 ms more
+
+            await joinTask;
+
+            // Shared budget: ~200 ms left for second once first is done, total call time ~500 ms.
+            // A fresh budget per thread would instead cost another ~500 ms on top of the 300
+            // already spent, a ~300 ms gap comfortably wider than any scheduling jitter this
+            // should see.
+            Assert.True(watch.Elapsed < TimeSpan.FromMilliseconds(650),
+                $"JoinStarted took {watch.Elapsed}: the shared budget was not honoured");
+            Assert.True(second.IsAlive, "second never got a chance to keep waiting under its own fresh budget");
+        }
+        finally
+        {
+            secondCanFinish.Set();
+            second.Join(TimeSpan.FromSeconds(1));
+        }
+    }
+
+    /// <summary>ReadRequestLine's scan keeps a 3 byte lookback rather than re-scanning the whole
+    /// buffer; the loop bound this protects has to stop at length, not wander past it into
+    /// whatever the rest of an 8 KB buffer happens to hold. Reflected directly: forcing length to
+    /// sit exactly at the buffer's own end through a real request would depend on how the OS
+    /// happens to chunk the bytes, which this sidesteps entirely.</summary>
+    [Fact]
+    public void HasBlankLine_DoesNotReadPastTheReceivedBytes_WhenTheyFillTheWholeBuffer()
+    {
+        byte[] buffer = new byte[8];
+        MethodInfo method = typeof(MetricsHttpServer).GetMethod("HasBlankLine", BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        object? result = method.Invoke(null, [buffer, 0, buffer.Length]);
+
+        Assert.False((bool)result!);
+    }
+
+    [Fact]
+    public void ParseRequestLine_ReturnsNull_ForANullLine_RatherThanThrowing()
+    {
+        MethodInfo method = typeof(MetricsHttpServer).GetMethod("ParseRequestLine", BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        object? result = method.Invoke(null, [null]);
+
+        Assert.Null(result);
+    }
+
+    [Fact]
+    public void ParseRequestLine_ReturnsNull_ForALineWithTooFewParts_RatherThanThrowing()
+    {
+        MethodInfo method = typeof(MetricsHttpServer).GetMethod("ParseRequestLine", BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        object? result = method.Invoke(null, ["GARBAGE"]);
+
+        Assert.Null(result);
+    }
+
+    /// <summary>A target that starts with neither '/' (origin-form) nor anything
+    /// Uri.TryCreate(..., Absolute, ...) accepts has to fall through both branches to null, not
+    /// reach AbsoluteFormPath's caller with one to build a Request out of.</summary>
+    [Fact]
+    public void ParseRequestLine_ReturnsNull_ForATargetThatIsNeitherOriginFormNorAnAbsoluteUri()
+    {
+        MethodInfo method = typeof(MetricsHttpServer).GetMethod("ParseRequestLine", BindingFlags.NonPublic | BindingFlags.Static)!;
+
+        object? result = method.Invoke(null, ["GET not-a-url HTTP/1.1"]);
+
+        Assert.Null(result);
+    }
+
     [Fact]
     public void Dispose_CalledTwice_IsSafe()
     {
@@ -813,6 +1077,29 @@ public class MetricsHttpServerTests
         Exception? secondCall = Record.Exception(server.Dispose);
 
         Assert.Null(secondCall);
+    }
+
+    /// <summary>Dispose_CalledTwice_IsSafe above proves a second call does not throw, but running
+    /// the real cleanup twice would not throw either (closing a socket or joining a thread twice
+    /// over is itself harmless), so it cannot tell a skipped second call from one that quietly
+    /// redid the work. Pre-marking disposed by reflection isolates exactly the guard: a real
+    /// second caller never reaches this method with stopping still false.</summary>
+    [Fact]
+    public void Dispose_WhenAlreadyMarkedDisposed_SkipsCleanup()
+    {
+        MetricsHttpServer server = new("127.0.0.1", FreePort(), () => "x", new FakeLogger());
+        server.Start();
+        FieldInfo disposedField = typeof(MetricsHttpServer).GetField("disposed", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        FieldInfo stoppingField = typeof(MetricsHttpServer).GetField("stopping", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        disposedField.SetValue(server, 1);
+
+        server.Dispose();
+
+        Assert.False((bool)stoppingField.GetValue(server)!, "the guard let a call through even though disposed was already set");
+
+        // Undoes the simulation so the real cleanup still runs and the process is left clean.
+        disposedField.SetValue(server, 0);
+        server.Dispose();
     }
 
     [Fact]
@@ -839,7 +1126,8 @@ public class MetricsHttpServerTests
     public async Task PersistentAcceptFailure_BacksOff_InsteadOfBusySpinning()
     {
         int port = FreePort();
-        MetricsHttpServer server = new("127.0.0.1", port, () => "x", new FakeLogger());
+        FakeLogger logger = new();
+        MetricsHttpServer server = new("127.0.0.1", port, () => "x", logger);
         server.Start();
 
         FieldInfo listenerField = typeof(MetricsHttpServer).GetField("listener", BindingFlags.NonPublic | BindingFlags.Instance)!;
@@ -849,6 +1137,9 @@ public class MetricsHttpServerTests
         await Task.Delay(500);
 
         Assert.InRange(server.AcceptFailures, 1, 50);
+        // Rate-limited to one line, but there has to be at least the one: proves the failure was
+        // actually logged, not merely counted.
+        Assert.NotEmpty(logger.Entries);
 
         server.Dispose();
     }
@@ -977,6 +1268,10 @@ public class MetricsHttpServerTests
     [InlineData("10.20.30.40", "10.20.30.40")]
     [InlineData("::1", "::1")]
     [InlineData("[::1]", "::1")]
+    // IPv4 is never bracketed, so this can only pass by way of StripOneBracketPair itself: unlike
+    // "[::1]", an IPv4 literal has no bracketed form of its own for IPAddress.Parse to accept
+    // regardless of whether the brackets were stripped first.
+    [InlineData("[10.0.0.1]", "10.0.0.1")]
     [InlineData("  127.0.0.1  ", "127.0.0.1")]
     [InlineData(" localhost ", "127.0.0.1")]
     [InlineData(" 0.0.0.0 ", "0.0.0.0")]
