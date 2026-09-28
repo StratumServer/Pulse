@@ -195,7 +195,7 @@ tests:
               level: fatal
             exp_annotations:
               summary: "Fatal log entry."
-              description: "A fatal log entry landed in the last 10 minutes; read the server log now, fatals count toward the engine's own self-shutdown threshold."
+              description: "A fatal log entry landed in the last 10 minutes; read the server log now. Error and fatal entries count the same way toward the engine's own DieAboveErrorCount self-shutdown threshold."
       - eval_time: 25m
         alertname: PulseLogErrorBurst
         exp_alerts: []
