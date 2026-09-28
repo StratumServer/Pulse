@@ -301,6 +301,14 @@ mutate Pulse/ConfigUpgrade.cs \
     's/return null;/return new JsonObject();/' \
     "config upgrade: a file that does not parse is treated as an empty one and rewritten over"
 
+mutate Pulse/ConfigUpgrade.cs \
+    's/merged\[property\.Key\] = property\.Value\?\.DeepClone\(\);/{ }/' \
+    "config upgrade: a block duplicated under two spellings merges to nothing, so a field only one spelling set is reported missing and rewritten over"
+
+mutate Pulse/ConfigUpgrade.cs \
+    's/entry\.Value is JsonObject \|\| configByKey\[entry\.Key\]\.Count\(\) > 1/false/' \
+    "config upgrade: a duplicated block or a dictionary's colliding keys claims a winner that does not exist"
+
 # Loading a config file has the same two ways to be wrong as upgrading one: an unreadable file is
 # the one this whole fix exists for, so mistaking it for a loaded or an absent one is exactly the
 # regression that would bring back the original bug (an admin's broken file getting overwritten).
@@ -326,6 +334,10 @@ mutate Pulse/AttributionMetrics.cs \
 mutate Pulse/AttributionMetrics.cs \
     's/if \(enabled \|\| !profiler\.PrintSlowTicks\)/if (true)/' \
     "attribution: the profiler flag is written on every call again, clobbering /debug logticks"
+
+mutate Pulse/AttributionMetrics.cs \
+    's/else if \(profilerEnabledLastWritten\)/else if (false)/' \
+    "attribution: switching off mid-burst never turns the profiler back off, the release review's regression"
 
 mutate Pulse/PulseCommands.cs \
     's/\.Where\(key => key\.Changed\)/.Where(key => true)/' \

@@ -30,9 +30,8 @@ internal static class ConfigUpgrade
         "{0} does not know these keys in {1}: {2}. They do nothing; check them for typos.";
 
     private const string DuplicateKeys =
-        "{0} found the same key written more than once, cased differently, in {1}: {2}. The "
-        + "spelling that comes last in the file is the value actually in effect; remove the "
-        + "others to stop this warning.";
+        "{0} found the same key written more than once, cased differently, in {1}: {2}. Remove "
+        + "the extra spellings to stop this warning.";
 
     private const string UpgradeFailed =
         "{0} could not bring {1} up to date ({2}). The server runs on the values the file does "
@@ -143,6 +142,19 @@ internal static class ConfigUpgrade
             }
         }
 
+        // config carrying more than one entry for the same case-insensitive key, at this same
+        // level, is only possible for a value Newtonsoft bound as a dictionary rather than a
+        // typed property: a class member has one canonical spelling no matter how the file cased
+        // it, but a Dictionary<string, TValue> keeps every JSON key it is handed as its own entry
+        // (confirmed against a Headers block with "authorization" and "Authorization" both set).
+        // That is the signal used below to tell the two apart without reflecting on config's
+        // actual C# type, and it is also why a dictionary's collision has to be de-duplicated: the
+        // outer loop below would otherwise visit the same file-side group once per surviving
+        // config entry and report it twice.
+        ILookup<string, KeyValuePair<string, JsonNode?>> configByKey =
+            config.ToLookup(entry => entry.Key, StringComparer.OrdinalIgnoreCase);
+        HashSet<string> reported = new(StringComparer.Ordinal);
+
         foreach (KeyValuePair<string, JsonNode?> entry in config)
         {
             List<KeyValuePair<string, JsonNode?>> matches = byKey[entry.Key].ToList();
@@ -152,26 +164,60 @@ internal static class ConfigUpgrade
                 continue;
             }
 
-            if (matches.Count > 1)
+            if (matches.Count > 1 && reported.Add(matches[0].Key))
             {
-                // The last spelling in document order is the one Newtonsoft actually applied: it
-                // populates the same bound property again for every later occurrence it reads.
-                (string winnerKey, JsonNode? winnerValue) = matches[^1];
-                string others = string.Join(
-                    ", ", matches.Take(matches.Count - 1).Select(m => $"\"{m.Key}\" ({Literal(m.Value)})"));
-                duplicated.Add(
-                    $"{prefix}{entry.Key}: \"{winnerKey}\" ({Literal(winnerValue)}) wins over {others}");
+                string spellings = string.Join(", ", matches.Select(m => $"\"{m.Key}\""));
+
+                // Never the values themselves: one spelling can be an OTLP header's own secret,
+                // and this file is linked into Pulse.Otlp unchanged. A "winner" is also only ever
+                // true for a scalar bound to one property: Newtonsoft merges a duplicated block's
+                // fields onto the same nested object (see the recursion below) and keeps every one
+                // of a dictionary's colliding keys, so nothing there ever simply replaces something
+                // else.
+                duplicated.Add(entry.Value is JsonObject || configByKey[entry.Key].Count() > 1
+                    ? $"{prefix}{entry.Key}: written as {spellings}; every spelling is read, none of them alone"
+                    : $"{prefix}{entry.Key}: \"{matches[^1].Key}\" wins over "
+                        + string.Join(", ", matches.Take(matches.Count - 1).Select(m => $"\"{m.Key}\"")));
             }
 
-            (_, JsonNode? theirs) = matches[^1];
-            if (entry.Value is JsonObject nested && theirs is JsonObject nestedFile)
+            if (entry.Value is JsonObject nested)
             {
-                Walk(nestedFile, nested, prefix + entry.Key + ".", missing, unknown, duplicated);
+                // A single spelling recurses into its own block as before; more than one merges
+                // every spelling's fields into one synthetic block first; Newtonsoft populates the
+                // same nested object for each occurrence it reads rather than replacing it
+                // wholesale, so a field only one spelling set (Attribution.Enabled, block
+                // "attribution" only setting BurstTicks, say) must not be reported missing just
+                // because the last spelling alone did not carry it.
+                JsonObject? nestedFile = matches.Count > 1 ? Merge(matches) : matches[^1].Value as JsonObject;
+                if (nestedFile != null)
+                {
+                    Walk(nestedFile, nested, prefix + entry.Key + ".", missing, unknown, duplicated);
+                }
             }
         }
     }
 
-    private static string Literal(JsonNode? value) => value?.ToJsonString() ?? "null";
+    /// <summary>Unions every matched spelling's own keys into one block, the way Newtonsoft's
+    /// reused-object binding leaves a class property after reading it more than once. Values are
+    /// cloned rather than moved: a <see cref="JsonNode"/> can belong to only one
+    /// <see cref="JsonObject"/> at a time, and <paramref name="matches"/> still belongs to
+    /// <c>file</c>.</summary>
+    private static JsonObject Merge(IEnumerable<KeyValuePair<string, JsonNode?>> matches)
+    {
+        JsonObject merged = [];
+        foreach (KeyValuePair<string, JsonNode?> match in matches)
+        {
+            if (match.Value is JsonObject block)
+            {
+                foreach (KeyValuePair<string, JsonNode?> property in block)
+                {
+                    merged[property.Key] = property.Value?.DeepClone();
+                }
+            }
+        }
+
+        return merged;
+    }
 
     private static JsonObject? Parse(string json)
     {

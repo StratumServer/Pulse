@@ -535,6 +535,96 @@ public class AttributionMetricsTests
         Assert.Empty(aggregator.Collect());
     }
 
+    /// <summary>The regression the release review found in the first fix for item 1:
+    /// <c>Switch</c> and <c>Reload</c> both go through <c>TickAttribution.Apply</c>, which restarts
+    /// the duty cycle and sets <c>Profiling</c> false between ticks, before the next call to
+    /// <c>Tick</c> ever runs. A write keyed on comparing <c>Profiling</c> before and after one
+    /// <c>OnTick</c> call never sees that change (both reads land on the same, already-restarted
+    /// value), so calling <c>Switch(false)</c> mid-burst used to leave the engine's frame profiler
+    /// on for the rest of the run. This drives the duty cycle through a whole primed tick first,
+    /// so the burst is genuinely running (profiler on, a real transition already behind it) before
+    /// <c>Switch(false)</c> fires.</summary>
+    [Fact]
+    public void Switch_Off_DuringABurst_TurnsTheProfilerOff_OnTheNextTick()
+    {
+        using Meter meter = new(UniqueMeterName());
+        FrameProfilerUtil profiler = new("test") { Enabled = true };
+        AttributionMetrics metrics = Metrics(meter, profiler, []);
+
+        // One primed tick is enough to start the burst: IntervalSeconds is 1, so this tick both
+        // primes and crosses the interval, leaving Profiling true and the flag written true.
+        profiler.PrevRootEntry = new ProfileEntryRange { ElapsedTicks = 1000 };
+        metrics.Tick(1.0);
+        Assert.True(profiler.Enabled);
+
+        metrics.Switch(false);
+        // Switch alone does not touch the flag (see the test below): still true right after it.
+        Assert.True(profiler.Enabled);
+
+        metrics.Tick(1.0);
+
+        Assert.False(profiler.Enabled);
+    }
+
+    /// <summary>The same regression from the other direction: switching (or reloading) back on
+    /// mid-burst also restarts the duty cycle, so the profiler has to go idle-off immediately and
+    /// stay off until the next burst actually starts, rather than sit on, unread, for the whole
+    /// interval the old before/after comparison let it coast through.</summary>
+    [Fact]
+    public void Switch_OnMidBurst_TurnsTheProfilerOff_ThroughTheIdleIntervalUntilTheNextBurst()
+    {
+        using Meter meter = new(UniqueMeterName());
+        FrameProfilerUtil profiler = new("test") { Enabled = true };
+        AttributionMetrics metrics = Metrics(meter, profiler, []);
+
+        profiler.PrevRootEntry = new ProfileEntryRange { ElapsedTicks = 1000 };
+        metrics.Tick(1.0);
+        Assert.True(profiler.Enabled);
+
+        // Already on; restarts the duty cycle exactly like a config reload would mid-burst. The
+        // confirming ticks below are 0.1s, not the 1.0s the first tick used: IntervalSeconds is 1,
+        // so a 1.0s tick would cross it immediately on its own, restart or no restart, and prove
+        // nothing about the restart itself.
+        metrics.Switch(true);
+
+        metrics.Tick(0.1);
+        Assert.False(profiler.Enabled);
+
+        // Stays off for the rest of the one second interval: five 0.1s ticks (this one and the
+        // four below) sum to 0.5s, still short of the 1s interval, so the flag must not sit on,
+        // unread, through the wait.
+        for (int i = 0; i < 4; i++)
+        {
+            metrics.Tick(0.1);
+            Assert.False(profiler.Enabled);
+        }
+    }
+
+    /// <summary>Item 2 of the release review's new defects: while a burst is running, the flag now
+    /// has to be re-asserted every tick, not only on the tick the burst starts on, because
+    /// <c>/debug logticks</c> or another mod can turn <c>FrameProfilerUtil.Enabled</c> back off
+    /// mid-burst. Left alone, the engine's own <c>End()</c> then returns early against a stale
+    /// tree, and the rest of the burst folds and publishes that same stale sample.</summary>
+    [Fact]
+    public void Tick_ReassertsTheProfilerOn_WhenAnotherWriterClearsItMidBurst()
+    {
+        using Meter meter = new(UniqueMeterName());
+        FrameProfilerUtil profiler = new("test") { Enabled = true };
+        AttributionMetrics metrics = Metrics(meter, profiler, []);
+
+        // Starts the burst (interval crossed) and folds it warm, same as the tests above.
+        profiler.PrevRootEntry = new ProfileEntryRange { ElapsedTicks = 1000 };
+        metrics.Tick(1.0);
+        Assert.True(profiler.Enabled);
+
+        // What /debug logticks (or another mod) turning itself off mid-burst looks like from here.
+        profiler.Enabled = false;
+
+        metrics.Tick(1.0);
+
+        Assert.True(profiler.Enabled);
+    }
+
     /// <summary>What PulseCommandsTests does not already cover: switching on seeds the families at
     /// zero straight away, and switching off does not touch the profiler flag by itself, the next
     /// tick does. Text formatting is PulseCommands' own job and is tested there.</summary>

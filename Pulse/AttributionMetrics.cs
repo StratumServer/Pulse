@@ -72,6 +72,13 @@ internal sealed partial class AttributionMetrics
     /// Pulse's one chance to turn it back off, exactly once, if nothing else wants it running.</summary>
     private bool primed;
 
+    /// <summary>The value Pulse itself last wrote to <c>FrameProfilerUtil.Enabled</c>, meaningful
+    /// only once <see cref="primed"/> is true. Compared against <see cref="TickAttribution.Profiling"/>
+    /// instead of this tick's own before/after: <c>Switch</c> and <c>Reload</c> restart the duty
+    /// cycle through <see cref="TickAttribution.Apply"/> between ticks, off the flag entirely, so a
+    /// tick that starts already out of sync with what Pulse last wrote still has to catch up.</summary>
+    private bool profilerEnabledLastWritten;
+
     /// <summary>Creates the duty cycle and the instruments it publishes to, with the profiler
     /// resolver, the listener walk and the warning sink supplied directly rather than read off a
     /// live server: what a unit test calls to drive the unprimed-tick give-up path, a failed
@@ -192,7 +199,8 @@ internal sealed partial class AttributionMetrics
             // since: this is the one write that undoes priming when nothing (attribution or
             // another mod's own /debug logticks) wants the profiler running yet.
             primed = true;
-            SetProfilerEnabled(profiler, attribution!.Profiling);
+            profilerEnabledLastWritten = attribution!.Profiling;
+            SetProfilerEnabled(profiler, profilerEnabledLastWritten);
         }
 
         bool wasProfiling = attribution!.Profiling;
@@ -207,12 +215,26 @@ internal sealed partial class AttributionMetrics
             PublishBurst(burst);
         }
 
-        // Written only on the transition, not every tick: a slow-tick report or another mod
-        // relies on the same flag, and re-asserting it every tick regardless of who else last set
-        // it is exactly the bug this replaces.
-        if (attribution.Profiling != wasProfiling)
+        // Two different rules for the two directions, not one "on a transition" rule: turning the
+        // profiler on is always safe (SetProfilerEnabled's own guard only ever holds an off write
+        // back), so this re-asserts it on every tick a burst is running, not only the tick the
+        // burst starts on. That is what stops /debug logticks or another mod turning the profiler
+        // off mid-burst from folding the same stale tick tree into the rest of the burst. Turning
+        // it off compares against profilerEnabledLastWritten rather than wasProfiling above,
+        // because Switch and Reload restart the duty cycle through TickAttribution.Apply between
+        // ticks: by the time this method runs, Profiling has already moved and wasProfiling reads
+        // the post-restart value too, so the two would never disagree and the write this replaced
+        // would never fire, leaving the profiler on for the rest of the run or the whole idle
+        // interval until the next burst.
+        if (attribution.Profiling)
         {
-            SetProfilerEnabled(profiler, attribution.Profiling);
+            SetProfilerEnabled(profiler, true);
+            profilerEnabledLastWritten = true;
+        }
+        else if (profilerEnabledLastWritten)
+        {
+            SetProfilerEnabled(profiler, false);
+            profilerEnabledLastWritten = false;
         }
     }
 
@@ -228,7 +250,7 @@ internal sealed partial class AttributionMetrics
         {
             if (resolveProfiler() is { } profiler)
             {
-                SetProfilerEnabled(profiler, false);
+                DisableProfilerForcefully(profiler);
             }
         }
         catch
@@ -251,6 +273,42 @@ internal sealed partial class AttributionMetrics
             profiler.Enabled = enabled;
         }
     }
+
+    /// <summary>Turns the profiler off no matter what, for the two callers (the give-up path's own
+    /// shutdown and <see cref="Stop"/>) that must not leave a primed profiler running for the rest
+    /// of the process over this.</summary>
+    /// <remarks>The guarded write above reads <c>PrintSlowTicks</c> before it reads or writes
+    /// <c>Enabled</c>, so a future engine reshape of that field alone throws there, before
+    /// <c>Enabled</c> is ever touched, and is otherwise indistinguishable from every other reshape
+    /// this class already degrades on. Both callers already give up on attribution for the reasons
+    /// that get them here; leaving the engine paying close to a quarter of its tick budget forever
+    /// on top of that is the one outcome worth a second attempt for. The fallback write sits in its
+    /// own non-inlinable method for the same reason as <see cref="RunProfiledTick"/>: so a reshape
+    /// of <c>Enabled</c> itself throws inside this try, not while this method is being JIT
+    /// compiled.</remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void DisableProfilerForcefully(FrameProfilerUtil profiler)
+    {
+        try
+        {
+            SetProfilerEnabled(profiler, false);
+        }
+        catch
+        {
+            try
+            {
+                DisableProfilerUnguarded(profiler);
+            }
+            catch
+            {
+                // PrintSlowTicks and Enabled are both unreachable. Nothing more Pulse can do
+                // about the engine's own flag.
+            }
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void DisableProfilerUnguarded(FrameProfilerUtil profiler) => profiler.Enabled = false;
 
     /// <summary>Re-reads which mod owns which tick listener, once per burst.</summary>
     /// <remarks>Once per burst rather than once at startup because mods register and drop listeners
@@ -360,7 +418,7 @@ internal sealed partial class AttributionMetrics
     {
         if (attribution != null && resolveProfiler() is { } profiler)
         {
-            SetProfilerEnabled(profiler, false);
+            DisableProfilerForcefully(profiler);
         }
     }
 }

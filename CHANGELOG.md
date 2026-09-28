@@ -203,9 +203,14 @@ first.
   `FrameProfilerUtil.Enabled` unconditionally each tick, even with `Attribution.Enabled` false (the
   default), which broke `/debug logticks` on every 0.2 server: the report lost its per-system and
   per-listener lines, off-thread reports stopped printing altogether, and any other mod that turns
-  the profiler on had its own setting clobbered a tick later. Pulse now writes that flag only on
-  its own transitions (turning off what it primed at startup, the start and end of a burst, giving
-  up, and shutting down), and never clears it while `/debug logticks` has asked for it.
+  the profiler on had its own setting clobbered a tick later. Pulse now tracks whether it is the
+  one that last turned the flag on, and writes it only on its own transitions (turning off what it
+  primed at startup, every tick a burst is running so another mod cannot fold a stale tick tree
+  into it, giving up, and shutting down), never clearing it while `/debug logticks` has asked for
+  it. `/pulse attribution off` and a reload that turns attribution off now turn the profiler off on
+  the very next tick even in the middle of a burst, instead of leaving it running, at close to a
+  quarter of the tick budget, for the rest of the run: restarting the duty cycle between ticks used
+  to go unnoticed by a write keyed on comparing its state only before and after one tick.
 - A server that already has a `/pulse` chat command from another mod could start Pulse with the
   frame profiler stuck on for the whole run, at close to a quarter of the tick budget, with no
   Pulse metrics to show for it. Registering `/pulse` used to be able to throw partway through
@@ -217,14 +222,24 @@ first.
   does: if a future game version reshapes the profiler in a way Pulse does not expect, this logs
   one warning and turns attribution off for the session instead of crashing the server at startup
   or logging an error on every tick for the rest of the run (which, left unaddressed, would have
-  driven the server into its own `DieAboveErrorCount` shutdown well within an hour).
+  driven the server into its own `DieAboveErrorCount` shutdown well within an hour). A reshape of
+  `PrintSlowTicks`, the one field the profiler guard itself now reads, still turns the profiler
+  fully off through a plain write rather than leaving it running for the rest of the session, and a
+  reshape of the profiler type itself costs only attribution instead of the whole mod failing to
+  start.
 - Config keys are now compared case-insensitively when Pulse rewrites `pulse.json` or
   `pulse-otlp.json` to add new keys, matching how the file is actually loaded. A key written with
   different casing than Pulse's own (`port` for `Port`, say) used to be logged as both a default
   Pulse silently added and a value the rewrite silently dropped, even though the admin's own value
   was kept the whole time. The same key written twice under different casing is now reported as a
-  duplicate, naming which spelling's value is the one actually in effect, rather than one spelling
-  reading as a match and the other as an unrelated unknown key doing nothing.
+  duplicate, naming every spelling involved, never the value written under it: a scalar property
+  (`Port`, say) names the spelling actually in effect, and a block or a dictionary entry duplicated
+  under two spellings (an OTLP header name typed in two casings, say) says every spelling is read
+  rather than claiming one replaces the other, since the config loader merges the former and keeps
+  every one of the latter's colliding keys. A block duplicated this way is also no longer misread
+  as missing the field only one of its spellings set. This warning is compiled into Pulse OTLP too,
+  where it used to print the duplicated value itself; an OTLP header written under two casings no
+  longer puts either header's value, a credential in the common case, into the server log.
 - `ChunksRefreshSeconds` set to an extreme value (above roughly 2.147 million seconds) no longer
   overflows into a negative tick listener period, which made the engine run the loaded-chunk read
   it guards on every single tick instead of never. The value is now clamped to at most a day.

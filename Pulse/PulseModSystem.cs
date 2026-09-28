@@ -184,7 +184,25 @@ public sealed class PulseModSystem : ModSystem
 
         // Armed whether or not the operator asked for it, so /pulse attribution on has something
         // to switch. Nothing is measured until it is switched on.
-        attributionMetrics = new AttributionMetrics(api, meter, config);
+        //
+        // Guarded on its own, separately from StartEngineProbe just above: the constructor builds
+        // a Func<FrameProfilerUtil?> closing over FrameProfilerUtil itself, so a future engine
+        // reshape of that type throws a TypeLoadException here, before any field of this class is
+        // touched. Left unguarded that takes the whole mod down (no endpoint, no tick listener),
+        // for what should cost only attribution, the same as every other reshape it already
+        // degrades on once construction succeeds.
+        try
+        {
+            attributionMetrics = new AttributionMetrics(api, meter, config);
+        }
+        catch (Exception e)
+        {
+            attributionMetrics = null;
+            api.Logger.Warning(
+                "Pulse could not start per-mod tick attribution ({0}). Every other metric is "
+                + "unaffected.",
+                e.Message);
+        }
 
         // The runtime publishes System.Runtime itself, so listening to it is the whole of the
         // integration: no instrumentation, no dependency, dotted OpenTelemetry names that the
@@ -196,7 +214,7 @@ public sealed class PulseModSystem : ModSystem
         // engine's own 0.1 default this class does not override) so its MeterProvider is already
         // listening when these seeds fire. Do not give this class an ExecuteOrder at or below 0.05.
         SeedCounters(logEntries, engineWarnings, suspendSeconds, columnsGenerated, playerDeaths, suspends);
-        attributionMetrics.Seed();
+        attributionMetrics?.Seed();
         PublishSnapshot();
 
         // The errorHandler overload is not optional. Without it an exception from this listener
@@ -211,7 +229,7 @@ public sealed class PulseModSystem : ModSystem
         // off. Arming this any earlier, from inside the AttributionMetrics constructor itself,
         // means a later failure in this same method (StartEndpoint aside, nothing after this point
         // throws) would leave RunGame armed with no listener left to undo it.
-        attributionMetrics.ArmPriming();
+        attributionMetrics?.ArmPriming();
 
         // AllLoadedChunks clones the whole loaded-chunk dictionary under the chunk lock on every
         // call, so it gets its own slow listener rather than riding the per-second snapshot. The
@@ -300,7 +318,7 @@ public sealed class PulseModSystem : ModSystem
             PublishSnapshot();
         }
 
-        attributionMetrics!.Tick(elapsedSeconds);
+        attributionMetrics?.Tick(elapsedSeconds);
     }
 
     private void OnTickError(Exception e) => sapi?.Logger.Error(e);
