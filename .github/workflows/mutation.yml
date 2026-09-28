@@ -3,9 +3,16 @@ name: mutation
 # Line coverage says the unit suites execute the code; it cannot say whether anything is
 # checked. Stryker answers that: it changes the code and asks whether a test notices. The lane
 # is a ratchet, not a target. Each project breaks just under the score measured when this file
-# landed, so tests cannot quietly get weaker; raising a threshold is a deliberate commit.
+# landed, so tests cannot quietly get weaker; raising a threshold is a deliberate commit. Pull
+# requests get a fast pass scoped to what they changed; the ratchet itself is enforced by the
+# full run, on workflow_dispatch and a weekly schedule.
 on:
   workflow_dispatch:
+  schedule:
+    # GitHub only runs a scheduled workflow from the copy of this file on the repository's
+    # default branch (main), so this weekly run has no effect until this file reaches main at
+    # the next release. Until then, the full run is reachable only through workflow_dispatch.
+    - cron: "0 6 * * 1"
   pull_request:
     branches: [main, dev]
     paths:
@@ -36,7 +43,10 @@ jobs:
   stryker:
     name: Mutation (${{ matrix.project }})
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    # Short on a pull request, where the run is scoped to a handful of changed files; generous
+    # on workflow_dispatch and the weekly schedule, where it mutates the whole project (Pulse
+    # alone has taken 20 to 53 minutes on a shared runner, and 60 was not always enough).
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 20 || 90 }}
     strategy:
       # A weak spot in one project should not hide the other.
       fail-fast: false
@@ -46,6 +56,15 @@ jobs:
         # `if` cannot see `matrix.*` (the matrix has not expanded yet when it is evaluated), so
         # the matrix itself is conditional on github.event_name below instead. This comment
         # explains both thresholds and why Pulse.Otlp is manual.
+        #
+        # This matrix also behaves differently depending on how the workflow was triggered. On
+        # a pull request, the step below scopes Stryker to the mutants in files the pull request
+        # changed (--since) and never breaks the build (--break-at 0): the full Pulse project
+        # takes 20 to 53 minutes on a shared runner, too slow and too variable to gate every
+        # pull request, and a score over a handful of changed-file mutants is too noisy to
+        # threshold on its own. The full project still runs, at the real thresholds below, on
+        # workflow_dispatch and the weekly schedule; that is the actual ratchet, and tools/
+        # mutation-check.sh (ci.yml) keeps guarding every push deterministically in between.
         #
         # stryker/Pulse.json and stryker/Pulse.Otlp.json exclude the same files sonar.yml's
         # sonar.coverage.exclusions does (PulseModSystem.cs, EngineProbe.cs, AttributionProbe.cs,
@@ -79,9 +98,10 @@ jobs:
         # in OtlpOptions.cs, which is pure and already thoroughly tested elsewhere, not a sign of
         # missing tests. A non-required check that can go red at random on a healthy pull request
         # teaches people to ignore it, so this lane stays manual: available to whoever picks up
-        # the host issue, rather than gating every PR on a coin flip. It belongs back on pull
-        # requests once that host resolution is fixed, upstream in Stryker or VSTest, or by a
-        # solution shape here that does not trigger it; a narrower solution was tried and instead
+        # the host issue, rather than gating every PR on a coin flip, and left out of the weekly
+        # schedule for the same reason. It belongs back on pull requests once that host
+        # resolution is fixed, upstream in Stryker or VSTest, or by a solution shape here that
+        # does not trigger it; a narrower solution was tried and instead
         # reproduced the original all-mutants-survived failure from issue #2 (restorable from
         # dcc17ad if that needs re-proving), so the fix is not a config change available today. In
         # the meantime OtlpOptions.cs stays covered deterministically: tools/mutation-check.sh's
@@ -92,7 +112,13 @@ jobs:
         project: ${{ github.event_name == 'workflow_dispatch' && fromJSON('["Pulse","Pulse.Otlp"]') || fromJSON('["Pulse"]') }}
 
     steps:
+      # A pull request needs the base branch's history to diff against for --since below; the
+      # default shallow checkout only has the merge commit itself. workflow_dispatch and the
+      # scheduled full run mutate everything regardless of history, so the full clone costs them
+      # nothing they need but does not hurt either.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
 
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v6
@@ -129,12 +155,24 @@ jobs:
       - name: Restore dotnet tools
         run: dotnet tool restore
 
-      # Not --since. A pull request that only deletes a contract test would leave every mutant
-      # filtered out under --since and pass, which is exactly the case this lane exists to catch.
-      # The full run is a stable number. Each mutant run restarts a test host, and that startup
-      # cost dominates on a shared runner: the timeout is generous because the score itself is
-      # the fast part, the fixed per-mutant overhead is what takes the wall clock past local.
-      - name: Mutation test ${{ matrix.project }}
+      # --since scopes this run to mutants in files that changed relative to the pull request's
+      # base branch; --break-at 0 keeps a small, noisy sample from failing the build (the real
+      # threshold lives on the full run below). Stryker exits 0 when since finds nothing to
+      # mutate, which is the common case for a pull request that only touches this workflow or
+      # the other non-code paths it also watches.
+      - name: Mutation test ${{ matrix.project }} (incremental)
+        if: github.event_name == 'pull_request'
+        run: |
+          dotnet dotnet-stryker -f stryker/${{ matrix.project }}.json --skip-version-check \
+            --since:origin/${{ github.base_ref }} --break-at 0 \
+            --output StrykerOutput/${{ matrix.project }}
+
+      # The full run, at the thresholds in stryker/Pulse.json and stryker/Pulse.Otlp.json. Each
+      # mutant run restarts a test host, and that startup cost dominates on a shared runner: the
+      # timeout above is generous because the score itself is the fast part, the fixed
+      # per-mutant overhead is what takes the wall clock past local.
+      - name: Mutation test ${{ matrix.project }} (full)
+        if: github.event_name != 'pull_request'
         run: dotnet dotnet-stryker -f stryker/${{ matrix.project }}.json --skip-version-check --output StrykerOutput/${{ matrix.project }}
 
       # The surviving mutants are the finding; without the report a red job only says a number
