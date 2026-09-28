@@ -30,7 +30,7 @@ internal readonly record struct ConfigLoadResult<T>(T Config, ConfigLoadStatus S
 /// <see cref="ConfigUpgrade"/>: Pulse.Otlp links it rather than referencing Pulse.dll.
 /// <para><c>ICoreServerAPI.LoadModConfig&lt;T&gt;</c> returns null for a file that does not exist,
 /// but throws for one that exists and will not deserialize: a <c>Newtonsoft.Json.JsonException</c>
-/// (a <c>JsonReaderException</c> for a syntax error such as a stray comma, or a
+/// (a <c>JsonReaderException</c> for a syntax error such as a doubled comma, or a
 /// <c>JsonSerializationException</c> for a value of the wrong shape) when the text itself is bad,
 /// or an <c>IOException</c>/<c>UnauthorizedAccessException</c> if the file cannot even be read.
 /// Left uncaught, that exception escapes StartServerSide and the mod never starts; worse, the file

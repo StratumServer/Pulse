@@ -1,0 +1,9 @@
+{
+  "Enabled": true,
+  "Endpoint": "http://127.0.0.1:39481",
+  "Protocol": "http/protobuf",
+  "Headers": {},
+  "IntervalSeconds": 2,
+  "IncludeRuntimeMetrics": false,
+  "ServiceName": "pulse-atlas-seed-test"
+}

@@ -199,12 +199,15 @@ Most gauges come from a snapshot the tick listener refreshes about once a second
 server's main thread, so a scrape never touches live world state.
 
 Loaded chunks are the exception. The engine offers no cheap count, and the one accessor that
-exists clones the entire loaded-chunk dictionary under the chunk lock, so that gauge gets its
-own listener at `ChunksRefreshSeconds` and reads 0 until the first refresh. The entity breakdown
-rides that same slow listener. The event-driven counters do not ride the tick listener either:
-columns generated is incremented from `MapChunkGeneration`, which fires on the worldgen thread,
-and the log counters from `Logger.EntryAdded`, which fires on whichever thread wrote the line.
-Both handlers classify and increment, and nothing else.
+exists clones the entire loaded-chunk dictionary under the chunk lock, so that gauge gets its own
+listener at `ChunksRefreshSeconds` and reads 0 until the first refresh. The entity breakdown
+rides that same slow listener, but it is not the same kind of gauge: `pulse_entities_by_code` is
+recorded only from the listener callback, with no observable default behind it, so it is absent
+from the exposition entirely until that first refresh, not present at 0. The event-driven
+counters do not ride the tick listener either: columns generated is incremented from
+`MapChunkGeneration`, which fires on the worldgen thread, and the log counters from
+`Logger.EntryAdded`, which fires on whichever thread wrote the line. Both handlers classify and
+increment, and nothing else.
 
 ## Degraded mode
 
