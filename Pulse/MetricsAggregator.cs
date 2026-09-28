@@ -99,6 +99,7 @@ public sealed class MetricsAggregator : IDisposable
             {
                 samples.Add(new MetricSample(s.Name, s.Kind, s.Help, s.Value)
                 {
+                    Unit = s.Unit,
                     Labels = s.Labels,
                     Bounds = s.Bounds,
                     Buckets = (long[])s.Buckets.Clone(),
@@ -249,6 +250,7 @@ public sealed class MetricsAggregator : IDisposable
             Kind = shape.Kind,
             Absolute = shape.Absolute,
             Help = instrument.Description ?? string.Empty,
+            Unit = instrument.Unit ?? string.Empty,
             Labels = labels,
             Bounds = bounds,
             Buckets = new long[bounds.Length],
@@ -271,6 +273,8 @@ public sealed class MetricsAggregator : IDisposable
         public required bool Absolute { get; init; }
 
         public required string Help { get; init; }
+
+        public required string Unit { get; init; }
 
         public KeyValuePair<string, string>[] Labels { get; init; } = [];
 

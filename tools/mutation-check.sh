@@ -127,8 +127,52 @@ mutate Pulse/TickBookkeeper.cs \
     "tick bookkeeper: snapshot cadence boundary made inclusive, delaying the due tick that lands exactly on it"
 
 mutate Pulse/PrometheusText.cs \
-    's/samples\.GroupBy\(sample => MetricName\(sample\.Name, sample\.Kind\)\)/samples.GroupBy(sample => MetricName(sample.Name, sample.Kind) + sample.Labels.Length)/' \
+    's/samples\.GroupBy\(sample => MetricName\(sample\.Name, sample\.Kind, sample\.Unit\)\)/samples.GroupBy(sample => MetricName(sample.Name, sample.Kind, sample.Unit) + sample.Labels.Length)/' \
     "writer: a family is split by tag set, repeating its HELP and TYPE lines"
+
+mutate Pulse/PrometheusText.cs \
+    's/tokens\.RemoveAll\(t => t == word\);//' \
+    "writer: a counter or ratio suffix already present in the name is duplicated instead of moved to the end"
+
+mutate Pulse/PrometheusText.cs \
+    's/"per_" \+ per/"per" + per/' \
+    "writer: a rate unit is built without its per_ separator"
+
+mutate Pulse/PrometheusText.cs \
+    's/\["s"\] = "second", \["m"\] = "minute"/["s"] = "seconds", ["m"] = "minute"/' \
+    "writer: the per-unit map pluralises seconds"
+
+mutate Pulse/PrometheusText.cs \
+    's/kind == MetricKind\.Gauge && unit == "1"/unit == "1"/' \
+    "writer: the _ratio suffix is no longer limited to gauges"
+
+mutate Pulse/PrometheusText.cs \
+    's/return joined\.Length > 0 && char\.IsAsciiDigit\(joined\[0\]\) \? "_" \+ joined : joined;/return joined;/' \
+    "writer: a name starting with a digit is served invalid"
+
+mutate Pulse/PrometheusText.cs \
+    's/string trimmed = part\.Trim\(\);/string trimmed = part;/' \
+    "writer: a unit's surrounding whitespace reaches the name"
+
+mutate Pulse/PrometheusText.cs \
+    "s/char\.IsAsciiLetterOrDigit\(c\) \|\| c == ':'/char.IsAsciiLetterOrDigit(c)/" \
+    "writer: colon is no longer a valid name character"
+
+mutate Pulse/PrometheusText.cs \
+    's/tokens\.Add\(perUnit\);//' \
+    "writer: the per-unit word is computed and then never appended"
+
+mutate Pulse/PrometheusText.cs \
+    "s#unit\.Split\('/', 2\)#unit.Split('/')#" \
+    "writer: the unit splits at every slash instead of only the first"
+
+mutate Pulse/PrometheusText.cs \
+    's/trimmed\.IndexOfAny\(BraceChars\) < 0/trimmed.IndexOfAny(BraceChars) != 0/' \
+    "writer: a brace only disqualifies a unit at the very front"
+
+mutate Pulse/PrometheusText.cs \
+    's/\["By"\] = "bytes"/["By"] = "byte"/' \
+    "writer: By maps to the singular byte"
 
 mutate Pulse/EngineSample.cs \
     's/ticksTotal > 0 \?/ticksTotal >= 0 ?/' \

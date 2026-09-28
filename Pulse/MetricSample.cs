@@ -13,6 +13,11 @@ public enum MetricKind
 /// carrying the same <see cref="Name"/>, so the writer emits HELP and TYPE once for the lot.</remarks>
 public sealed record MetricSample(string Name, MetricKind Kind, string Help, double Value)
 {
+    /// <summary>The instrument's OpenTelemetry unit (<c>By</c>, <c>s</c>, <c>{tick}</c>, empty for
+    /// an unset unit), carried through so the writer can derive the Prometheus name the same way
+    /// OTLP does. Not itself written to the wire: Prometheus text exposition has no unit line.</summary>
+    public string Unit { get; init; } = string.Empty;
+
     /// <summary>Label pairs, sorted by key, values already stringified. Empty for an untagged
     /// series, which renders without braces.</summary>
     public KeyValuePair<string, string>[] Labels { get; init; } = [];
