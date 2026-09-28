@@ -127,6 +127,65 @@ public class ExportFailureLogTests
         Assert.DoesNotContain(SecretHeaderValue, line);
     }
 
+    /// <summary>Two exporters whose configured base grpc endpoints differ can still reach export
+    /// paths where one is a character-level string prefix of the other ("/pre" of "/prefix"); only
+    /// exact equality against the one exact address Pulse's own export reaches tells them apart.
+    /// A prefix check would have logged the foreign exporter's failure as Pulse's own.</summary>
+    [Fact]
+    public void Grpc_RejectsAForeignExporter_WhoseBasePathIsOnlyAStringPrefixOfPulsesOwn()
+    {
+        int port = FreePort();
+        using FakeGrpcFailureCollector collector = new(port);
+        using Rig rig = BuildRig($"http://127.0.0.1:{port}/pre", protocol: OtlpExportProtocol.Grpc);
+        using ForeignExporter foreign = BuildForeignExporter(
+            $"http://127.0.0.1:{port}/prefix/othermod", OtlpExportProtocol.Grpc);
+
+        foreign.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+        Assert.Empty(failures);
+    }
+
+    /// <summary>Event 40's declared response size is not part of its key: three different sizes
+    /// (a real backend's error body length varies export to export) must still read as the same
+    /// kind, not three, contradicting the rate limit and the cap alike.</summary>
+    [Fact]
+    public void ResponseTooLarge_WithDifferentDeclaredSizes_StillGivesOneLine()
+    {
+        int port = FreePort();
+        string endpoint = $"http://127.0.0.1:{port}/v1/metrics";
+        using FakeCollector collector = new(
+            port, n => (401, "{\"error\":\"" + new string('x', 2000 + (n * 37)) + "\"}"));
+        using Rig rig = BuildRig(endpoint, maxResponseSizeBytes: 1024);
+
+        rig.Provider.ForceFlush();
+        rig.Provider.ForceFlush();
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+        Assert.Single(failures);
+    }
+
+    /// <summary>The cause is collector-controlled too (gRPC's Detail field, here): a 5000 character
+    /// one must be clipped exactly like an oversized response body is, not embedded whole.</summary>
+    [Fact]
+    public void GrpcCause_LongerThan200Characters_IsClipped()
+    {
+        int port = FreePort();
+        string endpoint = $"http://127.0.0.1:{port}";
+        string longDetail = new string('d', 5000);
+        using FakeGrpcFailureCollector collector = new(port, longDetail);
+        using Rig rig = BuildRig(endpoint, protocol: OtlpExportProtocol.Grpc);
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+
+        string line = Assert.Single(failures);
+        Assert.DoesNotContain(longDetail, line);
+        Assert.True(line.Length < 1000, $"expected a clipped line, got {line.Length} characters");
+    }
+
     [Fact]
     public void Recovery_QueuesASucceededLine_OnlyForTheFirstDeliveryAfterAFailure()
     {
@@ -324,6 +383,26 @@ public class ExportFailureLogTests
         Assert.DoesNotContain(SecretHeaderValue, line);
     }
 
+    /// <summary>The shape TryResolveEndpoint now produces for a configured endpoint that already
+    /// carries a query string: the query survives after the appended signal path. The endpoint
+    /// filter still has to recognise the export as Pulse's own, which it does without any change
+    /// of its own, since it already compares scheme, host, port and path only, the same components
+    /// the SDK's own EventSource payload is redacted to.</summary>
+    [Fact]
+    public void Failure_IsLogged_WhenTheConfiguredEndpointCarriesAQueryString()
+    {
+        int port = FreePort();
+        string endpoint = $"http://127.0.0.1:{port}/v1/metrics?key=abc";
+        using FakeCollector collector = new(port, _ => (401, string.Empty));
+        using Rig rig = BuildRig(endpoint);
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+
+        Assert.Contains("failed:", Assert.Single(failures));
+    }
+
     [Fact]
     public void Failure_NeverLeaksTheHeaderValue_EvenWhenTheCollectorEchoesIt()
     {
@@ -346,9 +425,12 @@ public class ExportFailureLogTests
 
     /// <summary>The regex fallback, not the exact-value match: a credential shaped like a bearer
     /// or basic token but not equal to anything this mod itself configured (someone else's, or a
-    /// reformatted echo) is still not something the server log should carry whole.</summary>
+    /// reformatted echo) is still not something the server log should carry whole. Also proves the
+    /// token68 restriction: the closing quote and brace right after the credential, and Pulse's own
+    /// suffix text after that, both survive intact, which a plain non-whitespace match would not
+    /// have left alone.</summary>
     [Fact]
-    public void Failure_RedactsABearerShapedCredential_EvenWhenItIsNotTheConfiguredValue()
+    public void Failure_RedactsABearerShapedCredential_WithoutSwallowingWhatFollowsInACompactBody()
     {
         int port = FreePort();
         string endpoint = $"http://127.0.0.1:{port}/v1/metrics";
@@ -362,7 +444,117 @@ public class ExportFailureLogTests
 
         string line = Assert.Single(failures);
         Assert.DoesNotContain("totally-unrelated-credential", line);
-        Assert.Contains("Bearer ***", line);
+        Assert.Contains("{\"error\":\"nope\",\"hint\":\"Bearer ***\"}", line);
+        Assert.Contains("Metrics are not reaching the backend", line);
+    }
+
+    /// <summary>The regex is case-insensitive: a backend is not obliged to send the scheme back
+    /// capitalised the way the specification writes it.</summary>
+    [Fact]
+    public void Failure_RedactsALowercaseBearerCredential_EvenWhenItIsNotTheConfiguredValue()
+    {
+        int port = FreePort();
+        string endpoint = $"http://127.0.0.1:{port}/v1/metrics";
+        const string body = "{\"hint\":\"bearer some-other-unconfigured-token\"}";
+        using FakeCollector collector = new(port, _ => (401, body));
+        using Rig rig = BuildRig(endpoint);
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+
+        string line = Assert.Single(failures);
+        Assert.DoesNotContain("some-other-unconfigured-token", line);
+        Assert.Contains("bearer ***", line);
+    }
+
+    /// <summary>An echo that drops the scheme entirely, showing only the bare credential, still has
+    /// to be caught: the exact-value pass matches the credential half of a configured "scheme
+    /// credential" value on its own, not only the value whole.</summary>
+    [Theory]
+    [InlineData("Bearer")]
+    [InlineData("Basic")]
+    public void Failure_RedactsTheCredential_EchoedWithoutItsScheme(string scheme)
+    {
+        int port = FreePort();
+        string endpoint = $"http://127.0.0.1:{port}/v1/metrics";
+        string body = $"{{\"got\":\"{SecretHeaderValue}\"}}";
+        using FakeCollector collector = new(port, _ => (401, body));
+        using Rig rig = BuildRig(endpoint, headerValue: $"{scheme} {SecretHeaderValue}");
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+
+        string line = Assert.Single(failures);
+        Assert.DoesNotContain(SecretHeaderValue, line);
+        Assert.Contains("\"got\":\"***\"", line);
+    }
+
+    /// <summary>PHP's json_encode escapes a literal "/" as "\/" by default; System.Text.Json does
+    /// not. A backend built on a different stack from the SDK's own can still echo a slash-bearing
+    /// value (a base64 API key, say) in that shape.</summary>
+    [Fact]
+    public void Failure_RedactsAPhpStyleSlashEscapedCredential()
+    {
+        int port = FreePort();
+        string endpoint = $"http://127.0.0.1:{port}/v1/metrics";
+        const string apiKey = "abc+def/ghi=";
+        const string body = "{\"key\":\"abc+def\\/ghi=\"}";
+        using FakeCollector collector = new(port, _ => (401, body));
+
+        // x-api-key, not Authorization: a bare value with no "<scheme> <token>" shape is not a
+        // valid Authorization header as far as HttpClient's own parsing is concerned, and this
+        // test wants the export to actually reach the collector.
+        using Rig rig = BuildRig(endpoint, headerValue: apiKey, headerName: "x-api-key");
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+
+        string line = Assert.Single(failures);
+        Assert.DoesNotContain("ghi=", line);
+        Assert.Contains("\"key\":\"***\"", line);
+    }
+
+    /// <summary>The SDK trims a header value before it ever reaches the wire; the redactor is only
+    /// ever handed the raw, padded configured value, so it has to trim its own copy before
+    /// searching, or a padded config value would never match anything a real collector sees.
+    /// </summary>
+    [Fact]
+    public void Failure_RedactsTheCredential_EvenWhenTheConfiguredValueHasPadding()
+    {
+        int port = FreePort();
+        string endpoint = $"http://127.0.0.1:{port}/v1/metrics";
+        using EchoingCollector collector = new(port);
+        using Rig rig = BuildRig(endpoint, headerValue: $"  Bearer {SecretHeaderValue}  ");
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+
+        string line = Assert.Single(failures);
+        Assert.DoesNotContain(SecretHeaderValue, line);
+    }
+
+    /// <summary>Mirrors OtlpOptions.SecretValues(null) and SecretValues of a Headers block holding
+    /// a null value: an empty secrets list, the shape PulseOtlpModSystem now always passes instead
+    /// of letting a null Headers block or a null value inside it reach the constructor. Nothing
+    /// here may throw, and a failure must still be logged.</summary>
+    [Fact]
+    public void Failure_IsStillLogged_WhenNoSecretsAreConfigured()
+    {
+        int port = FreePort();
+        string endpoint = $"http://127.0.0.1:{port}/v1/metrics";
+        using FakeCollector collector = new(port, _ => (401, "{\"error\":\"unauthorized\"}"));
+        using Rig rig = BuildRig(endpoint, secrets: []);
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+
+        string line = Assert.Single(failures);
+        Assert.Contains("unauthorized", line);
     }
 
     [Fact]
@@ -475,22 +667,26 @@ public class ExportFailureLogTests
 
     private static Rig BuildRig(
         string endpoint, int timeoutMs = 5000, OtlpExportProtocol protocol = OtlpExportProtocol.HttpProtobuf,
-        int? maxResponseSizeBytes = null, string headerValue = SecretHeaderValue)
+        int? maxResponseSizeBytes = null, string headerValue = SecretHeaderValue,
+        IReadOnlyCollection<string>? secrets = null, string headerName = "Authorization")
     {
-        ExportFailureLog log = new([headerValue], new Uri(endpoint));
+        ExportFailureLog log = new(secrets ?? [headerValue], new Uri(endpoint));
         (MeterProvider provider, Meter meter) = BuildProvider(
-            endpoint, headerValue, timeoutMs, protocol, maxResponseSizeBytes);
+            endpoint, headerName, headerValue, timeoutMs, protocol, maxResponseSizeBytes);
         return new Rig(provider, log, meter);
     }
 
-    private static ForeignExporter BuildForeignExporter(string endpoint)
+    private static ForeignExporter BuildForeignExporter(
+        string endpoint, OtlpExportProtocol protocol = OtlpExportProtocol.HttpProtobuf)
     {
-        (MeterProvider provider, Meter meter) = BuildProvider(endpoint, "k=v", 2000, OtlpExportProtocol.HttpProtobuf, null);
+        (MeterProvider provider, Meter meter) = BuildProvider(
+            endpoint, "x-scope-orgid", "othermod", 2000, protocol, null);
         return new ForeignExporter(provider, meter);
     }
 
     private static (MeterProvider Provider, Meter Meter) BuildProvider(
-        string endpoint, string headerValue, int timeoutMs, OtlpExportProtocol protocol, int? maxResponseSizeBytes)
+        string endpoint, string headerName, string headerValue, int timeoutMs, OtlpExportProtocol protocol,
+        int? maxResponseSizeBytes)
     {
         Meter meter = new($"Pulse.Otlp.Tests.{Guid.NewGuid()}");
         meter.CreateCounter<long>("test_counter").Add(1);
@@ -501,7 +697,12 @@ public class ExportFailureLogTests
             {
                 exporter.Endpoint = new Uri(endpoint);
                 exporter.Protocol = protocol;
-                exporter.Headers = $"Authorization={headerValue}";
+
+                // Through RenderHeaders, the way PulseOtlpModSystem actually builds this string,
+                // not a raw "{headerName}={headerValue}": the padding and escaping tests below
+                // depend on going through the real encoding path rather than one of this test's
+                // own shortcuts.
+                exporter.Headers = OtlpOptions.RenderHeaders(new Dictionary<string, string> { [headerName] = headerValue });
                 exporter.TimeoutMilliseconds = timeoutMs;
                 if (maxResponseSizeBytes.HasValue)
                 {

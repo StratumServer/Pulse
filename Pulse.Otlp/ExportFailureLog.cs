@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Tracing;
 using System.Globalization;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Pulse.Otlp;
@@ -22,10 +23,12 @@ internal sealed partial class ExportFailureLog(IReadOnlyCollection<string> secre
 {
     private const string ExporterSource = "OpenTelemetry-Exporter-OpenTelemetryProtocol";
     private const int ExportSucceeded = 21;
+    private const int ResponseTooLarge = 40;
     private const long RepeatMs = 10 * 60_000;
     private const int MaxKinds = 32;
     private const int ClipLength = 200;
     private const string Redacted = "***";
+    private const string GrpcExportPath = "/opentelemetry.proto.collector.metrics.v1.MetricsService/Export";
 
     // Field initialisers, not constructor assignments: the base EventListener constructor can
     // call OnEventSourceCreated, and through it EnableEvents, before any constructor body of ours
@@ -47,6 +50,16 @@ internal sealed partial class ExportFailureLog(IReadOnlyCollection<string> secre
     /// EventSource redacts every endpoint payload to, so it can be compared against one directly.
     /// </summary>
     private readonly string ownEndpoint = endpoint.GetComponents(UriComponents.SchemeAndServer | UriComponents.Path, UriFormat.UriEscaped);
+
+    /// <summary>The exact address a grpc export of Pulse's own reaches: the exporter appends
+    /// <see cref="GrpcExportPath"/> to the configured endpoint unconditionally, so equality
+    /// against this, not a prefix check against the base endpoint, is what tells Pulse's own grpc
+    /// export apart from another mod's on a base endpoint that merely starts with the same
+    /// characters (Pulse's "/pre" is a string prefix of some other mod's "/prefix" too). Recomputed
+    /// from the constructor's own <c>endpoint</c> parameter rather than read from <see
+    /// cref="ownEndpoint"/>: a field initialiser cannot reference another instance field.</summary>
+    private readonly string ownGrpcExportPath =
+        endpoint.GetComponents(UriComponents.SchemeAndServer | UriComponents.Path, UriFormat.UriEscaped).TrimEnd('/') + GrpcExportPath;
 
     /// <summary>Hands every queued line to the matching callback, oldest first: <paramref
     /// name="onFailure"/> for a failure line, <paramref name="onSuccess"/> for the "succeeded"
@@ -108,10 +121,12 @@ internal sealed partial class ExportFailureLog(IReadOnlyCollection<string> secre
 
         string cause = Cause(eventData);
 
-        // gRPC's Detail text can change on every export (a request id, say), and a response's own
-        // declared size (event 40) varies with the response itself; keying on the text before it
-        // is what keeps either from earning a line, and a tracked kind, per export forever.
-        string key = eventData.EventId + " " + TrimDetail(cause);
+        // Two shapes whose text would otherwise change on every single export: gRPC's Detail
+        // field (a request id, say) is trimmed off the key by TrimDetail, and event 40's declared
+        // response size, which is not part of Cause's text at all, is replaced outright rather
+        // than trimmed. Either one earning a line, and a tracked kind, per export would defeat the
+        // rate limit and the cap alike.
+        string key = eventData.EventId + " " + KeyCause(eventData, cause);
         long now = Environment.TickCount64;
         if (ShouldSkip(key, now))
         {
@@ -174,8 +189,12 @@ internal sealed partial class ExportFailureLog(IReadOnlyCollection<string> secre
 
     private void EnqueueFailure(string endpoint, EventWrittenEventArgs eventData, string cause)
     {
+        // Redact first, clip second, for both: clipping first could cut a secret in half and
+        // leave the surviving half unredacted. The cause needs this too, not only the response
+        // body, since a gRPC Detail field or an HTTP reason phrase is exactly as backend-controlled
+        // and exactly as unbounded.
         string endpointText = Clip(endpoint);
-        string safeCause = Redact(cause);
+        string safeCause = Clip(Redact(cause));
         string response = Payload(eventData, "response") is { Length: > 0 } body
             ? $" The backend answered: {Clip(Redact(body))}"
             : string.Empty;
@@ -187,13 +206,12 @@ internal sealed partial class ExportFailureLog(IReadOnlyCollection<string> secre
     }
 
     /// <summary>Whether <paramref name="candidate"/>, an endpoint or rawCollectorUri payload, is
-    /// Pulse's own export. Exact match for http/protobuf, where the configured endpoint is the
-    /// whole address; for grpc the exporter appends its own service path, so the base endpoint can
-    /// only ever be a prefix.</summary>
-    private bool IsOwnExport(string candidate) =>
-        candidate == ownEndpoint
-        || (candidate.StartsWith(ownEndpoint, StringComparison.Ordinal)
-            && candidate.EndsWith("MetricsService/Export", StringComparison.Ordinal));
+    /// Pulse's own export: an exact match against either the http/protobuf address or the one
+    /// exact address a grpc export reaches. Two exporters sending to the very same collector URL
+    /// are inherently indistinguishable from here, a known and accepted limit; everything short of
+    /// that exact collision is exact matching on purpose, not a prefix check, so a base endpoint
+    /// that is merely a string prefix of another mod's never passes.</summary>
+    private bool IsOwnExport(string candidate) => candidate == ownEndpoint || candidate == ownGrpcExportPath;
 
     /// <summary>The first line of whichever payload says why: the exception text or the gRPC
     /// status, with the exception type stripped off the front of it.</summary>
@@ -221,6 +239,11 @@ internal sealed partial class ExportFailureLog(IReadOnlyCollection<string> secre
         return message.Split('\n')[0].Trim().TrimEnd('.');
     }
 
+    /// <summary>The text a failure's rate-limit and cap key is built from: stable across repeats
+    /// of the same kind, even where the displayed cause is not.</summary>
+    private static string KeyCause(EventWrittenEventArgs eventData, string cause) =>
+        eventData.EventId == ResponseTooLarge ? "response discarded for its size" : TrimDetail(cause);
+
     private static string TrimDetail(string cause)
     {
         int detail = cause.IndexOf(", Detail=", StringComparison.Ordinal);
@@ -233,19 +256,23 @@ internal sealed partial class ExportFailureLog(IReadOnlyCollection<string> secre
         return i >= 0 ? e.Payload![i] as string : null;
     }
 
-    /// <summary>Blanks every configured header value out of collector-controlled text, plus
-    /// anything shaped like a bearer or basic credential regardless of whether it matches one of
-    /// those values verbatim. The response body and the gRPC Detail field are the backend's own
-    /// words, not the SDK's, so a backend that echoes what it was sent, by accident or not, must
-    /// not be able to put a header value in the server log.</summary>
+    /// <summary>Blanks every configured header value, and the credential half of it where the
+    /// value has a scheme, out of collector-controlled text, plus anything shaped like a bearer or
+    /// basic credential regardless of whether it matches one of those values verbatim. The
+    /// response body and the gRPC Detail field are the backend's own words, not the SDK's, so a
+    /// backend that echoes what it was sent, in whole, in part, or JSON-escaped, by accident or
+    /// not, must not be able to put a header value in the server log. This is not exhaustive: a
+    /// backend transforming a secret some other way (hashing it, say, or splitting it across two
+    /// fields) could still get it into the log, which is why the log itself stays worth treating as
+    /// sensitive before sharing it.</summary>
     private string Redact(string text)
     {
         string result = text;
         foreach (string secret in secrets)
         {
-            if (secret.Length > 0)
+            foreach (string target in RedactionTargets(secret))
             {
-                result = result.Replace(secret, Redacted, StringComparison.Ordinal);
+                result = result.Replace(target, Redacted, StringComparison.Ordinal);
             }
         }
 
@@ -261,10 +288,62 @@ internal sealed partial class ExportFailureLog(IReadOnlyCollection<string> secre
         return result;
     }
 
-    /// <summary>"Bearer " or "Basic " followed by a token, matched as plain non-whitespace: cheap,
-    /// and every real bearer or basic credential is exactly that shape. csharpsquid:S6444 requires
-    /// an explicit timeout on every regex match.</summary>
-    [GeneratedRegex("(Bearer|Basic) \\S+", RegexOptions.None, matchTimeoutMilliseconds: 1000)]
+    /// <summary>Every string worth searching for in collector-controlled text on account of one
+    /// configured header value: the value itself, trimmed the way the exporter trims it before
+    /// sending (the SDK trims a header value; this reads the raw configured one), the credential
+    /// alone when the value has an "scheme credential" shape (an echo can drop the scheme), and the
+    /// JSON-escaped form of each, since a backend's own JSON error body is exactly where an echo
+    /// shows up.</summary>
+    private static IEnumerable<string> RedactionTargets(string configuredValue)
+    {
+        string trimmed = configuredValue.Trim();
+        if (trimmed.Length == 0)
+        {
+            yield break;
+        }
+
+        foreach (string variant in EscapedForms(trimmed))
+        {
+            yield return variant;
+        }
+
+        int space = trimmed.IndexOf(' ');
+        if (space > 0 && space < trimmed.Length - 1)
+        {
+            foreach (string variant in EscapedForms(trimmed[(space + 1)..]))
+            {
+                yield return variant;
+            }
+        }
+    }
+
+    /// <summary>A value as configured, plus the same value the way it can come back JSON-encoded:
+    /// System.Text.Json's own escaping, and a literal "/" written as "\/", which System.Text.Json
+    /// does not produce but other JSON encoders (PHP's, notably) do by default.</summary>
+    private static IEnumerable<string> EscapedForms(string value)
+    {
+        yield return value;
+
+        string jsonEscaped = JsonEncodedText.Encode(value).ToString();
+        if (jsonEscaped != value)
+        {
+            yield return jsonEscaped;
+        }
+
+        string slashEscaped = value.Replace("/", "\\/", StringComparison.Ordinal);
+        if (slashEscaped != value)
+        {
+            yield return slashEscaped;
+        }
+    }
+
+    /// <summary>"Bearer" or "Basic", either case, followed by a token68 credential (RFC 7235):
+    /// letters, digits, "-._~+/", optionally padded with "=". Restricted to that shape, rather than
+    /// to plain non-whitespace, so a credential embedded in a compact JSON body (immediately
+    /// followed by '"' or '}', neither of which is token68) is what gets redacted, not everything
+    /// up to the next space. csharpsquid:S6444 requires an explicit timeout on every regex match.
+    /// </summary>
+    [GeneratedRegex("(Bearer|Basic) [A-Za-z0-9\\-._~+/]+=*", RegexOptions.IgnoreCase, matchTimeoutMilliseconds: 1000)]
     private static partial Regex CredentialScheme();
 
     /// <summary>First line only, and no longer than <see cref="ClipLength"/>: a backend's answer

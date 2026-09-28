@@ -82,6 +82,14 @@ public static partial class OtlpOptions
         return true;
     }
 
+    /// <summary>The header values ExportFailureLog should treat as secrets: null-safe against
+    /// both a null Headers block and a null value inside it, either of which Newtonsoft accepts
+    /// ("Headers": null, or an entry with a null value) despite the property's own non-nullable C#
+    /// type. Blank values are dropped too, the same as RenderHeaders already drops a blank
+    /// key.</summary>
+    public static string[] SecretValues(IDictionary<string, string>? headers) =>
+        headers?.Values.Where(value => !string.IsNullOrEmpty(value)).ToArray() ?? [];
+
     /// <summary>Renders the header dictionary into the single string the exporter parses, which is
     /// the specification's "k=v,k2=v2" with percent-encoded values.</summary>
     /// <remarks>The exporter unescapes the whole string before splitting it, so encoding is not

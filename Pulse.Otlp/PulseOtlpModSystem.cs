@@ -123,7 +123,7 @@ public sealed class PulseOtlpModSystem : ModSystem
         //
         // Constructed before the provider that creates the exporter, so the listener is already
         // attached to the exporter's EventSource by the time the first export can happen.
-        exportFailureLog = new ExportFailureLog(config.Headers.Values, endpoint);
+        exportFailureLog = new ExportFailureLog(OtlpOptions.SecretValues(config.Headers), endpoint);
 
         provider = Sdk.CreateMeterProviderBuilder()
             .AddMeter(meters)

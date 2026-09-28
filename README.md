@@ -486,14 +486,21 @@ backend; check Endpoint and Headers in pulse-otlp.json. This is logged again at 
 minutes.
 ```
 
-A matching line reports the first successful export after a failure, so recovery shows up too.
-Neither line ever carries a header value: each configured value, and anything shaped like a bearer
-or basic credential, is redacted out before a line is queued, whatever the backend echoes back. The
-backend's answer, once redacted, is clipped to 200 characters. A malformed `Endpoint` is still the
-one case Pulse checks itself, because that one would throw while the exporter is being built: it
-logs an error and registers nothing. For anything these lines do not explain, the SDK's own, far
-more verbose self-diagnostics turn on by dropping an `OTEL_DIAGNOSTICS.json` file next to the
-server.
+A matching line reports the first successful export after a failure, so recovery shows up too, and
+a healthy server that has never failed still logs exactly one such line, at Notification rather
+than Warning, right after its first delivery.
+
+Neither line is meant to carry a header value. Before a line is queued, each configured value, the
+credential half of it when the value has a "scheme credential" shape (a Bearer token echoed without
+its "Bearer ", say), and the JSON-escaped form of both, are redacted out of the backend's answer and
+out of a gRPC failure's status detail; anything else shaped like a bearer or basic credential is
+redacted too, whether or not it matches a configured value. This is not exhaustive: a backend that
+transforms a secret some other way, hashing it or splitting it across two fields, could still get it
+into the log, so treat the log itself as sensitive before sharing it regardless. The backend's
+answer, once redacted, is clipped to 200 characters. A malformed `Endpoint` is still the one case
+Pulse checks itself, because that one would throw while the exporter is being built: it logs an
+error and registers nothing. For anything these lines do not explain, the SDK's own, far more
+verbose self-diagnostics turn on by dropping an `OTEL_DIAGNOSTICS.json` file next to the server.
 
 ## Building and testing
 

@@ -335,8 +335,20 @@ mutate Pulse.Otlp/ExportFailureLog.cs \
     "otlp failure log: every exporter in the process is read as Pulse's own"
 
 mutate Pulse.Otlp/ExportFailureLog.cs \
-    's/result\.Replace\(secret, Redacted, StringComparison\.Ordinal\)/result/' \
+    's/result\.Replace\(target, Redacted, StringComparison\.Ordinal\)/result/' \
     "otlp failure log: a configured header value survives into the log verbatim"
+
+mutate Pulse.Otlp/ExportFailureLog.cs \
+    's/candidate == ownGrpcExportPath/false/' \
+    "otlp failure log: a real grpc export of Pulse's own is never recognised as its own"
+
+mutate Pulse.Otlp/ExportFailureLog.cs \
+    's/space > 0 && space < trimmed\.Length - 1/false/' \
+    "otlp failure log: a credential echoed back without its scheme is never redacted"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/headers\?\.Values\.Where/headers.Values.Where/' \
+    "otlp: a null Headers block throws instead of exporting with no secrets tracked"
 
 # Every mutation is reverted in the source, but the last one of each block was built before it
 # was, so the binaries on disk still carry it. Leave them matching the tree: anything running

@@ -1,12 +1,13 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 
 namespace Pulse.Otlp.Tests;
 
 /// <summary>Just enough of an OTLP/gRPC collector to answer one export with a non-OK gRPC status:
-/// settings, no data back, then a trailer naming status 16 (UNAUTHENTICATED). Adapted from
-/// Pulse.Otlp.Scenarios/FakeGrpcCollector.cs, which answers OK instead; see that file's remarks
-/// for why this is hand-rolled rather than a real HTTP/2 server.</summary>
+/// settings, no data back, then a trailer naming status 16 (UNAUTHENTICATED) and the given detail
+/// text. Adapted from Pulse.Otlp.Scenarios/FakeGrpcCollector.cs, which answers OK instead; see that
+/// file's remarks for why this is hand-rolled rather than a real HTTP/2 server.</summary>
 internal sealed class FakeGrpcFailureCollector : IDisposable
 {
     private const int PrefaceLength = 24;
@@ -29,20 +30,21 @@ internal sealed class FakeGrpcFailureCollector : IDisposable
 
     private static readonly byte[] EmptyResponseMessage = [0, 0, 0, 0, 0];
 
-    /// <summary>"grpc-status: 16" and "grpc-message: invalid token" as trailer literals with new
-    /// names. 16 is UNAUTHENTICATED; a real status is what proves the exporter's own status
-    /// parsing, rather than only its network error handling.</summary>
-    private static readonly byte[] UnauthenticatedTrailer =
-    [
-        0x00, 0x0b, .. "grpc-status"u8, 0x02, .. "16"u8,
-        0x00, 0x0c, .. "grpc-message"u8, 0x0d, .. "invalid token"u8,
-    ];
-
     private readonly TcpListener listener;
     private readonly CancellationTokenSource closing = new();
 
-    public FakeGrpcFailureCollector(int port)
+    /// <summary>"grpc-status: 16" and "grpc-message: {detail}" as trailer literals with new names.
+    /// 16 is UNAUTHENTICATED; a real status is what proves the exporter's own status parsing,
+    /// rather than only its network error handling.</summary>
+    private readonly byte[] unauthenticatedTrailer;
+
+    public FakeGrpcFailureCollector(int port, string detail = "invalid token")
     {
+        unauthenticatedTrailer =
+        [
+            0x00, 0x0b, .. "grpc-status"u8, 0x02, .. "16"u8,
+            0x00, 0x0c, .. "grpc-message"u8, .. HpackLiteralString(detail),
+        ];
         listener = new TcpListener(IPAddress.Loopback, port);
         listener.Start();
         Task.Run(Accept);
@@ -74,7 +76,7 @@ internal sealed class FakeGrpcFailureCollector : IDisposable
         }
     }
 
-    private static async Task Serve(TcpClient client, CancellationToken token)
+    private async Task Serve(TcpClient client, CancellationToken token)
     {
         using (client)
         {
@@ -101,7 +103,7 @@ internal sealed class FakeGrpcFailureCollector : IDisposable
         }
     }
 
-    private static async Task Pump(NetworkStream stream, CancellationToken token)
+    private async Task Pump(NetworkStream stream, CancellationToken token)
     {
         byte[] header = new byte[9];
         while (!token.IsCancellationRequested)
@@ -137,13 +139,13 @@ internal sealed class FakeGrpcFailureCollector : IDisposable
         }
     }
 
-    private static async Task Respond(NetworkStream stream, int streamId, CancellationToken token)
+    private async Task Respond(NetworkStream stream, int streamId, CancellationToken token)
     {
         byte[] response =
         [
             .. Frame(Headers, EndHeaders, streamId, ResponseHeaders),
             .. Frame(Data, 0, streamId, EmptyResponseMessage),
-            .. Frame(Headers, EndHeaders | EndStream, streamId, UnauthenticatedTrailer),
+            .. Frame(Headers, EndHeaders | EndStream, streamId, unauthenticatedTrailer),
         ];
 
         await stream.WriteAsync(response, token);
@@ -158,4 +160,34 @@ internal sealed class FakeGrpcFailureCollector : IDisposable
         (byte)(streamId >> 24), (byte)(streamId >> 16), (byte)(streamId >> 8), (byte)streamId,
         .. payload,
     ];
+
+    /// <summary>An HPACK literal string, not Huffman-coded (high bit of the length clear): a
+    /// 7-bit-prefixed integer length (RFC 7541 5.1, continuation bytes for anything 127 or over)
+    /// followed by the bytes themselves. The fixed single length byte the OK-status collector gets
+    /// away with only works up to 126 bytes; a gRPC Detail field is not bounded to that.</summary>
+    private static byte[] HpackLiteralString(string value)
+    {
+        byte[] bytes = Encoding.ASCII.GetBytes(value);
+        return [.. HpackPrefixedInteger(bytes.Length), .. bytes];
+    }
+
+    private static byte[] HpackPrefixedInteger(int value)
+    {
+        const int prefixMax = 127; // 2^7 - 1: the length byte's high bit is the Huffman flag.
+        if (value < prefixMax)
+        {
+            return [(byte)value];
+        }
+
+        List<byte> encoded = [(byte)prefixMax];
+        int remaining = value - prefixMax;
+        while (remaining >= 128)
+        {
+            encoded.Add((byte)((remaining % 128) | 0x80));
+            remaining /= 128;
+        }
+
+        encoded.Add((byte)remaining);
+        return [.. encoded];
+    }
 }

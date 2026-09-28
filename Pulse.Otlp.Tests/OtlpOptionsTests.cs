@@ -85,6 +85,24 @@ public class OtlpOptionsTests
         Assert.Equal(string.Empty, OtlpOptions.RenderHeaders(new Dictionary<string, string>()));
     }
 
+    /// <summary>Newtonsoft accepts "Headers": null, and a null value for any one key inside it,
+    /// despite PulseOtlpConfig.Headers's own non-nullable C# type; a null value used to make
+    /// ExportFailureLog.Redact throw at secret.Length, silently losing every failure line for the
+    /// rest of the session.</summary>
+    [Fact]
+    public void SecretValues_IsNullSafe_ForANullHeadersDictionaryOrANullOrEmptyValueWithinIt()
+    {
+        Assert.Empty(OtlpOptions.SecretValues(null));
+
+        Dictionary<string, string> headers = new()
+        {
+            ["x-api-key"] = null!,
+            ["x-empty"] = string.Empty,
+            ["Authorization"] = "Bearer abc",
+        };
+        Assert.Equal(["Bearer abc"], OtlpOptions.SecretValues(headers));
+    }
+
     [Fact]
     public void RenderHeaders_Joins_PairsWithCommas()
     {
