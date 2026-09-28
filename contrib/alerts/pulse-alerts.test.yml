@@ -126,16 +126,22 @@ tests:
               summary: "p99 tick time over 3x budget for 5m."
               description: "The slowest 1% of ticks have been running past three times the tick budget for 5 minutes; look for worldgen, an autosave, or a mod spiking before this turns into a sustained TPS drop."
 
-  # --- PulseEngineWarning (kind!=memory -> warning, kind=memory -> critical, no for:) --------
-  # overload jumps once at minute 10 and holds; memory jumps once at minute 20 and holds. At
-  # minute 15 only overload's jump is inside the trailing 10m increase() window; at minute 25
-  # only memory's is, since overload's jump has aged out of it.
+  # --- PulseEngineWarning (kind!~memory|physics_skip -> warning, kind=memory -> critical, no
+  # for:) ---------------------------------------------------------------------------------------
+  # overload jumps once at minute 10 and holds; memory jumps once at minute 20 and holds;
+  # physics_skip jumps at the same minute as overload, every boot's spawn-chunk load being exactly
+  # the kind of single stray occurrence this alert must never page on. At minute 15 only overload's
+  # jump is inside the trailing 10m increase() window (physics_skip's own jump produces no alert of
+  # its own, proving the exclusion); at minute 25 only memory's is, since overload's and
+  # physics_skip's jumps have aged out of it.
   - interval: 1m
     input_series:
       - series: 'pulse_engine_warnings_total{kind="overload"}'
         values: '0x10 1x15'
       - series: 'pulse_engine_warnings_total{kind="memory"}'
         values: '0x20 1x5'
+      - series: 'pulse_engine_warnings_total{kind="physics_skip"}'
+        values: '0x10 1x15'
     alert_rule_test:
       - eval_time: 5m
         alertname: PulseEngineWarning

@@ -174,7 +174,10 @@ The metric families it serves:
 - `pulse_engine_warnings_total{kind}` (counter): the engine's own health warnings, recognised
   by the text it logs. `overload` is a tick past 500 ms, `memory` is crossing 90% of
   `DieAboveMemoryUsageMb`, `suspend_timeout` is a server suspend that gave up waiting for a
-  thread, and `autosave_io` is an autosave arriving while the previous one is still writing.
+  thread, `autosave_io` is an autosave arriving while the previous one is still writing, and
+  `physics_skip` is a tick over 400 ms making the physics simulation drop ticks to catch up.
+  Every busy boot logs a few `physics_skip` warnings while spawn chunks load, so a nonzero count
+  right after startup is normal, not a sign of trouble.
 - `pulse_server_uptime_seconds` (gauge): seconds the server has been ticking. This is the
   engine's own unpaused clock, so it stops during a save and is not process uptime.
 - `pulse_entities_by_code{code}` (gauge): loaded entities by entity code, the ten most numerous
@@ -374,8 +377,11 @@ it is a no-op unless that variable is set, because spawning four thousand entiti
 over, is slow.
 
 One visible side effect: the engine logs "Over 400ms tick. Skipping N physics ticks" only when its
-profiler is on. If your server is already overloaded you will see that warning appear during
-bursts. It is the engine reporting a real condition it otherwise keeps to itself.
+profiler is on, which Pulse itself turns on for one tick at every startup regardless of whether
+attribution is enabled (see `PrimeFrameProfiler`), and again for every burst once it is. If your
+server is already overloaded you will see that warning appear during bursts. It is the engine
+reporting a real condition it otherwise keeps to itself, and since 0.2.0 Pulse also counts it under
+`pulse_engine_warnings_total{kind="physics_skip"}`.
 
 ### What it cannot see
 

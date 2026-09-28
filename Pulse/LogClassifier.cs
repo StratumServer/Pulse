@@ -12,19 +12,22 @@ public static class LogClassifier
     public static readonly IReadOnlyList<string> Levels = ["warning", "error", "fatal"];
 
     /// <summary>Kinds counted by <c>pulse_engine_warnings_total</c>, in exposition order.</summary>
-    public static readonly IReadOnlyList<string> Kinds = ["overload", "memory", "suspend_timeout", "autosave_io"];
+    public static readonly IReadOnlyList<string> Kinds =
+        ["overload", "memory", "suspend_timeout", "autosave_io", "physics_skip"];
 
-    /// <summary>The engine's own warning strings at 1.22.7, each matched on the stable head of the
-    /// sentence. EntryAdded hands over the format string before argument substitution, so the {0}
-    /// in the overload warning and the megabyte figure in the memory one never reach this table.
-    /// Verified by decompiling ServerMain.Process, ServerMain.Suspend,
-    /// ServerSystemMonitor.OnEvery60sec and ServerSystemAutoSaveGame.doAutoSave.</summary>
+    /// <summary>The engine's own warning strings, byte-identical at 1.22.3 and 1.22.7, each matched
+    /// on the stable head of the sentence. EntryAdded hands over the format string before argument
+    /// substitution, so the {0} in the overload warning, the megabyte figure in the memory one and
+    /// the tick count in the physics skip one never reach this table. Verified by decompiling
+    /// ServerMain.Process, ServerMain.Suspend, ServerSystemMonitor.OnEvery60sec,
+    /// ServerSystemAutoSaveGame.doAutoSave and PhysicsManager.ServerTick.</summary>
     private static readonly (string Prefix, string Kind)[] EngineWarnings =
     [
         ("Server overloaded. A tick took", "overload"),
         ("The server is currently using more than 90% of its maximum allowed memory", "memory"),
         ("Server suspend requested, but reached max wait time", "suspend_timeout"),
         ("Call to autosave, but server is already saving", "autosave_io"),
+        ("Over 400ms tick. Skipping", "physics_skip"),
     ];
 
     /// <summary>The severity label for an entry Pulse counts, or null for the levels it ignores

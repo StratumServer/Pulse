@@ -170,7 +170,7 @@ public class MetricsEndpointScenarios : AtlasScenarioBase
             Assert.Contains($"pulse_log_entries_total{{level=\"{level}\"}} ", body);
         }
 
-        foreach (string kind in new[] { "overload", "memory", "suspend_timeout", "autosave_io" })
+        foreach (string kind in new[] { "overload", "memory", "suspend_timeout", "autosave_io", "physics_skip" })
         {
             Assert.Contains($"pulse_engine_warnings_total{{kind=\"{kind}\"}} ", body);
         }

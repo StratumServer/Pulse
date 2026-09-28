@@ -351,7 +351,7 @@
     },
     {
       "type": "timeseries", "title": "Engine warnings, 5 minute window", "id": 24,
-      "description": "The engine's own health warnings, recognised from the text it logs. overload is a tick past 500 ms, memory is crossing 90% of DieAboveMemoryUsageMb, suspend_timeout is a suspend that gave up waiting for a thread, autosave_io is an autosave arriving while the previous one is still writing.",
+      "description": "The engine's own health warnings, recognised from the text it logs. overload is a tick past 500 ms, memory is crossing 90% of DieAboveMemoryUsageMb, suspend_timeout is a suspend that gave up waiting for a thread, autosave_io is an autosave arriving while the previous one is still writing, physics_skip is a tick over 400 ms making the physics simulation drop ticks to catch up. Every busy boot logs a few physics_skip warnings while spawn chunks load, so seeing it nonzero right after startup is normal, not a problem.",
       "gridPos": { "x": 12, "y": 68, "w": 6, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" } }, "overrides": [] },

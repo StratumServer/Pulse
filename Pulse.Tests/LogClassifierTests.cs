@@ -25,8 +25,9 @@ public class LogClassifierTests
         Assert.Null(LogClassifier.Level(type));
     }
 
-    /// <summary>The engine's own 1.22.7 strings, verbatim from the decompiled call sites, as
-    /// EntryAdded hands them over: the format string, before argument substitution.</summary>
+    /// <summary>The engine's own strings, byte-identical at 1.22.3 and 1.22.7, verbatim from the
+    /// decompiled call sites, as EntryAdded hands them over: the format string, before argument
+    /// substitution.</summary>
     [Theory]
     [InlineData("Server overloaded. A tick took {0}ms to complete.", "overload")]
     [InlineData(
@@ -38,9 +39,22 @@ public class LogClassifierTests
     [InlineData(
         "Call to autosave, but server is already saving. May indicate a disk i/o bottleneck. Reduce autosave interval or improve file i/o. Will ignore this autosave call.",
         "autosave_io")]
+    [InlineData("Over 400ms tick. Skipping {0} physics ticks.", "physics_skip")]
     public void EngineWarning_Matches_EveryEngineStringItTracks(string format, string expected)
     {
         Assert.Equal(expected, LogClassifier.EngineWarning(EnumLogType.Warning, format));
+    }
+
+    /// <summary>PhysicsManager.ServerTick substitutes a different N every time it fires (one per
+    /// boot during the spawn-chunk load, more if physics keeps falling behind), so the match has to
+    /// hold across every N, not just the unsubstituted format string above.</summary>
+    [Theory]
+    [InlineData("Over 400ms tick. Skipping 1 physics ticks.")]
+    [InlineData("Over 400ms tick. Skipping 12 physics ticks.")]
+    [InlineData("Over 400ms tick. Skipping 247 physics ticks.")]
+    public void EngineWarning_Matches_PhysicsSkip_WhateverTheSkippedCountIs(string message)
+    {
+        Assert.Equal("physics_skip", LogClassifier.EngineWarning(EnumLogType.Warning, message));
     }
 
     [Fact]
@@ -52,6 +66,7 @@ public class LogClassifierTests
             LogClassifier.EngineWarning(EnumLogType.Warning, "The server is currently using more than 90% of its maximum allowed memory.")!,
             LogClassifier.EngineWarning(EnumLogType.Warning, "Server suspend requested, but reached max wait time.")!,
             LogClassifier.EngineWarning(EnumLogType.Warning, "Call to autosave, but server is already saving.")!,
+            LogClassifier.EngineWarning(EnumLogType.Warning, "Over 400ms tick. Skipping {0} physics ticks.")!,
         ];
 
         Assert.Equal(LogClassifier.Kinds, matched);

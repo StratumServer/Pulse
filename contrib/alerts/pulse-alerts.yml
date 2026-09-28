@@ -71,9 +71,17 @@ groups:
       # increase() > 0 over a 10m window already is the debounce; a single stray warning ten
       # minutes ago still counts, which is the point. Same alert name for both severities, kind
       # excluded from the warning leg so memory doesn't double-fire under its own critical rule
-      # below.
+      # below. physics_skip is excluded too: PhysicsManager logs it on every busy boot during the
+      # spawn-chunk load, and again on any later tick the engine happens to be frame-profiling
+      # (Pulse primes that profiler for one tick at startup, see AttributionMetrics.Server.cs), so
+      # a single occurrence is routine, not exceptional, the way a suspend timeout or an autosave
+      # collision is. A sustained run of them still needs no rule of its own: 400ms of accumulated
+      # physics lag is already past PulseTickOverrunsHigh's 3x-budget threshold (about 100ms at the
+      # default 30 TPS budget), so anything that keeps triggering physics_skip is already sustained
+      # tick overrun that PulseTickRateLow, PulseTickSaturationHigh and PulseTickOverrunsHigh watch
+      # continuously; a dedicated rule here would just fire alongside them, not catch anything new.
       - alert: PulseEngineWarning
-        expr: increase(pulse_engine_warnings_total{kind!="memory"}[10m]) > 0
+        expr: increase(pulse_engine_warnings_total{kind!~"memory|physics_skip"}[10m]) > 0
         labels:
           severity: warning
         annotations:

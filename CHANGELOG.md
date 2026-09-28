@@ -99,6 +99,13 @@ first.
 - A wire-level test for the grpc protocol: a scenario boots the server against a fake gRPC
   collector and reads the export off the socket, so both protocols `pulse-otlp.json` accepts are
   now proven end to end, not just http/protobuf.
+- `pulse_engine_warnings_total{kind="physics_skip"}`, a fifth engine warning kind counting
+  `PhysicsManager`'s own "Over 400ms tick. Skipping N physics ticks." line, logged when a tick ran
+  so long that the physics simulation drops ticks to catch up, seeded at zero like the other four.
+  Every busy boot logs a few of these while spawn chunks load, so a nonzero count right after
+  startup is expected, not a problem. `contrib/alerts/pulse-alerts.yml`'s `PulseEngineWarning` rule
+  excludes it from the immediate any-occurrence page for that reason; a sustained run of them is
+  already caught by the existing tick rate and tick overrun rules, so it gets no alert of its own.
 
 ### Changed
 

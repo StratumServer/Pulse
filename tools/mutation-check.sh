@@ -123,6 +123,10 @@ mutate Pulse/LogClassifier.cs \
     's/\("Server suspend requested, but reached max wait time", "suspend_timeout"\)/("Server suspend requested and reached max wait time", "suspend_timeout")/' \
     "classifier: an engine warning prefix drifts from the engine string"
 
+mutate Pulse/LogClassifier.cs \
+    's/\("Over 400ms tick\. Skipping", "physics_skip"\)/("Over 400ms tick, Skipping", "physics_skip")/' \
+    "classifier: the physics skip prefix drifts from the engine string"
+
 mutate Pulse/MetricsHttpServer.cs \
     's/now - lastErrorLogMs < ErrorLogIntervalMs/false/' \
     "http server: error log rate limit never suppresses a repeat failure"

@@ -95,7 +95,7 @@ The public API exposes exactly two counters, `sapi.Server.TotalSentBytes` and `T
 
 ### Log-derived health counters
 
-`ILogger.EntryAdded` is public API and is how the engine's own monitor system watches itself. Counting entries by severity gives error and warning rates; string-matching four engine messages gives high-signal counters that nothing else exposes: the 500 ms overload warning, the two memory warnings near `DieAboveMemoryUsageMb`, the suspend timeout ("possibly deadlocked"), and the autosave disk bottleneck warning. Temporalog has run this exact approach in production for two years.
+`ILogger.EntryAdded` is public API and is how the engine's own monitor system watches itself. Counting entries by severity gives error and warning rates; string-matching five engine messages gives high-signal counters that nothing else exposes: the 500 ms overload warning, the two memory warnings near `DieAboveMemoryUsageMb`, the suspend timeout ("possibly deadlocked"), the autosave disk bottleneck warning, and (since 0.2.0) `PhysicsManager`'s own 400 ms physics-skip warning. Temporalog has run this exact approach in production for two years.
 
 ### Uptime
 
