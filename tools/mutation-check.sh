@@ -306,7 +306,7 @@ mutate Pulse/ConfigUpgrade.cs \
     "config upgrade: a block duplicated under two spellings merges to nothing, so a field only one spelling set is reported missing and rewritten over"
 
 mutate Pulse/ConfigUpgrade.cs \
-    's/entry\.Value is JsonObject \|\| configByKey\[entry\.Key\]\.Count\(\) > 1/false/' \
+    's/configValue is JsonObject \|\| configByKey\[key\]\.Count\(\) > 1/false/' \
     "config upgrade: a duplicated block or a dictionary's colliding keys claims a winner that does not exist"
 
 # Loading a config file has the same two ways to be wrong as upgrading one: an unreadable file is
