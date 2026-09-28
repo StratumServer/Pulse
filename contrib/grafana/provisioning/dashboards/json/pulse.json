@@ -362,7 +362,7 @@
     },
     {
       "type": "timeseries", "title": "Log entries, 5 minute window", "id": 25,
-      "description": "Lines the server logged, by severity. Fatal entries count toward the engine's DieAboveErrorCount self-shutdown, so they are worth an alert of their own.",
+      "description": "Lines the server logged, by severity. Error and fatal entries both count toward the engine's DieAboveErrorCount self-shutdown; fatal gets an alert of its own because it is the more severe level, not the only one that counts toward it.",
       "gridPos": { "x": 18, "y": 68, "w": 6, "h": 8 },
       "datasource": { "type": "prometheus", "uid": "pulse-prom" },
       "fieldConfig": { "defaults": { "unit": "short", "min": 0, "custom": { "lineWidth": 2, "fillOpacity": 0, "showPoints": "never" } }, "overrides": [] },
