@@ -112,15 +112,18 @@ groups:
           summary: "More than 5 error log entries in 10m."
           description: "More than 5 error-level log entries landed in the last 10 minutes; tail the server log for the recurring one rather than a one-off."
 
-      # Fatal entries abort the rest of the tick they land in and count toward the engine's own
-      # DieAboveErrorCount self-shutdown, so even one is worth a page, not a threshold.
+      # Fatal is the engine's own top log severity, so even one is worth a page, not a threshold
+      # like the burst rule above. It is not the only level that can shut the server down though:
+      # VintagestoryLib.dll's ServerSystemMonitor.OnEntryAdded counts error and fatal entries the
+      # same way toward the engine's own DieAboveErrorCount threshold, so a sustained stream of
+      # errors is also a path to an unplanned restart, covered above by the burst rule.
       - alert: PulseLogFatal
         expr: increase(pulse_log_entries_total{level="fatal"}[10m]) > 0
         labels:
           severity: critical
         annotations:
           summary: "Fatal log entry."
-          description: "A fatal log entry landed in the last 10 minutes; read the server log now, fatals count toward the engine's own self-shutdown threshold."
+          description: "A fatal log entry landed in the last 10 minutes; read the server log now. Error and fatal entries count the same way toward the engine's own DieAboveErrorCount self-shutdown threshold."
 
   - name: pulse-availability
     rules:
