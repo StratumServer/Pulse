@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -87,15 +88,13 @@ internal sealed class MetricsHttpServer : IDisposable
     internal int AcceptFailures => acceptFailures;
 
     /// <summary>The handler thread of every connection currently being served; read back by a
-    /// test that needs to confirm one has actually stopped, nothing in production reads it.</summary>
-    internal IReadOnlyList<Thread> ActiveHandlerThreads
+    /// test that needs to confirm one has actually stopped, nothing in production reads it. A
+    /// method rather than a property, since it copies the live list rather than exposing it.</summary>
+    internal IReadOnlyList<Thread> GetActiveHandlerThreads()
     {
-        get
+        lock (activeConnectionsGate)
         {
-            lock (activeConnectionsGate)
-            {
-                return activeConnections.Select(c => c.Thread).ToList();
-            }
+            return activeConnections.Select(c => c.Thread).ToList();
         }
     }
 
@@ -191,6 +190,9 @@ internal sealed class MetricsHttpServer : IDisposable
     // it. A connection past the cap waits in the kernel's own accept backlog instead of being
     // accepted and then dropped, since the accept thread does not call AcceptTcpClient again
     // until a slot frees up.
+    [SuppressMessage(
+        "Critical Bug", "S2222:Locks should be released",
+        Justification = "connectionSlots.Wait acquires a slot this method itself releases on every path that does not hand the connection to a handler thread; once StartHandler succeeds, ownership of that slot passes to HandleConnection, which releases it in its own finally when that thread finishes. The analysis has no way to see a release deliberately made from a different method on a different thread.")]
     private void Serve()
     {
         while (!stopping)

@@ -528,7 +528,7 @@ public class MetricsHttpServerTests
         // AcceptTcpClient or the semaphore wait.
         await Task.Delay(200);
 
-        Thread handlerThread = Assert.Single(server.ActiveHandlerThreads);
+        Thread handlerThread = Assert.Single(server.GetActiveHandlerThreads());
         Assert.True(handlerThread.IsAlive);
 
         Stopwatch watch = Stopwatch.StartNew();
