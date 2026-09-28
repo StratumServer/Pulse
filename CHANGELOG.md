@@ -199,6 +199,36 @@ first.
   is seeded with at startup, plus the handful of log lines the two mods can log between the base
   mod starting and the OTLP mod finishing its own startup. The OTLP mod now starts before the base
   mod, so its exporter is already listening when these counters are seeded.
+- An `Endpoint` with an empty user name and a password (`http://:token@collector:4318`, say)
+  crashed the whole game server at boot instead of merely leaving Pulse OTLP without export.
+  `UriBuilder` throws on that shape, for `http/protobuf` while the signal path is resolved and for
+  `grpc` a few lines later while the exporter's provider is built, and `UriFormatException` is one
+  of the few exception types the mod loader rethrows instead of absorbing. Not a regression,
+  0.1.0 crashed on this the same way; endpoint resolution and provider construction are now inside
+  one guard that catches any exception there, not only this one, logs a single error naming what
+  went wrong and never the endpoint or a header value, and leaves the game server running with
+  export off.
+- `IntervalSeconds` set several digits too high (`3000000`, say) crashed the OTLP mod on startup
+  with a stack trace instead of a clean message: converting it to milliseconds overflowed a
+  32-bit integer, and the exporter's own option validation rejected the resulting negative value
+  with an unhandled `ArgumentOutOfRangeException`. `IntervalSeconds` is now capped at 86400 (24
+  hours) before that conversion, the same way it is already floored at 5.
+- A header value containing a comma, or two header names that collide once leading and trailing
+  whitespace is trimmed off, crashed the OTLP mod on startup with a stack trace: the exporter's
+  own header parser rejects both, the comma because it cannot survive the exporter's own
+  unescape-then-split round trip whatever this mod encodes it as going in. Both are now checked
+  before a header ever reaches the exporter, and refused with one error naming the offending
+  header, never its value, instead of a stack trace with no clear cause.
+- A collector answering a failed export with a body that echoes the request target (a reverse
+  proxy's own error page, say) could put a signed-URL backend's own secret in the server log:
+  `ExportFailureLog`'s redaction only knew about the configured header values, not the query
+  parameter values or the userinfo the configured `Endpoint` itself can carry. Both are now in the
+  same redaction list, subject to the same 6 character floor and longest-first ordering a header
+  value already gets.
+- A missing `pulse-otlp.json` on a read-only `ModConfig` directory stopped the OTLP mod from
+  starting at all: writing the freshly defaulted file back to disk was not guarded the way
+  loading one already is. It now logs one error naming what happened and runs on the in-memory
+  defaults for that session, exporting off, instead of never starting.
 
 ## [0.1.0] - 2026-09-01
 

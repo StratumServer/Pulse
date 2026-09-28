@@ -16,6 +16,14 @@ public static partial class OtlpOptions
     /// outright, so a config typo cannot be allowed through.</summary>
     public const int MinimumIntervalSeconds = 5;
 
+    /// <summary>Longest export interval accepted, in seconds: 24 hours, far past any real use of a
+    /// push exporter and comfortably below the point (a little over 24.8 days) where multiplying by
+    /// 1000 would overflow a 32-bit millisecond count. A config value above this used to overflow
+    /// silently instead: 3,000,000 seconds, typed for "a lot less often", became a negative
+    /// millisecond count the reader's own validation then rejected with an unhandled
+    /// ArgumentOutOfRangeException.</summary>
+    public const int MaximumIntervalSeconds = 86_400;
+
     private const string MetricsPath = "/v1/metrics";
 
     /// <summary>Fallback service.name when the config key is blank. Distinct from the SDK's own
@@ -23,9 +31,11 @@ public static partial class OtlpOptions
     /// would recognise even before anyone edits the config.</summary>
     public const string DefaultServiceName = "vintagestory";
 
-    /// <summary>Export interval in milliseconds, floored.</summary>
+    /// <summary>Export interval in milliseconds, clamped to <see cref="MinimumIntervalSeconds"/> and
+    /// <see cref="MaximumIntervalSeconds"/> before the multiply, so neither end of a config typo can
+    /// reach the reader unvalidated or overflow on the way there.</summary>
     public static int IntervalMilliseconds(int intervalSeconds)
-        => Math.Max(MinimumIntervalSeconds, intervalSeconds) * 1000;
+        => Math.Clamp(intervalSeconds, MinimumIntervalSeconds, MaximumIntervalSeconds) * 1000;
 
     /// <summary>Resolves the service.name to export, falling back to <see
     /// cref="DefaultServiceName"/> on a blank config value rather than exporting an empty resource
@@ -97,6 +107,113 @@ public static partial class OtlpOptions
     {
         string safe = endpoint.GetComponents(UriComponents.SchemeAndServer | UriComponents.Path, UriFormat.UriEscaped);
         return endpoint.Query.Length > 0 ? safe + " (query string kept, not logged)" : safe;
+    }
+
+    /// <summary>Every secret <paramref name="endpoint"/> itself carries: its userinfo, user and
+    /// password both where both are present, every one of its query parameter values, and a
+    /// value-less query parameter's own name (a bare "?BareKeySecret777" carries the secret in
+    /// the key, since there is no value to hold it). <see cref="LoggableEndpoint"/> already keeps
+    /// all of this out of every log line Pulse writes on its own, but a 4xx body that echoes the
+    /// request target back (a reverse proxy's own error page, say) would otherwise put it
+    /// straight into the log through <see cref="ExportFailureLog"/>'s redaction of the backend's
+    /// own words, which only ever knew about the configured header values until now. Both the
+    /// escaped form (what <see cref="Uri.UserInfo"/> and <see cref="Uri.Query"/> return, and so
+    /// what a raw request target on the wire, and any echo of it, actually carries) and the
+    /// unescaped one are yielded: a real signed URL (an Azure SAS "sig", an AWS
+    /// X-Amz-Credential or X-Amz-Security-Token) is base64 and always carries '+', '/' or '='
+    /// escaped as %2B, %2F or %3D, so redacting only the unescaped form leaves the form that
+    /// actually appears on the wire unmatched. Not floored or ordered here: <see
+    /// cref="ExportFailureLog"/> applies <c>MinimumSecretLength</c> and longest-first ordering
+    /// once every source's secrets are merged into one list, the same as it already does for a
+    /// header value.</summary>
+    public static IEnumerable<string> EndpointSecrets(Uri endpoint)
+    {
+        string userInfo = endpoint.UserInfo;
+        if (userInfo.Length > 0)
+        {
+            foreach (string part in userInfo.Split(':', 2))
+            {
+                foreach (string secret in EscapedAndUnescaped(part))
+                {
+                    yield return secret;
+                }
+            }
+        }
+
+        string query = endpoint.Query;
+        if (query.Length > 1) // more than just the leading '?'
+        {
+            foreach (string pair in query[1..].Split('&'))
+            {
+                int equals = pair.IndexOf('=');
+
+                // A value-less parameter ("?BareKeySecret777") carries the secret in its own
+                // name, since there is nothing after an '=' to hold it; otherwise only the
+                // value is a candidate secret, never an ordinary parameter name like "token".
+                string candidate = equals >= 0 ? pair[(equals + 1)..] : pair;
+                foreach (string secret in EscapedAndUnescaped(candidate))
+                {
+                    yield return secret;
+                }
+            }
+        }
+    }
+
+    /// <summary>A URL-escaped candidate exactly as it sits on the wire, plus its unescaped form
+    /// when unescaping actually changes it. Yielding only one used to be the bug: a collector's
+    /// echo of the raw request target carries whichever form was actually sent.</summary>
+    private static IEnumerable<string> EscapedAndUnescaped(string candidate)
+    {
+        if (candidate.Length == 0)
+        {
+            yield break;
+        }
+
+        yield return candidate;
+
+        string unescaped = Uri.UnescapeDataString(candidate);
+        if (unescaped != candidate)
+        {
+            yield return unescaped;
+        }
+    }
+
+    /// <summary>Whether <paramref name="headers"/> is safe to hand the exporter: no value carries a
+    /// comma, and no two names collide once trimmed. Both shapes reach the exporter's own option
+    /// validation otherwise and throw there instead of here: a comma cannot survive
+    /// <see cref="RenderHeaders"/>'s round trip (see its own remarks) and corrupts the rendered
+    /// string at whatever pair follows it, and two names equal after trimming both render to the
+    /// same key, which the exporter's own header parser rejects as a duplicate. <paramref
+    /// name="offendingHeader"/> is the trimmed name of the first header either check does not
+    /// like, never its value, so the log line this drives can name what to fix without repeating a
+    /// credential into it. An entry with no name is skipped, the same as <see cref="RenderHeaders"/>
+    /// already skips one.</summary>
+    public static bool TryValidateHeaders(
+        IDictionary<string, string>? headers, [NotNullWhen(false)] out string? offendingHeader)
+    {
+        offendingHeader = null;
+        if (headers == null)
+        {
+            return true;
+        }
+
+        HashSet<string> seenNames = new(StringComparer.Ordinal);
+        foreach (KeyValuePair<string, string> header in headers)
+        {
+            if (string.IsNullOrWhiteSpace(header.Key))
+            {
+                continue;
+            }
+
+            string name = header.Key.Trim();
+            if (!seenNames.Add(name) || (header.Value?.Contains(',') ?? false))
+            {
+                offendingHeader = name;
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <summary>The header values ExportFailureLog should treat as secrets: null-safe against

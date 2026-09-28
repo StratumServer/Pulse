@@ -13,9 +13,12 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Plain reference: these tests exercise the config translation in process, with no server,
-         no mod loader and no exporter thread. Nothing here touches the game API, so unlike
-         Pulse.Tests this project needs no VintagestoryAPI.dll beside it. -->
     <ProjectReference Include="..\Pulse.Otlp\Pulse.Otlp.csproj" />
+
+    <!-- Private=true: PulseOtlpModSystem.TryStoreDefaults is reached directly (it is internal,
+         not reflected into, like ExportFailureLog), and PulseOtlpModSystem extends ModSystem, so
+         the game dll has to sit next to the test assembly for that type to resolve. No server is
+         booted here; the game API is loaded, never called. -->
+    <Reference Include="VintagestoryAPI" HintPath="$(VINTAGE_STORY)/VintagestoryAPI.dll" Private="true" />
   </ItemGroup>
 </Project>

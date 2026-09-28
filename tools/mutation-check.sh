@@ -52,7 +52,7 @@ mutate() { # <file> <sed -E expression> <label>
     git checkout -- "$file"
 }
 
-MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse/EngineSample.cs Pulse/PingSummary.cs Pulse/EntityBreakdown.cs Pulse/SuspendBookkeeper.cs Pulse/TickAttribution.cs Pulse/ModOwners.cs Pulse/ConfigUpgrade.cs Pulse/ConfigLoad.cs Pulse/PulseCommands.cs Pulse/AttributionMetrics.cs Pulse.Otlp/OtlpOptions.cs Pulse.Otlp/ExportFailureLog.cs"
+MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse/EngineSample.cs Pulse/PingSummary.cs Pulse/EntityBreakdown.cs Pulse/SuspendBookkeeper.cs Pulse/TickAttribution.cs Pulse/ModOwners.cs Pulse/ConfigUpgrade.cs Pulse/ConfigLoad.cs Pulse/PulseCommands.cs Pulse/AttributionMetrics.cs Pulse.Otlp/OtlpOptions.cs Pulse.Otlp/ExportFailureLog.cs Pulse.Otlp/PulseOtlpModSystem.cs"
 
 if ! git diff --quiet -- $MUTATED; then
     echo "One of $MUTATED has uncommitted changes; refusing to mutate over them."
@@ -337,8 +337,8 @@ mutate Pulse/PulseCommands.cs \
 TEST_PROJECT="Pulse.Otlp.Tests/Pulse.Otlp.Tests.csproj"
 
 mutate Pulse.Otlp/OtlpOptions.cs \
-    's/Math\.Max\(MinimumIntervalSeconds, intervalSeconds\)/Math.Min(MinimumIntervalSeconds, intervalSeconds)/' \
-    "otlp: the interval floor becomes a ceiling"
+    's/Math\.Clamp\(intervalSeconds, MinimumIntervalSeconds, MaximumIntervalSeconds\)/Math.Clamp(intervalSeconds, MinimumIntervalSeconds, MinimumIntervalSeconds)/' \
+    "otlp: the interval clamp collapses to the floor, so anything above 5 seconds is floored too"
 
 mutate Pulse.Otlp/OtlpOptions.cs \
     's/if \(protocol == OtlpExportProtocol\.Grpc\)/if (protocol != OtlpExportProtocol.Grpc)/' \
@@ -398,6 +398,34 @@ mutate Pulse.Otlp/ExportFailureLog.cs \
 mutate Pulse.Otlp/OtlpOptions.cs \
     's/headers\?\.Values\.Where/headers.Values.Where/' \
     "otlp: a null Headers block throws instead of exporting with no secrets tracked"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/Math\.Clamp\(intervalSeconds, MinimumIntervalSeconds, MaximumIntervalSeconds\)/Math.Max(MinimumIntervalSeconds, intervalSeconds)/' \
+    "otlp: the interval ceiling disappears, so a large enough config value overflows on the multiply again"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    "s/header\.Value\?\.Contains\(','\) \?\? false/false/" \
+    "otlp: a header value containing a comma is no longer refused, reopening the exporter's own crash on it"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/!seenNames\.Add\(name\)/false/' \
+    "otlp: two header names that collide once trimmed are no longer refused, reopening the exporter's own duplicate-key crash"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/if \(userInfo\.Length > 0\)/if (false)/' \
+    "otlp: the endpoint's userinfo is no longer added to the secrets list, so it could leak through an echoing backend"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/query\.Length > 1/false/' \
+    "otlp: the endpoint's query values are no longer added to the secrets list, so a signed-URL secret could leak through an echoing backend"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/^        yield return candidate;$//' \
+    "otlp: a userinfo or query secret is only added to the secrets list unescaped, so the percent-escaped form a raw echoed request target actually carries leaks through"
+
+mutate Pulse.Otlp/PulseOtlpModSystem.cs \
+    's/failureReason = ex\.GetType\(\)\.Name;/failureReason = null;/' \
+    "otlp: TryStoreDefaults stops reporting what failed when writing the default config throws"
 
 # Every mutation is reverted in the source, but the last one of each block was built before it
 # was, so the binaries on disk still carry it. Leave them matching the tree: anything running

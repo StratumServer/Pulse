@@ -103,7 +103,7 @@ The OTLP mod has no reload command: every key below needs a restart to take effe
 | `Endpoint` | `"http://localhost:4318"` | Base address of the collector, without a signal path. Pulse appends `/v1/metrics` for `http/protobuf`; the exporter appends its own service path for `grpc`. | Restart |
 | `Protocol` | `"http/protobuf"` | `http/protobuf` or `grpc`. Anything else logs a warning and falls back to `http/protobuf`. | Restart |
 | `Headers` | `{}` | Headers sent with every export, for backend authentication. See [OTLP export](#otlp-export). | Restart |
-| `IntervalSeconds` | `60` | Seconds between two exports. Floored at 5. | Restart |
+| `IntervalSeconds` | `60` | Seconds between two exports. Floored at 5, capped at 86400 (24 hours). | Restart |
 | `IncludeRuntimeMetrics` | `true` | Adds the `System.Runtime` meter to what gets pushed. Independent of the base mod's `RuntimeMetrics`. | Restart |
 | `ServiceName` | `"vintagestory"` | Sets the `service.name` resource attribute. A blank value falls back to `vintagestory`; `OTEL_SERVICE_NAME`, if set, overrides this key. | Restart |
 
@@ -451,9 +451,10 @@ metrics from more than one server tells them apart: grouping, filtering and dash
 are usually keyed off it. The `OTEL_SERVICE_NAME` environment variable, the ecosystem's standard
 override, takes precedence over this key when it is set.
 
-`IntervalSeconds` is floored at 5. Sixty is the OTLP default and the right answer for almost
-everyone: the interval also decides how often every observable gauge is polled, and the
-loaded-chunk read behind one of them is not free.
+`IntervalSeconds` is floored at 5 and capped at 86400 (24 hours), the cap there so a config typo
+several digits too long cannot overflow the millisecond count it is converted to. Sixty is the
+OTLP default and the right answer for almost everyone: the interval also decides how often every
+observable gauge is polled, and the loaded-chunk read behind one of them is not free.
 
 For a local collector, the whole config is the endpoint:
 
@@ -482,9 +483,12 @@ the instance ID as the user and an access policy token as the password:
 `x-honeycomb-team` for Honeycomb, `api-key` for New Relic, `x-scope-orgid` for a multi-tenant
 Mimir. Values are percent-encoded on the way into the exporter, which the OTLP header format
 expects, so a base64 token with `+`, `/` and `=` in it needs no special handling. A literal comma
-in a header value is the one thing that cannot survive the trip, because the exporter unescapes
-the whole header string before splitting it on commas. No auth scheme in the wild puts a comma in
-a token.
+in a header value does not survive the trip: the exporter unescapes the whole header string before
+splitting it on commas, so encoding it going in does not stop it from being read as a separator
+coming out. Pulse checks every header for this, and for two names that collide once leading and
+trailing whitespace is trimmed off, before ever handing them to the exporter, and refuses to start
+exporting rather than let either reach it: the server log names the offending header, never its
+value.
 
 **`pulse-otlp.json` holds a credential.** It sits in `ModConfig/` in plain text, with whatever
 permissions your server's umask gave it. On a shared or rented host, `chmod 600` it and make sure
@@ -510,20 +514,31 @@ A matching line reports the first successful export after a failure, so recovery
 a healthy server that has never failed still logs exactly one such line, at Notification rather
 than Warning, right after its first delivery.
 
-Neither line is meant to carry a header value. Before a line is queued, each configured value of at
-least 6 characters (shorter than that reads as an ordinary id, not a credential), the credential
-half of it when the value has a "scheme credential" shape (a Bearer token echoed without its
-"Bearer ", say), and the JSON-escaped form of both, are matched case-insensitively and redacted out
-of the backend's answer and out of a gRPC failure's status detail, longest value first so a short
-one can never land inside a longer one's own match. Anything else shaped like a bearer or basic
-credential of at least 8 characters is redacted too, whether or not it matches a configured value.
-This is not exhaustive: a backend that transforms a secret some other way, hashing it or splitting
-it across two fields, could still get it into the log, so treat the log itself as sensitive before
-sharing it regardless. The backend's answer, once redacted, is clipped to 200 characters. A
-malformed `Endpoint` is still the one case
-Pulse checks itself, because that one would throw while the exporter is being built: it logs an
-error and registers nothing. For anything these lines do not explain, the SDK's own, far more
-verbose self-diagnostics turn on by dropping an `OTEL_DIAGNOSTICS.json` file next to the server.
+Neither line is meant to carry a header value, or the query string or userinfo half of `Endpoint`
+either, for a backend that authenticates a signed URL that way instead of through a header. Before
+a line is queued, each of those values, at least 6 characters long (shorter than that reads as an
+ordinary id, not a credential), the credential half of it when the value has a "scheme credential"
+shape (a Bearer token echoed without its "Bearer ", say), and the JSON-escaped form of both, are
+matched case-insensitively and redacted out of the backend's answer and out of a gRPC failure's
+status detail, longest value first so a short one can never land inside a longer one's own match.
+Anything else shaped like a bearer or basic credential of at least 8 characters is redacted too,
+whether or not it matches a configured value. This is not exhaustive: a backend that transforms a
+secret some other way, hashing it or splitting it across two fields, could still get it into the
+log, so treat the log itself as sensitive before sharing it regardless. The backend's answer, once
+redacted, is clipped to 200 characters.
+
+A malformed `Endpoint`, and a `Headers` entry with a comma in its value or a name that collides
+with another once trimmed, are cases Pulse checks itself before the exporter is ever built: it
+logs one error, naming the problem and never the value, and registers nothing. An `IntervalSeconds`
+so large it would once have overflowed the millisecond conversion is not one of those cases any
+more: it is silently clamped to 86,400 seconds (24 hours) and exported at that rate instead, with
+no error at all. A `Headers` shape neither check above names, such as a comma inside a header
+*name* rather than its value, or a header called `User-Agent` (which collides with one the
+exporter sets on its own), still reaches the OpenTelemetry SDK's own option validation, which
+throws; Pulse catches that too, so nothing crashes and nothing is exported, but the log line only
+names the exception type, not the header. For anything these lines do not explain, the SDK's own,
+far more verbose self-diagnostics turn on by dropping an `OTEL_DIAGNOSTICS.json` file next to the
+server.
 
 ## Building and testing
 
@@ -562,7 +577,7 @@ aggregates, the entity top-ten with its series retirement rule, and the suspend 
 them needs a server. `Pulse.Otlp.Tests` covers the config translation, which is where the OTLP
 mod's only non-obvious logic lives.
 
-Mutation testing runs at two depths. `tools/mutation-check.sh` applies seventy-nine representative
+Mutation testing runs at two depths. `tools/mutation-check.sh` applies eighty-six representative
 mutations one at a time and requires the suite to fail on every one; CI runs it on every push,
 deterministic and under a minute. `.github/workflows/mutation.yml` runs dotnet-stryker
 incrementally on pull requests touching `Pulse/`: it mutates only the files the pull request

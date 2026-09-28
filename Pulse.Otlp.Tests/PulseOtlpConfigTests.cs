@@ -34,4 +34,20 @@ public class PulseOtlpConfigTests
     [InlineData(-30)]
     public void IntervalMilliseconds_Floors_AnythingBelowFiveSeconds(int seconds)
         => Assert.Equal(5_000, OtlpOptions.IntervalMilliseconds(seconds));
+
+    /// <summary>3,000,000 seconds, typed for "a lot less often", used to overflow a 32-bit
+    /// millisecond count once multiplied by 1000 (it becomes -1,294,967,296), which the reader's
+    /// own option validation then rejected with an unhandled ArgumentOutOfRangeException instead of
+    /// this ever getting the chance to floor or cap it.</summary>
+    [Fact]
+    public void IntervalMilliseconds_Clamps_AValueThatWouldOtherwiseOverflowOnTheMultiply()
+        => Assert.Equal(
+            OtlpOptions.MaximumIntervalSeconds * 1000, OtlpOptions.IntervalMilliseconds(3_000_000));
+
+    [Theory]
+    [InlineData(86_400, 86_400_000)] // exactly the documented maximum: not touched
+    [InlineData(86_401, 86_400_000)] // one second past it: capped
+    [InlineData(int.MaxValue, 86_400_000)]
+    public void IntervalMilliseconds_Caps_AnythingAboveTheDocumentedMaximum(int seconds, int expected)
+        => Assert.Equal(expected, OtlpOptions.IntervalMilliseconds(seconds));
 }
