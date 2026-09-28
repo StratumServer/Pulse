@@ -130,6 +130,14 @@ mutate Pulse/MetricsHttpServer.cs \
     's/MaxHeadBytes = 8192;/MaxHeadBytes = 65536;/' \
     "http server: the request head size limit widened, no longer rejecting a header the tests expect it to reject"
 
+mutate Pulse/MetricsHttpServer.cs \
+    's/Environment\.TickCount64 > deadline/false/' \
+    "http server: the overall request deadline never trips, so a byte-dribbling client is held forever"
+
+mutate Pulse/MetricsHttpServer.cs \
+    's/Thread\.Sleep\(acceptBackoffMs\);/Thread.Sleep(0);/' \
+    "http server: the accept-failure backoff stops sleeping, spinning the loop instead of throttling it"
+
 mutate Pulse/TickBookkeeper.cs \
     's/sinceSnapshotSeconds < snapshotIntervalSeconds/sinceSnapshotSeconds <= snapshotIntervalSeconds/' \
     "tick bookkeeper: snapshot cadence boundary made inclusive, delaying the due tick that lands exactly on it"

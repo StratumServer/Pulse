@@ -26,25 +26,45 @@ internal sealed class MetricsHttpServer : IDisposable
     /// this, the request is treated the same as a malformed one rather than read indefinitely.</summary>
     private const int MaxHeadBytes = 8192;
 
-    /// <summary>Bounds how long a connected client can take to finish sending its request and how
-    /// long it can take to accept the response, so a stalled client delays the next scrape by at
-    /// most this, never the game.</summary>
+    /// <summary>Bounds a single socket call: one Read, or the Write of the response. This alone
+    /// does not bound a whole request, since a client that keeps a call alive by sending or
+    /// accepting one byte just often enough never trips it; see <see cref="requestTimeoutMs"/>.</summary>
     private const int IoTimeoutMs = 5000;
+
+    /// <summary>Accept-loop backoff, applied only to a failed AcceptTcpClient call: an empty
+    /// sleep the first time, doubling on every consecutive failure, so a transient error costs
+    /// nothing while a persistent one (the process out of file descriptors, say) does not spin a
+    /// full core forever behind a log line that only fires once a minute.</summary>
+    private const int InitialAcceptBackoffMs = 10;
+    private const int MaxAcceptBackoffMs = 1000;
 
     private readonly TcpListener listener;
     private readonly Func<string> render;
     private readonly ILogger logger;
     private readonly Thread thread;
+    private readonly int requestTimeoutMs;
 
     // Starts one interval in the past so the first failure is logged rather than swallowed.
     private long lastErrorLogMs = -ErrorLogIntervalMs;
     private volatile bool stopping;
 
+    // Read back through reflection by the accept-loop-backoff test; nothing production reads.
+    private int acceptFailures;
+
     public MetricsHttpServer(string bind, int port, Func<string> render, ILogger logger)
+        : this(bind, port, render, logger, IoTimeoutMs)
+    {
+    }
+
+    /// <summary>Test seam: production always uses IoTimeoutMs as the overall request deadline
+    /// too, through the constructor above. A test shortens it to prove the deadline logic without
+    /// waiting on the real one.</summary>
+    internal MetricsHttpServer(string bind, int port, Func<string> render, ILogger logger, int requestTimeoutMs)
     {
         listener = new TcpListener(ParseBind(bind), port);
         this.render = render;
         this.logger = logger;
+        this.requestTimeoutMs = requestTimeoutMs;
         thread = TyronThreadPool.CreateDedicatedThread(Serve, "pulse-metrics");
     }
 
@@ -53,15 +73,25 @@ internal sealed class MetricsHttpServer : IDisposable
     /// "localhost" resolves to the IPv4 loopback rather than going through DNS: .NET tries ::1
     /// first on Linux, and every common client that finds ::1 closed falls back to 127.0.0.1 on
     /// its own, so binding the address the client falls back to is what actually gets scraped.
-    /// Anything else is a literal address, brackets stripped the way a URL would carry them
-    /// around an IPv6 one.</summary>
-    internal static IPAddress ParseBind(string bind) => bind switch
+    /// Surrounding whitespace is trimmed first, since the value comes straight out of a config
+    /// file. Anything else is a literal address with one pair of brackets stripped, the way a URL
+    /// would carry them around an IPv6 one; a blank value (null included, which a config file
+    /// that sets Bind to a JSON null parses to) reaches IPAddress.Parse the same as any other
+    /// unparseable text, rather than throwing on the null check itself.</summary>
+    internal static IPAddress ParseBind(string? bind)
     {
-        "0.0.0.0" or "*" or "+" => IPAddress.Any,
-        "::" => IPAddress.IPv6Any,
-        _ when bind.Equals("localhost", StringComparison.OrdinalIgnoreCase) => IPAddress.Loopback,
-        _ => IPAddress.Parse(bind.Trim('[', ']')),
-    };
+        string trimmed = (bind ?? string.Empty).Trim();
+        return trimmed switch
+        {
+            "0.0.0.0" or "*" or "+" => IPAddress.Any,
+            "::" => IPAddress.IPv6Any,
+            _ when trimmed.Equals("localhost", StringComparison.OrdinalIgnoreCase) => IPAddress.Loopback,
+            _ => IPAddress.Parse(StripOneBracketPair(trimmed)),
+        };
+    }
+
+    private static string StripOneBracketPair(string value) =>
+        value.Length >= 2 && value[0] == '[' && value[^1] == ']' ? value[1..^1] : value;
 
     /// <summary>Binds the socket and starts serving. Throws when the port is unavailable or the
     /// bind address does not parse; the caller logs that and keeps the game server running
@@ -83,34 +113,61 @@ internal sealed class MetricsHttpServer : IDisposable
     }
 
     // ponytail: one connection at a time, an accepted client blocking the next until it finishes
-    // or the I/O timeout evicts it. A stalled scraper only ever delays the next scrape by that
-    // long. Accept concurrently if that ever matters.
+    // or a timeout evicts it. A stalled scraper only ever delays the next scrape by that long.
+    // Accept concurrently if that ever matters.
     private void Serve()
     {
+        int acceptBackoffMs = InitialAcceptBackoffMs;
         while (!stopping)
         {
+            TcpClient client;
             try
             {
-                using TcpClient client = listener.AcceptTcpClient();
-                client.ReceiveTimeout = IoTimeoutMs;
-                client.SendTimeout = IoTimeoutMs;
-                Handle(client.GetStream());
+                client = listener.AcceptTcpClient();
             }
             catch (Exception e) when (!stopping)
             {
+                // A one-off failure and a persistent one (the process out of file descriptors,
+                // for instance) look identical from here, so both back off: nothing else stands
+                // between a persistent failure and a full core spent re-failing as fast as
+                // AcceptTcpClient can throw, invisible behind a log line rate-limited to once a
+                // minute.
                 LogOccasionally(e);
+                acceptFailures++;
+                Thread.Sleep(acceptBackoffMs);
+                acceptBackoffMs = Math.Min(acceptBackoffMs * 2, MaxAcceptBackoffMs);
+                continue;
             }
             catch
             {
-                // Dispose stopped the listener out from under AcceptTcpClient, or evicted a
-                // stalled client's socket. Normal shutdown either way.
+                // Dispose stopped the listener out from under AcceptTcpClient. Normal shutdown.
+                continue;
+            }
+
+            acceptBackoffMs = InitialAcceptBackoffMs;
+            using (client)
+            {
+                try
+                {
+                    client.ReceiveTimeout = IoTimeoutMs;
+                    client.SendTimeout = IoTimeoutMs;
+                    Handle(client.GetStream(), Environment.TickCount64 + requestTimeoutMs);
+                }
+                catch (Exception e) when (!stopping)
+                {
+                    LogOccasionally(e);
+                }
+                catch
+                {
+                    // Dispose evicted this connection's socket mid-request. Normal shutdown.
+                }
             }
         }
     }
 
-    private void Handle(NetworkStream stream)
+    private void Handle(NetworkStream stream, long deadline)
     {
-        Request? request = ParseRequestLine(ReadRequestLine(stream));
+        Request? request = ParseRequestLine(ReadRequestLine(stream, deadline));
         byte[] body = [];
         string status;
         string headers = "";
@@ -148,14 +205,24 @@ internal sealed class MetricsHttpServer : IDisposable
     /// <summary>Reads up to the first blank line and returns the request line; the bytes after it
     /// are discarded unread, since nothing here needs a header value or a body. Null when the
     /// connection closes before a blank line arrives, or the head is larger than
-    /// <see cref="MaxHeadBytes"/>; the caller answers both the same way it answers a malformed
-    /// request.</summary>
-    private static string? ReadRequestLine(NetworkStream stream)
+    /// <see cref="MaxHeadBytes"/>.</summary>
+    /// <remarks>IoTimeoutMs alone bounds one Read call, not the request: a client that sends one
+    /// byte every four seconds never trips a five second per-call timeout and can hold this loop
+    /// for as long as it keeps doing that. <paramref name="deadline"/>, an
+    /// <see cref="Environment.TickCount64"/> value taken once at accept, is the actual ceiling on
+    /// the whole read; it is checked before every call that could otherwise block again.</remarks>
+    private static string? ReadRequestLine(NetworkStream stream, long deadline)
     {
         byte[] buffer = new byte[MaxHeadBytes];
         int length = 0;
+        int searchedTo = 0;
         while (length < buffer.Length)
         {
+            if (Environment.TickCount64 > deadline)
+            {
+                throw new TimeoutException("the request did not complete within the overall deadline");
+            }
+
             int read = stream.Read(buffer, length, buffer.Length - length);
             if (read == 0)
             {
@@ -163,26 +230,60 @@ internal sealed class MetricsHttpServer : IDisposable
             }
 
             length += read;
-            string head = Encoding.ASCII.GetString(buffer, 0, length);
-            if (head.Contains("\r\n\r\n", StringComparison.Ordinal))
+
+            // Only the bytes this call just added need scanning, a 3 byte lookback included so a
+            // terminator split across two reads is not missed. Re-decoding and re-scanning the
+            // whole buffer on every read, as this once did, turned a head arriving one byte at a
+            // time into an O(n^2) string allocation: about 67 MB of garbage for one ordinary 8 KB
+            // head trickled in that way.
+            if (HasBlankLine(buffer, Math.Max(0, searchedTo - 3), length))
             {
+                string head = Encoding.ASCII.GetString(buffer, 0, length);
                 return head[..head.IndexOf("\r\n", StringComparison.Ordinal)];
             }
+
+            searchedTo = length;
         }
 
         return null;
     }
 
+    /// <summary>Whether "\r\n\r\n" occurs anywhere in buffer[from, length), a plain byte scan with
+    /// no allocation of its own.</summary>
+    private static bool HasBlankLine(byte[] buffer, int from, int length)
+    {
+        for (int i = from; i <= length - 4; i++)
+        {
+            if (buffer[i] == '\r' && buffer[i + 1] == '\n' && buffer[i + 2] == '\r' && buffer[i + 3] == '\n')
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>Method and path off the request line, the query string dropped and the path
     /// matched exactly. No header, Host included, is ever consulted: what reached this socket is
-    /// enough on its own.</summary>
+    /// enough on its own. The target is ordinarily origin-form ("/metrics"), but RFC 9112
+    /// requires an origin server to also accept absolute-form ("http://host/metrics"), the form a
+    /// request written for a proxy carries; <see cref="AbsoluteFormPath"/> is that one path taken
+    /// out.</summary>
     private static Request? ParseRequestLine(string? line)
     {
         string[] parts = line?.Split(' ') ?? [];
-        return parts.Length == 3 && parts[1].StartsWith('/')
-            ? new Request(parts[0], parts[1].Split('?')[0])
-            : null;
+        if (parts.Length != 3)
+        {
+            return null;
+        }
+
+        string target = parts[1];
+        string? path = target.StartsWith('/') ? target.Split('?')[0] : AbsoluteFormPath(target);
+        return path is null ? null : new Request(parts[0], path);
     }
+
+    private static string? AbsoluteFormPath(string target) =>
+        Uri.TryCreate(target, UriKind.Absolute, out Uri? absolute) ? absolute.AbsolutePath : null;
 
     private sealed record Request(string Method, string Path);
 

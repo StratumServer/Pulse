@@ -144,8 +144,9 @@ you should make on purpose, not a default you inherit.
 `localhost` binds the IPv4 loopback directly, so both `localhost` and `127.0.0.1` reach it,
 whichever one a client's own name resolution tries first. All of this behaves the same on
 Windows, Linux and macOS, and none of it needs administrator rights or a `netsh` URL reservation
-on Windows: only ports below 1024 need elevation there, and Pulse's default of 9464 is nowhere
-near that range.
+on Windows. Binding `0.0.0.0` there can still prompt Windows Firewall to ask whether to allow
+access, or be blocked outright by a service's default inbound rules; loopback never asks, since
+nothing outside the machine is trying to reach it.
 
 If the port is already taken, Pulse logs an error and carries on without the endpoint. The game
 server keeps running; you get no metrics until you fix the config.

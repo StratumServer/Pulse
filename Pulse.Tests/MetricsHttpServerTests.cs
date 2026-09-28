@@ -198,6 +198,21 @@ public class MetricsHttpServerTests
         Assert.StartsWith("HTTP/1.1 200", response);
     }
 
+    /// <summary>RFC 9112 requires an origin server to accept the absolute-form request target as
+    /// well as the ordinary origin-form one, the form a request written for a proxy carries.</summary>
+    [Fact]
+    public async Task AbsoluteFormRequestTarget_IsAccepted()
+    {
+        int port = FreePort();
+        using MetricsHttpServer server = new("127.0.0.1", port, () => "x", new FakeLogger());
+        server.Start();
+
+        string response = await RawRequestAsync(
+            port, $"GET http://127.0.0.1:{port}/metrics HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n");
+
+        Assert.StartsWith("HTTP/1.1 200", response);
+    }
+
     [Fact]
     public async Task TwoScrapes_OnSeparateConnections_BothSucceed()
     {
@@ -233,6 +248,66 @@ public class MetricsHttpServerTests
             int read = await stream.ReadAsync(buffer, cts.Token);
             Assert.Equal(0, read);
         }
+
+        using HttpClient client = new();
+        using HttpResponseMessage response = await client.GetAsync($"http://127.0.0.1:{port}/metrics");
+        Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+    }
+
+    /// <summary>The per-call receive timeout alone does not bound a request: each single Read
+    /// still completes well inside it as long as some byte turns up before it expires, and a
+    /// client can keep doing exactly that indefinitely. Only an overall deadline, taken once at
+    /// accept, ends this. Uses the internal constructor to shorten that deadline to 1 s; the
+    /// per-call timeout stays at its real 5 s throughout, unable to explain a drop this fast on
+    /// its own.</summary>
+    [Fact]
+    public async Task SlowlorisClient_IsDroppedByTheOverallDeadline_NotJustThePerReadTimeout()
+    {
+        int port = FreePort();
+        using MetricsHttpServer server = new("127.0.0.1", port, () => "x", new FakeLogger(), requestTimeoutMs: 1000);
+        server.Start();
+
+        using TcpClient slow = new();
+        await slow.ConnectAsync(IPAddress.Loopback, port);
+        NetworkStream stream = slow.GetStream();
+
+        Stopwatch watch = Stopwatch.StartNew();
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
+
+        // Watches for the drop concurrently with sending: a graceful close reads back as 0, a
+        // reset as an exception, whichever this platform surfaces once the server hangs up.
+        Task<bool> waitForDrop = Task.Run(async () =>
+        {
+            byte[] buffer = new byte[16];
+            try
+            {
+                return await stream.ReadAsync(buffer, cts.Token) == 0;
+            }
+            catch (IOException)
+            {
+                return true;
+            }
+        });
+
+        // One byte every 200 ms: comfortably inside the 5 s per-read socket timeout on every
+        // single call, so nothing but an overall deadline can end this.
+        byte[] one = Encoding.ASCII.GetBytes("G");
+        while (!waitForDrop.IsCompleted && watch.Elapsed < TimeSpan.FromSeconds(4))
+        {
+            try
+            {
+                await stream.WriteAsync(one, cts.Token);
+            }
+            catch (IOException)
+            {
+                break;
+            }
+
+            await Task.Delay(200, cts.Token);
+        }
+
+        Assert.True(await waitForDrop, "the server never dropped the byte-dribbling client");
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), $"took {watch.Elapsed} to drop a byte-dribbling client");
 
         using HttpClient client = new();
         using HttpResponseMessage response = await client.GetAsync($"http://127.0.0.1:{port}/metrics");
@@ -317,6 +392,34 @@ public class MetricsHttpServerTests
         Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), $"Dispose took {watch.Elapsed}");
     }
 
+    /// <summary>A persistent AcceptTcpClient failure, the process out of file descriptors being
+    /// the real-world example, must not spin the serve thread at full speed forever behind a log
+    /// line that only fires once a minute. Stops the listener directly, through reflection,
+    /// rather than through Dispose, so `stopping` stays false and every further accept keeps
+    /// failing exactly the way a persistent failure would, not a one-off. Without a backoff this
+    /// would run into the tens of thousands of failures within half a second; a low count proves
+    /// the loop is sleeping between attempts instead.</summary>
+    [Fact]
+    public void PersistentAcceptFailure_BacksOff_InsteadOfBusySpinning()
+    {
+        int port = FreePort();
+        MetricsHttpServer server = new("127.0.0.1", port, () => "x", new FakeLogger());
+        server.Start();
+
+        FieldInfo listenerField = typeof(MetricsHttpServer).GetField("listener", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        TcpListener listener = (TcpListener)listenerField.GetValue(server)!;
+        listener.Stop();
+
+        Thread.Sleep(500);
+
+        FieldInfo failuresField = typeof(MetricsHttpServer).GetField("acceptFailures", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        int failures = (int)failuresField.GetValue(server)!;
+
+        Assert.InRange(failures, 1, 50);
+
+        server.Dispose();
+    }
+
     [Fact]
     public void Start_OnAnAlreadyTakenPort_Throws_AndDisposeAfterwardsIsSafe()
     {
@@ -374,9 +477,30 @@ public class MetricsHttpServerTests
     [InlineData("10.20.30.40", "10.20.30.40")]
     [InlineData("::1", "::1")]
     [InlineData("[::1]", "::1")]
+    [InlineData("  127.0.0.1  ", "127.0.0.1")]
+    [InlineData(" localhost ", "127.0.0.1")]
+    [InlineData(" 0.0.0.0 ", "0.0.0.0")]
     public void ParseBind_MapsWildcardsAndNamesAndLiterals(string bind, string expected)
     {
         Assert.Equal(IPAddress.Parse(expected), MetricsHttpServer.ParseBind(bind));
+    }
+
+    /// <summary>Anything ParseBind cannot make sense of has to fail through IPAddress.Parse's own
+    /// FormatException, the exception StartEndpoint already knows how to log cleanly, and never
+    /// through a NullReferenceException on the null check itself: a pulse.json that sets Bind to
+    /// a JSON null deserialises Bind to exactly that. "[::1]]" checks that only one pair of
+    /// brackets is stripped: a blanket Trim('[', ']') would also strip the extra trailing
+    /// bracket, silently accepting a malformed value that only looks like a real one; stripping
+    /// one pair leaves a lone bracket IPAddress.Parse correctly refuses.</summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("not-an-address")]
+    [InlineData("[::1]]")]
+    public void ParseBind_InvalidValues_ThrowFormatException(string? bind)
+    {
+        Assert.Throws<FormatException>(() => MetricsHttpServer.ParseBind(bind));
     }
 
     /// <summary>Captures every entry through the one abstract hook LoggerBase funnels its whole
