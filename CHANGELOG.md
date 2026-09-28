@@ -286,6 +286,13 @@ first.
   spelling by hand, even though the rewrite that added the missing key had already dropped it
   down to one spelling. Each line now names what actually happened for the combination in front
   of it.
+- `pulse_server_tick_seconds`'s histogram buckets gain two boundaries, 0.035 and 0.04, just above
+  the 33.3 ms default budget. A server ticking only a fraction of a millisecond slow (three
+  players, 29.8 TPS) used to land almost every tick in the single 0.0334 to 0.05 bucket, and
+  `histogram_quantile` interpolating across that whole span showed the shipped dashboard's p50
+  around 40 ms and p99 around 49.8 ms even though the server was healthy. Every existing boundary
+  is unchanged, so this only adds new `le` series; nothing that already queries this histogram
+  needs to change.
 
 ## [0.1.0] - 2026-09-01
 

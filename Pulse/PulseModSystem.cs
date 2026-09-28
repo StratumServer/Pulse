@@ -44,8 +44,17 @@ public sealed class PulseModSystem : ModSystem
         + "served; every other metric is unaffected.";
 
     /// <summary>Tick period buckets, seconds. Placed around the 33.3 ms default budget so a
-    /// healthy server fills the low buckets and every overrun is separable.</summary>
-    private static readonly double[] TickBuckets = [0.025, 0.0334, 0.05, 0.075, 0.1, 0.25, 0.5, 1.0];
+    /// healthy server fills the low buckets and every overrun is separable. 0.035 and 0.04 sit
+    /// between the budget and the next original boundary, 0.05, because Prometheus's
+    /// histogram_quantile interpolates linearly inside whichever bucket a quantile lands in: a
+    /// healthy server ticking a fraction of a millisecond slow (three players, 29.8 TPS, mean
+    /// interval about 33.5 ms) used to push almost all its mass into the single wide 0.0334 to
+    /// 0.05 bucket, and interpolating across that whole span read p50 around 40 ms and p99 around
+    /// 49.8 ms on a server with nothing wrong. Every original boundary is kept, so existing
+    /// queries, alert math and any already recorded series stay valid; only new le series
+    /// appear.</summary>
+    internal static readonly double[] TickBuckets =
+        [0.025, 0.0334, 0.035, 0.04, 0.05, 0.075, 0.1, 0.25, 0.5, 1.0];
 
     private readonly Stopwatch tickClock = new();
     private readonly SuspendBookkeeper suspendWindow = new();
