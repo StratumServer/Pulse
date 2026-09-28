@@ -16,7 +16,36 @@ namespace Pulse.Otlp.Tests;
 [Collection(nameof(ExportRetentionTests))]
 public class ExportRetentionTests
 {
+    private const int WarmUpExports = 500;
+    private const int MeasuredExports = 10_000;
+    private const long MaxRetainedBytes = 1_000_000;
+
+    /// <summary>The main guard, run on every OS: a local collector answers each export with an
+    /// HTTP 503 immediately, so the exporter's failure path and <see cref="ExportFailureLog"/> run
+    /// the same way everywhere. See <see
+    /// cref="FailedExports_AgainstARefusedConnection_RetainNothing"/> for why the refused-connection
+    /// path a user actually hits cannot carry this same 10,500-export loop on every OS.</summary>
     [Fact]
+    public void FailedExports_AgainstAFailingCollector_RetainNothing()
+    {
+        TcpListener probe = new(IPAddress.Loopback, 0);
+        probe.Start();
+        int port = ((IPEndPoint)probe.LocalEndpoint).Port;
+        probe.Stop();
+        Uri endpoint = new($"http://127.0.0.1:{port}/v1/metrics");
+
+        using FakeCollector collector = new(port, _ => (503, "unavailable"));
+        Measure(endpoint);
+    }
+
+    /// <summary>The path a user with an unreachable endpoint actually hits, kept as its own test
+    /// since a refused connection is a different failure shape than an HTTP error response.
+    /// Skipped on Windows: there, a refused TCP connect on a closed loopback port is only reported
+    /// after a couple of seconds of SYN retries, where Linux and macOS report it immediately, so
+    /// the 10,500 connects this test makes take hours on Windows instead of seconds. <see
+    /// cref="FailedExports_AgainstAFailingCollector_RetainNothing"/> guards the same retention
+    /// property on every OS, Windows included.</summary>
+    [FactExceptOnWindows("Refused-connection SYN retries take seconds each on Windows; see this class's remarks.")]
     public void FailedExports_AgainstARefusedConnection_RetainNothing()
     {
         TcpListener probe = new(IPAddress.Loopback, 0);
@@ -25,6 +54,11 @@ public class ExportRetentionTests
         probe.Stop();
         Uri endpoint = new($"http://127.0.0.1:{port}/v1/metrics");
 
+        Measure(endpoint);
+    }
+
+    private static void Measure(Uri endpoint)
+    {
         using Meter meter = new($"Pulse.Otlp.Tests.{Guid.NewGuid()}");
         Counter<long> counter = meter.CreateCounter<long>("test_counter");
         using ExportFailureLog log = new([], endpoint);
@@ -47,9 +81,9 @@ public class ExportRetentionTests
             }
         }
 
-        Export(500); // JIT, pools, the SDK's first-failure diagnostics
+        Export(WarmUpExports); // JIT, pools, the SDK's first-failure diagnostics
         long before = LiveBytes();
-        Export(10_000);
+        Export(MeasuredExports);
         long after = LiveBytes();
 
         List<string> failures = [];
@@ -59,7 +93,9 @@ public class ExportRetentionTests
         // 1 MB over 10 000 exports is 100 B each. Measured on 1.19.1: a one-time step of about
         // 250 KB in the first seconds of exporting, then a few hundred bytes per 10 000 exports.
         // The leak once suspected here (about 1 MB per export) would show as gigabytes.
-        Assert.True(after - before < 1_000_000, $"live heap grew {after - before:N0} bytes over 10 000 failed exports");
+        Assert.True(
+            after - before < MaxRetainedBytes,
+            $"live heap grew {after - before:N0} bytes over {MeasuredExports:N0} failed exports");
     }
 
     private static long LiveBytes()
@@ -67,5 +103,21 @@ public class ExportRetentionTests
         GC.Collect(2, GCCollectionMode.Forced, blocking: true, compacting: true);
         GC.WaitForPendingFinalizers();
         return GC.GetTotalMemory(forceFullCollection: true);
+    }
+}
+
+/// <summary>A <see cref="FactAttribute"/> that skips itself on Windows, with the given reason
+/// reported the same way any other xunit Skip is: xunit has no built-in per-OS conditional fact,
+/// and this class's own constructor, which xunit's discovery runs on the machine actually
+/// executing the tests, is enough to decide it without a whole extra test-framework
+/// dependency.</summary>
+internal sealed class FactExceptOnWindowsAttribute : FactAttribute
+{
+    public FactExceptOnWindowsAttribute(string reason)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            Skip = reason;
+        }
     }
 }
