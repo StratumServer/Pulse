@@ -166,6 +166,18 @@ public class OtlpOptionsTests
         Assert.Equal("Authorization=Bearer%20t", rendered);
     }
 
+    /// <summary>Newtonsoft accepts a null value for any one key inside Headers despite
+    /// PulseOtlpConfig.Headers's own non-nullable C# type (see SecretValues's own null-safety
+    /// test); RenderHeaders defaults that same null to an empty string rather than passing it into
+    /// Uri.EscapeDataString, which throws on a null argument.</summary>
+    [Fact]
+    public void RenderHeaders_Defaults_ANullValue_ToAnEmptyString()
+    {
+        string rendered = OtlpOptions.RenderHeaders(new Dictionary<string, string> { ["x-api-key"] = null! });
+
+        Assert.Equal("x-api-key=", rendered);
+    }
+
     /// <summary>The characters that need care, each with the reason it needs it.</summary>
     [Theory]
     // A Grafana Cloud token is base64, so it carries padding '=' and a space after the scheme.
