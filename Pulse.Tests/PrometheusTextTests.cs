@@ -285,7 +285,59 @@ public class PrometheusTextTests
 
         // A non-ASCII sign is not a valid name character either, and cleans up the same way.
         { "x", MetricKind.Gauge, "°C", "x_C" },
+
+        // A metric name that tokenises to nothing at all (every character is a separator) still
+        // has to render as an empty string, not crash trying to read a leading digit off it.
+        { "...", MetricKind.Histogram, "", "" },
+
+        // AddUnitTokens trims the main word's own trailing underscore before a per word follows
+        // it, so the two do not end up separated by a double underscore.
+        { "x", MetricKind.Gauge, "[degF]/s", "x_degF_per_second" },
     };
+
+    /// <summary>Every word MainUnits maps a UCUM unit to, read directly rather than through one of
+    /// the real instruments above, so a blanked entry cannot hide behind another word in the same
+    /// row happening to still be right.</summary>
+    [Theory]
+    [InlineData("d", "days")]
+    [InlineData("h", "hours")]
+    [InlineData("min", "minutes")]
+    [InlineData("s", "seconds")]
+    [InlineData("ms", "milliseconds")]
+    [InlineData("us", "microseconds")]
+    [InlineData("ns", "nanoseconds")]
+    [InlineData("By", "bytes")]
+    [InlineData("KiBy", "kibibytes")]
+    [InlineData("MiBy", "mebibytes")]
+    [InlineData("GiBy", "gibibytes")]
+    [InlineData("TiBy", "tibibytes")]
+    [InlineData("KBy", "kilobytes")]
+    [InlineData("MBy", "megabytes")]
+    [InlineData("GBy", "gigabytes")]
+    [InlineData("TBy", "terabytes")]
+    [InlineData("m", "meters")]
+    [InlineData("V", "volts")]
+    [InlineData("A", "amperes")]
+    [InlineData("J", "joules")]
+    [InlineData("W", "watts")]
+    [InlineData("g", "grams")]
+    [InlineData("Cel", "celsius")]
+    [InlineData("Hz", "hertz")]
+    [InlineData("%", "percent")]
+    public void MetricName_Maps_EveryMainUnitWord(string unit, string expectedWord)
+        => Assert.Equal($"x_{expectedWord}", PrometheusText.MetricName("x", MetricKind.Gauge, unit));
+
+    /// <summary>Every word PerUnits maps a rate's denominator to, the same way.</summary>
+    [Theory]
+    [InlineData("s", "second")]
+    [InlineData("m", "minute")]
+    [InlineData("h", "hour")]
+    [InlineData("d", "day")]
+    [InlineData("w", "week")]
+    [InlineData("mo", "month")]
+    [InlineData("y", "year")]
+    public void MetricName_Maps_EveryPerUnitWord(string per, string expectedWord)
+        => Assert.Equal($"x_per_{expectedWord}", PrometheusText.MetricName("x", MetricKind.Gauge, "1/" + per));
 
     /// <summary>Every instrument Pulse.Server and the runtime's System.Runtime meter publish, with
     /// the exact name prometheus/otlptranslator v1.0.0 derives from its instrument name, unit and
