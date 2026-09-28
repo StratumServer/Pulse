@@ -83,10 +83,13 @@ public sealed class PulseOtlpModSystem : ModSystem
         // throws while the provider is being built rather than on the export thread.
         if (!OtlpOptions.TryResolveEndpoint(config.Endpoint, protocol, out Uri? endpoint))
         {
+            // Never the configured value itself: a backend authenticating through userinfo or a
+            // query string in the URL put both right there, and an unparsable endpoint is exactly
+            // the case where that value most needs to stay out of the log.
             api.Logger.Error(
-                "Pulse OTLP cannot read '{0}' as an http or https endpoint. Nothing will be exported; "
-                + "the game server is unaffected.",
-                config.Endpoint);
+                "Pulse OTLP's '{0}' in {1} is not an absolute http or https URL. Nothing will be "
+                + "exported; the game server is unaffected.",
+                nameof(PulseOtlpConfig.Endpoint), ConfigFile);
             return;
         }
 

@@ -22,27 +22,19 @@ first.
   first successful export after a failure, or the first export overall on a server that has never
   failed, at Notification rather than Warning. Every failure line is logged at Warning, never
   Error, so a struggling backend cannot push a server toward `DieAboveErrorCount`. Neither line is
-  meant to carry a header value: each configured value, the credential half of it when the value
-  has a "scheme credential" shape, and the JSON-escaped form of both, are redacted out of the
-  backend's own response body and gRPC status detail before a line is queued, and anything else
-  shaped like a bearer or basic credential is redacted too, whether or not it matches a configured
-  value; this is not exhaustive, so the log itself is still worth treating as sensitive. The
-  listener is read off the export thread only to classify and queue; a five second tick listener
-  drains it into the game logger on the main thread. Up to 32 distinct failure kinds are tracked at
-  once; once the cap is reached, every kind whose own ten-minute window has already passed is
-  evicted first, so a server old enough to have once seen that many, all since resolved, never
-  loses a genuinely new one to it. `PulseOtlpConfig.Headers` being `null`, or holding a `null`
-  value for one key, both accepted on the config side already, no longer turns exporting off for
-  the session.
-- The startup `Pulse OTLP exporting ...` log line no longer names the full configured `Endpoint`.
-  Userinfo or a query string in it (a backend that authenticates through a signed URL, say) had no
-  business there; only scheme, host, port and path are logged now, the same components every
-  export failure or success line already named.
-- `TryResolveEndpoint` no longer mangles a configured `Endpoint` that already carries a query
-  string: `https://host/otlp?key=abc` used to become `https://host/otlp?key=abc/v1/metrics`,
-  landing the signal path after the query instead of before it. It now builds the result from the
-  endpoint's path alone, through `UriBuilder`, so the query survives in its rightful place:
-  `https://host/otlp/v1/metrics?key=abc`.
+  meant to carry a header value: each configured value of at least 6 characters (shorter than that
+  reads as an ordinary id, not a credential), the credential half of it when the value has a
+  "scheme credential" shape, and the JSON-escaped form of both, are matched case-insensitively and
+  redacted out of the backend's own response body and gRPC status detail before a line is queued,
+  longest value first so a short one can never land inside a longer one's own match. Anything else
+  shaped like a bearer or basic credential of at least 8 characters is redacted too, whether or not
+  it matches a configured value, the length floor keeping ordinary prose that merely mentions one
+  of the two words intact; this is not exhaustive, so the log itself is still worth treating as
+  sensitive. The listener is read off the export thread only to classify and queue; a five second
+  tick listener drains it into the game logger on the main thread. Up to 32 distinct failure kinds
+  are tracked at once; once the cap is reached, every kind whose own ten-minute window has already
+  passed is evicted first, so a server old enough to have once seen that many, all since resolved,
+  never loses a genuinely new one to it.
 - `docs/getting-started.md`, a walkthrough for a server owner who has never used Prometheus or
   Grafana, routed by how their server is hosted: installing the base mod, then either a local
   Prometheus and Grafana pair or Grafana Cloud's free tier over OTLP, ending at the shared
@@ -176,6 +168,19 @@ first.
   `pulse_mod_tick_seconds_total`, `pulse_attribution_ticks_total` and
   `pulse_attribution_dropped_samples_total` are unaffected: they are cumulative counters and simply
   stop moving.
+- The startup `Pulse OTLP exporting ...` log line no longer names the full configured `Endpoint`.
+  Userinfo or a query string in it (a backend that authenticates through a signed URL, say) had no
+  business there; only scheme, host, port and path are logged now, the same components every
+  export failure or success line already named.
+- `TryResolveEndpoint` no longer mangles a configured `Endpoint` that already carries a query
+  string: `https://host/otlp?key=abc` used to become `https://host/otlp?key=abc/v1/metrics`,
+  landing the signal path after the query instead of before it. It now builds the result from the
+  endpoint's path alone, through `UriBuilder`, so the query survives in its rightful place:
+  `https://host/otlp/v1/metrics?key=abc`.
+- The error logged for an `Endpoint` `TryResolveEndpoint` cannot parse used to repeat the configured
+  value back whole, the same problem as the two entries above: userinfo or a query string in it
+  went straight into the log. The line now names the config key and the file instead of the value:
+  `Pulse OTLP's 'Endpoint' in pulse-otlp.json is not an absolute http or https URL.`
 
 ## [0.1.0] - 2026-09-01
 
