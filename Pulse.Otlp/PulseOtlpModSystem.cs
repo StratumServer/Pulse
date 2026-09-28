@@ -32,9 +32,11 @@ public sealed class PulseOtlpModSystem : ModSystem
     /// so without an override here the two mods keep whatever order dependency resolution happened
     /// to produce. This mod's MeterProvider has to be built, and therefore already listening for
     /// the "Pulse.Server" meter by name, before PulseModSystem creates that meter and seeds its
-    /// counters: a System.Diagnostics.Metrics.Counter.Add call is a no-op when nothing is listening
-    /// at the moment it runs, so a seed recorded first is simply gone, not merely delayed. See
-    /// PulseModSystem.SeedCounters for the call this protects.</summary>
+    /// counters: a measurement only reaches the listeners attached at the moment it is recorded.
+    /// MeterListener.Start() does see an instrument that already existed, since it walks every
+    /// published instrument when it starts, so starting later costs nothing on the instrument
+    /// itself; what it costs is whatever was already recorded on it, which for a fresh instrument
+    /// is exactly its seed. See PulseModSystem.SeedCounters for the call this protects.</summary>
     public override double ExecuteOrder() => 0.05;
 
     public override void StartServerSide(ICoreServerAPI api)

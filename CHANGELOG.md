@@ -148,11 +148,11 @@ first.
   ran: `pulse_engine_warnings_total`, `pulse_player_deaths_total`, `pulse_server_suspends_total`,
   `pulse_server_suspend_seconds_total` and `pulse_worldgen_columns_generated_total` reached
   `/metrics` correctly but did not reach OTLP until whatever they measured happened for the first
-  time, and `pulse_log_entries_total` was missing the same way until a real log line arrived.
-  Anything counted while the server was still starting up, including early log entries and
-  spawn-area worldgen columns, never reached OTLP totals at all, even once the panels did start
-  moving. The OTLP mod now starts before the base mod, so its exporter is already listening when
-  these counters are seeded at startup.
+  time, and `pulse_log_entries_total` was missing the same way until a real log line arrived. What
+  never reached OTLP at all, even once the panels did start moving, was the zero every one of them
+  is seeded with at startup, plus the handful of log lines the two mods can log between the base
+  mod starting and the OTLP mod finishing its own startup. The OTLP mod now starts before the base
+  mod, so its exporter is already listening when these counters are seeded.
 
 ## [0.1.0] - 2026-09-01
 
