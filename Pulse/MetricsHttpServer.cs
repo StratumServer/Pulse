@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -118,6 +119,9 @@ internal sealed class MetricsHttpServer : IDisposable
     // ponytail: one connection at a time, an accepted client blocking the next until it finishes
     // or a timeout evicts it. A stalled scraper only ever delays the next scrape by that long.
     // Accept concurrently if that ever matters.
+    [SuppressMessage(
+        "Major Code Smell", "S2589:Boolean expressions should not be gratuitous",
+        Justification = "stopping is volatile and Dispose sets it from another thread; the analysis assumes it cannot change inside the loop body.")]
     private void Serve()
     {
         int acceptBackoffMs = InitialAcceptBackoffMs;
