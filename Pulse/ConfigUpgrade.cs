@@ -22,6 +22,10 @@ internal static class ConfigUpgrade
         "{0} added these keys to {1} with their defaults: {2}. Everything already in the file was "
         + "kept as it was.";
 
+    private const string AddedKeysDroppedDuplicates =
+        "{0} added these keys to {1} with their defaults: {2}. The same rewrite also dropped the "
+        + "duplicate keys below to one spelling each.";
+
     private const string DroppedKeys =
         "{0} does not know these keys in {1}, and rewriting the file has just dropped them: {2}. "
         + "Check them for typos.";
@@ -33,6 +37,10 @@ internal static class ConfigUpgrade
         "{0} found the same key written more than once, cased differently, in {1}: {2}. Remove "
         + "the extra spellings to stop this warning.";
 
+    private const string DuplicateKeysResolved =
+        "{0} found the same key written more than once, cased differently, in {1}: {2}. The "
+        + "rewrite above already dropped the extra spellings.";
+
     private const string UpgradeFailed =
         "{0} could not bring {1} up to date ({2}). The server runs on the values the file does "
         + "have, with defaults for the rest.";
@@ -41,6 +49,23 @@ internal static class ConfigUpgrade
     /// must not be one this refuses to look at.</summary>
     private static readonly JsonDocumentOptions Lenient =
         new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
+
+    /// <summary>Which added-keys line is true: the plain one, or the one admitting that the same
+    /// rewrite also collapsed a duplicate spelling, when <see cref="Compare"/> found one alongside
+    /// the missing keys that triggered the rewrite. Returns the template, not a line with the
+    /// missing keys already substituted into it: those names come straight off the admin's own
+    /// file, and formatting them in here rather than leaving them as <c>Logger.Notification</c>'s
+    /// own args would let a key spelled with a literal brace reach <c>string.Format</c> twice.
+    /// </summary>
+    internal static string AddedKeysTemplate(ConfigDiff diff) =>
+        diff.Duplicated.Count > 0 ? AddedKeysDroppedDuplicates : AddedKeys;
+
+    /// <summary>Which duplicate-key line is true: an admin only has to remove the extra spelling by
+    /// hand when nothing else rewrote the file for them. When <see cref="Compare"/> also found a
+    /// missing key, <see cref="Upgrade{T}"/>'s own rewrite has already collapsed the duplicate
+    /// down to one spelling by the time this warning is logged.</summary>
+    internal static string DuplicateKeysTemplate(ConfigDiff diff) =>
+        diff.Missing.Count > 0 ? DuplicateKeysResolved : DuplicateKeys;
 
     /// <summary>Adds whatever keys a newer version of the mod introduced to the config file the
     /// admin already has, and says in the log what changed.</summary>
@@ -76,7 +101,8 @@ internal static class ConfigUpgrade
             if (diff.Missing.Count > 0)
             {
                 api.StoreModConfig(config, filename);
-                api.Logger.Notification(AddedKeys, modName, filename, string.Join(", ", diff.Missing));
+                api.Logger.Notification(
+                    AddedKeysTemplate(diff), modName, filename, string.Join(", ", diff.Missing));
             }
         }
         catch (Exception e)
@@ -94,7 +120,8 @@ internal static class ConfigUpgrade
 
         if (diff.Duplicated.Count > 0)
         {
-            api.Logger.Warning(DuplicateKeys, modName, filename, string.Join("; ", diff.Duplicated));
+            api.Logger.Warning(
+                DuplicateKeysTemplate(diff), modName, filename, string.Join("; ", diff.Duplicated));
         }
     }
 

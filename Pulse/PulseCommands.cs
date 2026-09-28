@@ -42,7 +42,8 @@ internal static class PulseCommands
     public static string Switched(bool on, int burstTicks, int intervalSeconds) =>
         on
             ? $"Attribution is on: {Cycle(burstTicks, intervalSeconds)}. {NotWritten}"
-            : $"Attribution is off, and the engine's frame profiler with it. {NotWritten}";
+            : "Attribution is off, and the engine's frame profiler with it, unless the engine's "
+                + $"own /debug logticks still wants it running. {NotWritten}";
 
     public static string Status(bool on, int burstTicks, int intervalSeconds, long ticksProfiled, bool inBurst) =>
         on

@@ -42,6 +42,14 @@ public class PulseModSystemClashTests
         chatCommands.Create("PULSE");
         apiFake.On("get_ChatCommands", _ => chatCommands);
 
+        // Left unstubbed, this fake API hands StartServerSide a brand new PulseConfig, whose
+        // default Port (9464) is a real Pulse's own. StartServerSide would then bind that exact
+        // socket for the rest of the test process: harmless here, but a real collision waiting to
+        // happen against a developer's own running Pulse or a parallel test run. Port 0 asks the
+        // OS for whatever is free; Enabled stays true, the default, since this test needs the
+        // rest of StartServerSide (the profiler priming) to run same as it would for a real admin.
+        apiFake.On("LoadModConfig", _ => new PulseConfig { Port = 0 });
+
         (IServerEventAPI eventApi, AutoFakeProxy eventFake) = AutoFakeProxy.Create<IServerEventAPI>();
         eventFake.On("RegisterGameTickListener", args =>
         {
@@ -73,37 +81,48 @@ public class PulseModSystemClashTests
         });
         apiFake.On("get_Logger", _ => logger);
 
-        Exception? thrown = Record.Exception(() => new PulseModSystem().StartServerSide(api));
+        PulseModSystem system = new();
+        try
+        {
+            Exception? thrown = Record.Exception(() => system.StartServerSide(api));
 
-        Assert.Null(thrown);
+            Assert.Null(thrown);
 
-        // The clash costs its own warning and nothing upstream of it: two other warnings fire
-        // first (the config file and the engine probe, both unreachable through this fake API and
-        // both already unrelated, pre-existing degrade paths of their own), but exactly one names
-        // the clash, and none of the three is an exception escaping StartServerSide.
-        string[] rendered = warnings
-            .Select(w => string.Format((string)w![0]!, (object?[])w[1]!))
-            .ToArray();
-        string clashWarning = Assert.Single(rendered, message => message.Contains("could not register /pulse"));
-        Assert.Contains("Command with such name already exists", clashWarning);
+            // The clash costs its own warning and nothing upstream of it: two other warnings fire
+            // first (the config file and the engine probe, both unreachable through this fake API
+            // and both already unrelated, pre-existing degrade paths of their own), but exactly
+            // one names the clash, and none of the three is an exception escaping StartServerSide.
+            string[] rendered = warnings
+                .Select(w => string.Format((string)w![0]!, (object?[])w[1]!))
+                .ToArray();
+            string clashWarning = Assert.Single(rendered, message => message.Contains("could not register /pulse"));
+            Assert.Contains("Command with such name already exists", clashWarning);
 
-        // The order the review's own DispatchProxy probe recorded: the main tick listener first,
-        // then priming armed for RunGame, then the chunk listener. ArmPriming must run after the
-        // tick listener that is the only thing ever able to turn a primed profiler back off; the
-        // clash above must not have disturbed that.
-        Assert.Equal(["tick-listener", "run-phase", "tick-listener"], order);
+            // The order the review's own DispatchProxy probe recorded: the main tick listener
+            // first, then priming armed for RunGame, then the chunk listener. ArmPriming must run
+            // after the tick listener that is the only thing ever able to turn a primed profiler
+            // back off; the clash above must not have disturbed that.
+            Assert.Equal(["tick-listener", "run-phase", "tick-listener"], order);
 
-        // PrimeFrameProfiler runs before the tick loop and turns the profiler on unconditionally;
-        // only AttributionMetrics.Tick, riding the first listener registered above, ever turns it
-        // back off, and only once it has seen a completed tick to prove the profiler is safe to
-        // read. The clash must not have cost that: attribution is off by default, so the first
-        // primed tick is Pulse's only chance to undo priming for the rest of the run.
-        runGamePhase!();
-        Assert.True(profiler.Enabled, "PrimeFrameProfiler must still have run despite the clash");
+            // PrimeFrameProfiler runs before the tick loop and turns the profiler on
+            // unconditionally; only AttributionMetrics.Tick, riding the first listener registered
+            // above, ever turns it back off, and only once it has seen a completed tick to prove
+            // the profiler is safe to read. The clash must not have cost that: attribution is off
+            // by default, so the first primed tick is Pulse's only chance to undo priming for the
+            // rest of the run.
+            runGamePhase!();
+            Assert.True(profiler.Enabled, "PrimeFrameProfiler must still have run despite the clash");
 
-        profiler.PrevRootEntry = new ProfileEntryRange { ElapsedTicks = 1000 };
-        tickListeners[0](0.02f);
+            profiler.PrevRootEntry = new ProfileEntryRange { ElapsedTicks = 1000 };
+            tickListeners[0](0.02f);
 
-        Assert.False(profiler.Enabled);
+            Assert.False(profiler.Enabled);
+        }
+        finally
+        {
+            // StartServerSide bound a real (if ephemeral) socket and started a serving thread for
+            // the metrics endpoint; nothing else in this test would ever stop either one.
+            system.Dispose();
+        }
     }
 }

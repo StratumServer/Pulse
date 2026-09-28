@@ -316,4 +316,53 @@ public class ConfigUpgradeTests
         Assert.Empty(diff.Missing);
         Assert.Empty(diff.Unknown);
     }
+
+    /// <summary>The release review's still-false variant of the added-keys line: the plain "kept
+    /// as it was" claim is only true when the rewrite that added a missing key did not also have
+    /// to collapse a duplicate spelling.</summary>
+    [Fact]
+    public void AddedKeysTemplate_Claims_EverythingWasKept_WhenCompareFoundNoDuplicate()
+    {
+        ConfigDiff diff = new(Missing: ["Attribution"], Unknown: [], Duplicated: []);
+
+        Assert.Contains("kept as it was", ConfigUpgrade.AddedKeysTemplate(diff));
+    }
+
+    /// <summary>Duplicate and rewrite together: the same rewrite that wrote the missing key also
+    /// collapsed "Port"/"port" down to one spelling, so the plain "kept as it was" line would be
+    /// false here.</summary>
+    [Fact]
+    public void AddedKeysTemplate_AdmitsTheRewriteAlsoDroppedADuplicate_WhenCompareFoundOne()
+    {
+        ConfigDiff diff = new(
+            Missing: ["Attribution"], Unknown: [], Duplicated: ["Port: \"port\" wins over \"Port\""]);
+
+        string template = ConfigUpgrade.AddedKeysTemplate(diff);
+        Assert.DoesNotContain("kept as it was", template);
+        Assert.Contains("dropped", template);
+    }
+
+    /// <summary>Duplicate without a rewrite: nothing collapsed "Port"/"port" for the admin, so the
+    /// warning still has to ask them to do it themselves.</summary>
+    [Fact]
+    public void DuplicateKeysTemplate_AsksToRemoveThem_WhenNothingElseRewroteTheFile()
+    {
+        ConfigDiff diff = new(Missing: [], Unknown: [], Duplicated: ["Port: \"port\" wins over \"Port\""]);
+
+        Assert.Contains("Remove the extra spellings", ConfigUpgrade.DuplicateKeysTemplate(diff));
+    }
+
+    /// <summary>Duplicate and rewrite together, the other side of the same release-review defect:
+    /// the rewrite already dropped "Port"/"port" down to one spelling, so telling the admin to
+    /// remove it themselves would be false.</summary>
+    [Fact]
+    public void DuplicateKeysTemplate_SaysTheRewriteAboveAlreadyDroppedThem_WhenOneHappened()
+    {
+        ConfigDiff diff = new(
+            Missing: ["Attribution"], Unknown: [], Duplicated: ["Port: \"port\" wins over \"Port\""]);
+
+        string template = ConfigUpgrade.DuplicateKeysTemplate(diff);
+        Assert.DoesNotContain("Remove the extra spellings", template);
+        Assert.Contains("already dropped", template);
+    }
 }

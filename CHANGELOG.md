@@ -275,6 +275,17 @@ first.
   starting at all: writing the freshly defaulted file back to disk was not guarded the way
   loading one already is. It now logs one error naming what happened and runs on the in-memory
   defaults for that session, exporting off, instead of never starting.
+- `/pulse attribution off`'s reply and its own help text claimed the engine's frame profiler
+  always goes back off with it. That stopped being true the moment the fix above landed: the
+  profiler now stays on while `/debug logticks` still wants it. Both lines now say so.
+- Two of the log lines from the duplicate-key fix above could contradict what the same run of
+  `ConfigUpgrade` actually did. Adding a missing key and collapsing a duplicate spelling can
+  happen in the same rewrite (a file with both `Port` and `port` set, and a key from a newer
+  release still absent, say): the added-keys line still claimed everything already in the file
+  was kept as it was, and the duplicate-key line still asked the admin to remove the extra
+  spelling by hand, even though the rewrite that added the missing key had already dropped it
+  down to one spelling. Each line now names what actually happened for the combination in front
+  of it.
 
 ## [0.1.0] - 2026-09-01
 
