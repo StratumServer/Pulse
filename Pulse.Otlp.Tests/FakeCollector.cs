@@ -50,6 +50,11 @@ internal sealed class FakeCollector : IDisposable
             context.Response.StatusCode = status;
             context.Response.StatusDescription = "Test";
             context.Response.ContentType = "application/json";
+
+            // Without an explicit length the response goes out chunked, which carries no
+            // Content-Length header at all; the exporter's own response size check compares
+            // against that header, so a chunked body would never be seen as too large.
+            context.Response.ContentLength64 = bytes.Length;
             context.Response.OutputStream.Write(bytes, 0, bytes.Length);
             context.Response.Close();
         }

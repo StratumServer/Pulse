@@ -101,7 +101,7 @@ internal sealed class FakeGrpcFailureCollector : IDisposable
         }
     }
 
-    private async Task Pump(NetworkStream stream, CancellationToken token)
+    private static async Task Pump(NetworkStream stream, CancellationToken token)
     {
         byte[] header = new byte[9];
         while (!token.IsCancellationRequested)

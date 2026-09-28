@@ -188,6 +188,32 @@ public class ExportFailureLogTests
         Assert.Contains(longBody[..200] + "...", line);
     }
 
+    /// <summary>A response the exporter refuses to even read has no exception or gRPC status in
+    /// its event payload, only an endpoint and two byte counts: the one shape that reaches Cause's
+    /// own message-template fallback instead of an exception or status string.</summary>
+    [Fact]
+    public void ResponseTooLargeToRead_IsLogged_ViaTheMessageTemplateFallback()
+    {
+        int port = FreePort();
+        string oversizedBody = "{\"error\":\"" + new string('x', 2000) + "\"}";
+        using FakeCollector collector = new(port, _ => (401, oversizedBody));
+        using Rig rig = BuildRig($"http://127.0.0.1:{port}/v1/metrics", maxResponseSizeBytes: 1024);
+
+        rig.Provider.ForceFlush();
+
+        List<string> lines = [];
+        rig.Log.Drain(lines.Add);
+
+        // No exception and no gRPC status travel on this event, only the endpoint and two byte
+        // counts, so this is the one failure kind that reaches Cause's message-template fallback
+        // rather than an exception message or a status string.
+        string line = Assert.Single(lines);
+        Assert.Contains("failed: The response from", line);
+        Assert.Contains("was discarded because its size of", line);
+        Assert.Contains("exceeds the maximum response size of 1024 bytes", line);
+        Assert.DoesNotContain(SecretHeaderValue, line);
+    }
+
     [Fact]
     public void DistinctFailureKinds_AreCappedAt32()
     {
@@ -229,7 +255,8 @@ public class ExportFailureLogTests
     }
 
     private static Rig BuildRig(
-        string endpoint, int timeoutMs = 5000, OtlpExportProtocol protocol = OtlpExportProtocol.HttpProtobuf)
+        string endpoint, int timeoutMs = 5000, OtlpExportProtocol protocol = OtlpExportProtocol.HttpProtobuf,
+        int? maxResponseSizeBytes = null)
     {
         ExportFailureLog log = new();
         Meter meter = new($"Pulse.Otlp.Tests.{Guid.NewGuid()}");
@@ -243,6 +270,10 @@ public class ExportFailureLogTests
                 exporter.Protocol = protocol;
                 exporter.Headers = $"Authorization={SecretHeaderValue}";
                 exporter.TimeoutMilliseconds = timeoutMs;
+                if (maxResponseSizeBytes.HasValue)
+                {
+                    exporter.MaxResponseSizeBytes = maxResponseSizeBytes.Value;
+                }
 
                 // Long enough that the periodic reader's own timer never fires during a test:
                 // every export here is driven explicitly through ForceFlush instead.

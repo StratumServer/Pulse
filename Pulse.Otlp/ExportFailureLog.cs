@@ -40,37 +40,37 @@ internal sealed class ExportFailureLog : EventListener
         }
     }
 
-    protected override void OnEventSourceCreated(EventSource source)
+    protected override void OnEventSourceCreated(EventSource eventSource)
     {
-        if (source.Name == ExporterSource)
+        if (eventSource.Name == ExporterSource)
         {
-            EnableEvents(source, EventLevel.Informational);
+            EnableEvents(eventSource, EventLevel.Informational);
         }
     }
 
     /// <summary>Runs on the exporter's own export thread: classify, queue, return. Never logs from
     /// here, and never blocks, so a slow game logger can never hold the export thread back.</summary>
-    protected override void OnEventWritten(EventWrittenEventArgs e)
+    protected override void OnEventWritten(EventWrittenEventArgs eventData)
     {
-        if (e.EventId == ExportSucceeded)
+        if (eventData.EventId == ExportSucceeded)
         {
             // Only the first delivery, and the first one after a logged failure, are worth a line.
             if (reportSuccess)
             {
                 reportSuccess = false;
-                pending.Enqueue($"Pulse OTLP export to {Clip(Payload(e, "endpoint") ?? "the collector")} succeeded.");
+                pending.Enqueue($"Pulse OTLP export to {Clip(Payload(eventData, "endpoint") ?? "the collector")} succeeded.");
             }
 
             return;
         }
 
-        if (e.Level > EventLevel.Warning)
+        if (eventData.Level > EventLevel.Warning)
         {
             return;
         }
 
-        string cause = Cause(e);
-        string key = e.EventId + " " + cause;
+        string cause = Cause(eventData);
+        string key = eventData.EventId + " " + cause;
         long now = Environment.TickCount64;
 
         // ponytail: a cause whose text changes on every export (a request id inside a gRPC status
@@ -84,8 +84,8 @@ internal sealed class ExportFailureLog : EventListener
 
         lastLogged[key] = now;
         reportSuccess = true;
-        string endpoint = Clip(Payload(e, "endpoint") ?? Payload(e, "rawCollectorUri") ?? "the collector");
-        string response = Payload(e, "response") is { Length: > 0 } body
+        string endpoint = Clip(Payload(eventData, "endpoint") ?? Payload(eventData, "rawCollectorUri") ?? "the collector");
+        string response = Payload(eventData, "response") is { Length: > 0 } body
             ? $" The backend answered: {Clip(body)}"
             : string.Empty;
         pending.Enqueue(
