@@ -7,13 +7,15 @@ namespace Pulse.Otlp.Scenarios;
 internal sealed class FakeCollector : IDisposable
 {
     private readonly HttpListener listener = new();
+    private readonly HttpStatusCode statusCode;
 
     /// <summary>The first export received, or null while none has arrived. Written by the listener
     /// thread and read by the scenario, hence the volatile: the record itself is immutable.</summary>
     private volatile Export? first;
 
-    public FakeCollector(int port)
+    public FakeCollector(int port, HttpStatusCode statusCode = HttpStatusCode.OK)
     {
+        this.statusCode = statusCode;
         listener.Prefixes.Add($"http://127.0.0.1:{port}/");
         listener.Start();
         Task.Run(Accept);
@@ -53,8 +55,10 @@ internal sealed class FakeCollector : IDisposable
                 body.ToArray());
 
             // A real collector answers 200 with an empty ExportMetricsServiceResponse, which on the
-            // wire is a protobuf message with no fields set, which is zero bytes.
-            context.Response.StatusCode = 200;
+            // wire is a protobuf message with no fields set, which is zero bytes. A rejecting
+            // collector gets no body either: the scenario that configures one only needs the
+            // status code itself to reach the exporter.
+            context.Response.StatusCode = (int)statusCode;
             context.Response.ContentType = "application/x-protobuf";
             context.Response.Close();
         }

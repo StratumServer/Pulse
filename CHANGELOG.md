@@ -10,6 +10,17 @@ first.
 
 ### Added
 
+- Export failures no longer pass silently. Pulse OTLP now listens to the OpenTelemetry SDK's own
+  diagnostic event source and turns the first failure of each kind (a rejected push, a refused or
+  unreachable collector, a timeout, and so on) into one line in the server log, repeated at most
+  every ten minutes: `Pulse OTLP export to <endpoint> failed: <why>. The backend answered:
+  <clipped to 200 characters>. Metrics are not reaching the backend; check Endpoint and Headers in
+  pulse-otlp.json. This is logged again at most every 10 minutes.` A matching line reports the
+  first successful export after a failure. Everything is logged at Warning, never Error, so a
+  struggling backend cannot push a server toward `DieAboveErrorCount`, and no line ever carries a
+  header value, since the SDK's own diagnostics never see one either. The listener is read off the
+  export thread only to classify and queue; a five second tick listener drains it into the game
+  logger on the main thread, and at most 32 distinct failure kinds are tracked at once.
 - `docs/getting-started.md`, a walkthrough for a server owner who has never used Prometheus or
   Grafana, routed by how their server is hosted: installing the base mod, then either a local
   Prometheus and Grafana pair or Grafana Cloud's free tier over OTLP, ending at the shared

@@ -23,12 +23,22 @@ public sealed class PulseOtlpModSystem : ModSystem
 
     private const string ConfigFile = "pulse-otlp.json";
 
+    /// <summary>How often the queue <see cref="ExportFailureLog"/> fills on the export thread is
+    /// drained onto the main thread. Independent of the configured export interval: a short
+    /// IntervalSeconds should not also mean the log is checked any more often than this.</summary>
+    private const int ExportFailureDrainIntervalMs = 5000;
+
+    private ICoreServerAPI? sapi;
     private MeterProvider? provider;
+    private ExportFailureLog? exportFailureLog;
+    private long exportFailureLogListenerId = -1;
 
     public override bool ShouldLoad(EnumAppSide forSide) => forSide == EnumAppSide.Server;
 
     public override void StartServerSide(ICoreServerAPI api)
     {
+        sapi = api;
+
         ConfigLoadResult<PulseOtlpConfig> loaded = ConfigLoad.Resolve(
             () => api.LoadModConfig<PulseOtlpConfig>(ConfigFile), () => new PulseOtlpConfig());
         PulseOtlpConfig config = loaded.Config;
@@ -106,9 +116,15 @@ public sealed class PulseOtlpModSystem : ModSystem
         // Nothing past this point can take the server down. Every export runs on the SDK's own
         // background thread ("OpenTelemetry-PeriodicExportingMetricReader-..."), and
         // MetricReader.Collect wraps the collect-and-send in a catch that only writes to the SDK's
-        // EventSource. A refused connection, a 401 from a SaaS backend or a DNS failure is
-        // therefore invisible here by construction; adding our own guard around it would catch
-        // nothing. Checked against OpenTelemetry 1.19.1.
+        // own EventSource. A refused connection, a 401 from a SaaS backend or a DNS failure is
+        // therefore invisible to a try/catch placed here, by construction: the EventListener
+        // below, not a guard around the export call, is what makes it visible instead. Checked
+        // against OpenTelemetry 1.19.1.
+        //
+        // Constructed before the provider that creates the exporter, so the listener is already
+        // attached to the exporter's EventSource by the time the first export can happen.
+        exportFailureLog = new ExportFailureLog();
+
         provider = Sdk.CreateMeterProviderBuilder()
             .AddMeter(meters)
             .ConfigureResource(r =>
@@ -127,6 +143,12 @@ public sealed class PulseOtlpModSystem : ModSystem
             })
             .Build();
 
+        // The errorHandler overload is not optional, for the same reason as the base mod's own
+        // tick listeners: an unhandled exception here would log Fatal and count toward the
+        // engine's DieAboveErrorCount self-shutdown.
+        exportFailureLogListenerId = api.Event.RegisterGameTickListener(
+            OnDrainExportFailures, OnDrainExportFailuresError, ExportFailureDrainIntervalMs);
+
         api.Logger.Notification(
             "Pulse OTLP exporting {0} to {1} over {2} every {3}s as service '{4}'",
             string.Join(", ", meters), endpoint,
@@ -135,10 +157,31 @@ public sealed class PulseOtlpModSystem : ModSystem
 
     public override void Dispose()
     {
-        // Disposing the provider shuts the reader down, which force-flushes one last export before
-        // the process goes away. Blocking here is the point: the alternative is losing the window
-        // that holds whatever went wrong just before shutdown.
+        // Order matters. Disposing the provider shuts the reader down, which force-flushes one
+        // last export before the process goes away; draining right after that flush, rather than
+        // before it, is what catches a failure on that very last attempt. The tick listener comes
+        // down only once nothing more will be queued, and the event listener only once nothing is
+        // left to drain.
         provider?.Dispose();
         provider = null;
+        DrainExportFailures();
+
+        if (exportFailureLogListenerId >= 0)
+        {
+            sapi?.Event.UnregisterGameTickListener(exportFailureLogListenerId);
+            exportFailureLogListenerId = -1;
+        }
+
+        exportFailureLog?.Dispose();
+        exportFailureLog = null;
     }
+
+    private void OnDrainExportFailures(float _) => DrainExportFailures();
+
+    private void OnDrainExportFailuresError(Exception e) => sapi?.Logger.Error(e);
+
+    /// <summary>Passed as an argument, never as the format string: the game's logger runs every
+    /// message through string.Format, and a backend's JSON error body can carry braces that would
+    /// throw and lose the line.</summary>
+    private void DrainExportFailures() => exportFailureLog?.Drain(line => sapi?.Logger.Warning("{0}", line));
 }

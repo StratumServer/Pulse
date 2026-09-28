@@ -132,12 +132,15 @@ jobs:
 
       # Has to run after the build and before the end step, so the reports exist by the time the
       # scanner uploads them. The opencover format comes from coverlet.collector, referenced by
-      # both test projects; the scenarios boot a real server, which is where the ModSystem and
-      # the HTTP path get their coverage.
+      # every test project; the scenarios boot a real server, which is where the ModSystems and
+      # the HTTP path get their coverage. Pulse.Otlp.Tests joined this loop with the OTLP export
+      # failure log: before it, nothing ever ran Pulse.Otlp's own unit tests under coverage, so
+      # Sonar saw every line in Pulse.Otlp as uncovered new code regardless of what the suite
+      # actually exercised.
       - name: Tests with coverage
         run: |
           set -e
-          for p in Pulse.Tests Pulse.Scenarios; do
+          for p in Pulse.Tests Pulse.Scenarios Pulse.Otlp.Tests; do
             dotnet test "$p/$p.csproj" -c Release --no-build \
               --filter "Category!=Cost" \
               --collect:"XPlat Code Coverage;Format=opencover" \

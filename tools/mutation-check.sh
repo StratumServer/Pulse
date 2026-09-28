@@ -47,7 +47,7 @@ mutate() { # <file> <sed -E expression> <label>
     git checkout -- "$file"
 }
 
-MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse/EngineSample.cs Pulse/PingSummary.cs Pulse/EntityBreakdown.cs Pulse/SuspendBookkeeper.cs Pulse/TickAttribution.cs Pulse/ModOwners.cs Pulse/ConfigUpgrade.cs Pulse/ConfigLoad.cs Pulse/PulseCommands.cs Pulse/AttributionMetrics.cs Pulse.Otlp/OtlpOptions.cs"
+MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse/EngineSample.cs Pulse/PingSummary.cs Pulse/EntityBreakdown.cs Pulse/SuspendBookkeeper.cs Pulse/TickAttribution.cs Pulse/ModOwners.cs Pulse/ConfigUpgrade.cs Pulse/ConfigLoad.cs Pulse/PulseCommands.cs Pulse/AttributionMetrics.cs Pulse.Otlp/OtlpOptions.cs Pulse.Otlp/ExportFailureLog.cs"
 
 if ! git diff --quiet -- $MUTATED; then
     echo "One of $MUTATED has uncommitted changes; refusing to mutate over them."
@@ -270,6 +270,17 @@ mutate Pulse.Otlp/OtlpOptions.cs \
 mutate Pulse.Otlp/OtlpOptions.cs \
     's/string\.IsNullOrWhiteSpace\(configuredName\)/!string.IsNullOrWhiteSpace(configuredName)/' \
     "otlp: a blank ServiceName exports as-is and a real one is replaced by the default"
+
+# The failure log turns a silent export into one rate-limited line; both of its limits exist to
+# bound the log itself, and a mutation that erases either one is exactly what would let a stuck
+# collector or a churning cause flood it.
+mutate Pulse.Otlp/ExportFailureLog.cs \
+    's/RepeatMs = 10 \* 60_000;/RepeatMs = 0;/' \
+    "otlp failure log: the ten-minute repeat window disappears, so a standing outage floods the log"
+
+mutate Pulse.Otlp/ExportFailureLog.cs \
+    's/MaxKinds = 32;/MaxKinds = 320;/' \
+    "otlp failure log: the tracked-kinds cap stops bounding memory"
 
 # Every mutation is reverted in the source, but the last one of each block was built before it
 # was, so the binaries on disk still carry it. Leave them matching the tree: anything running
