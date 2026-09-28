@@ -28,6 +28,21 @@ public class AttributionMetricsTests
             walkListeners ?? (_ => { }),
             (template, message) => warnings.Add((template, message)));
 
+    /// <summary>Advances the duty cycle through the interval tick, the discarded warm-up sample,
+    /// and a whole five-tick burst (the <see cref="Metrics"/> helper's own BurstTicks), folding
+    /// <paramref name="tick"/> every time a tick is actually profiled. Setting
+    /// <c>profiler.PrevRootEntry</c> once up front, the way <c>TickAttributionTests</c> builds its
+    /// own trees, rather than calling Begin/End keeps the burst's arithmetic exact: a hand-built
+    /// tree has no timing noise for entry.Value or BusySeconds to pick up.</summary>
+    private static void RunWholeBurst(AttributionMetrics metrics, FrameProfilerUtil profiler, ProfileEntryRange tick)
+    {
+        profiler.PrevRootEntry = tick;
+        for (int i = 0; i < 7; i++)
+        {
+            metrics.Tick(1.0);
+        }
+    }
+
     [Fact]
     public void Tick_KeepsWaiting_WhileThePrimedTickHasNotCompletedYet()
     {
@@ -198,6 +213,112 @@ public class AttributionMetricsTests
         Assert.Contains(samples, s => s.Name == "pulse_mod_tick_seconds_total");
     }
 
+    /// <summary>Names, units and help text are not decoration: Unit feeds PrometheusText's own
+    /// translation of the OTLP unit into a name suffix, and Help becomes the exported HELP line,
+    /// so a wrong one is wrong in what a server operator actually reads.</summary>
+    [Fact]
+    public void Constructor_Names_TheFourInstruments_WithTheStatedUnitAndHelpText()
+    {
+        using Meter meter = new(UniqueMeterName());
+        using MetricsAggregator aggregator = new(meter.Name);
+        FrameProfilerUtil profiler = new("test") { Enabled = true };
+        AttributionMetrics metrics = Metrics(meter, profiler, []);
+
+        metrics.Seed();
+        IReadOnlyList<MetricSample> samples = aggregator.Collect();
+
+        MetricSample share = samples.First(s => s.Name == "pulse_mod_tick_share");
+        Assert.Equal("{share}", share.Unit);
+        Assert.Equal(
+            "Fraction of the profiled main-thread busy time attributed to one mod over the last completed burst, while attribution is running.",
+            share.Help);
+
+        MetricSample seconds = samples.First(s => s.Name == "pulse_mod_tick_seconds_total");
+        Assert.Equal("s", seconds.Unit);
+        Assert.Equal(
+            "Main-thread seconds attributed to one mod while attribution was profiling. Sampled: this is time inside the bursts, not since startup.",
+            seconds.Help);
+
+        MetricSample ticks = samples.Single(s => s.Name == "pulse_attribution_ticks_total");
+        Assert.Equal("{tick}", ticks.Unit);
+        Assert.Equal(
+            "Ticks actually profiled, so the sampled seconds can be normalised against the ticks they came from.",
+            ticks.Help);
+
+        MetricSample dropped = samples.Single(s => s.Name == "pulse_attribution_dropped_samples_total");
+        Assert.Equal("{sample}", dropped.Unit);
+        Assert.Equal(
+            "Profiler marks discarded because their elapsed time had overflowed the engine's 32 bit counter.",
+            dropped.Help);
+    }
+
+    /// <summary>No mod-owned marks at all: every busy tick lands on the engine bucket, so its
+    /// measured seconds and the burst's busy seconds are the same number by construction. The
+    /// share has to come out at exactly 1, not merely close to it, which is what tells a real
+    /// division from one that quietly turned into a multiplication or a fixed 0 or 1.</summary>
+    [Fact]
+    public void PublishBurst_Reports_TheEngineShare_AsExactlyItsFractionOfBusyTime()
+    {
+        using Meter meter = new(UniqueMeterName());
+        using MetricsAggregator aggregator = new(meter.Name);
+        FrameProfilerUtil profiler = new("test") { Enabled = true };
+        AttributionMetrics metrics = Metrics(meter, profiler, []);
+
+        RunWholeBurst(metrics, profiler, new ProfileEntryRange { ElapsedTicks = 1000 });
+
+        MetricSample share = Assert.Single(
+            aggregator.Collect(), s => s.Name == "pulse_mod_tick_share" && s.Labels.Any(l => l.Value == "engine"));
+        Assert.Equal(1.0, share.Value);
+    }
+
+    /// <summary>The whole tick is the sleep mark Fold() subtracts before charging anything to the
+    /// engine, so busy time and the engine's own seconds both land on exactly zero. An idle burst
+    /// like this has to publish a zero share, not the NaN a 0/0 division would otherwise leak into
+    /// the exported metric.</summary>
+    [Fact]
+    public void PublishBurst_Reports_AZeroShare_InsteadOfDividingByZero_WhenABurstMeasuresNoBusyTime()
+    {
+        using Meter meter = new(UniqueMeterName());
+        using MetricsAggregator aggregator = new(meter.Name);
+        FrameProfilerUtil profiler = new("test") { Enabled = true };
+        AttributionMetrics metrics = Metrics(meter, profiler, []);
+
+        RunWholeBurst(metrics, profiler, new ProfileEntryRange
+        {
+            ElapsedTicks = 400,
+            Marks = new Dictionary<string, ProfileEntry> { ["sleep"] = new ProfileEntry(400, 1) },
+        });
+
+        MetricSample share = Assert.Single(
+            aggregator.Collect(), s => s.Name == "pulse_mod_tick_share" && s.Labels.Any(l => l.Value == "engine"));
+        Assert.Equal(0.0, share.Value);
+    }
+
+    /// <summary>The mark's prefix names an owner, but the default walkListeners passed to
+    /// <see cref="Metrics"/> never populates one, so the whole tick's busy time is charged to
+    /// "unattributed" and nothing is left over for "engine". Both still have to appear exactly
+    /// once each: not dropped (an empty family) and not doubled (the real value published once by
+    /// the loop and then again by its own zero fallback).</summary>
+    [Fact]
+    public void PublishBurst_Reports_AnUnclaimedMark_AsUnattributed_WithoutDuplicatingEitherBucket()
+    {
+        using Meter meter = new(UniqueMeterName());
+        using MetricsAggregator aggregator = new(meter.Name);
+        FrameProfilerUtil profiler = new("test") { Enabled = true };
+        AttributionMetrics metrics = Metrics(meter, profiler, []);
+
+        RunWholeBurst(metrics, profiler, new ProfileEntryRange
+        {
+            ElapsedTicks = 1000,
+            Marks = new Dictionary<string, ProfileEntry> { ["gmleSome.Mod.Thing"] = new ProfileEntry(1000, 1) },
+        });
+
+        List<MetricSample> shares = aggregator.Collect().Where(s => s.Name == "pulse_mod_tick_share").ToList();
+        Assert.Equal(2, shares.Count);
+        Assert.Equal(0.0, Assert.Single(shares, s => s.Labels.Any(l => l.Value == "engine")).Value);
+        Assert.Equal(1.0, Assert.Single(shares, s => s.Labels.Any(l => l.Value == "unattributed")).Value);
+    }
+
     [Fact]
     public void Stop_DisablesTheProfiler_WhileAttributionIsStillLive()
     {
@@ -208,6 +329,22 @@ public class AttributionMetricsTests
         metrics.Stop();
 
         Assert.False(profiler.Enabled);
+    }
+
+    /// <summary>Seed() is also called from Switch(true), which only ever calls it once attribution
+    /// is already enabled; nothing previously drove the guard's own early return while attribution
+    /// was still off.</summary>
+    [Fact]
+    public void Seed_DoesNothing_WhileAttributionIsDisabled()
+    {
+        using Meter meter = new(UniqueMeterName());
+        using MetricsAggregator aggregator = new(meter.Name);
+        FrameProfilerUtil profiler = new("test") { Enabled = true };
+        AttributionMetrics metrics = Metrics(meter, profiler, [], enabled: false);
+
+        metrics.Seed();
+
+        Assert.Empty(aggregator.Collect());
     }
 
     /// <summary>What PulseCommandsTests does not already cover: switching on seeds the families at
@@ -230,6 +367,9 @@ public class AttributionMetricsTests
         Assert.Equal(0, seeded.Single(s => s.Name == "pulse_attribution_dropped_samples_total").Value);
         Assert.All(seeded.Where(s => s.Name == "pulse_mod_tick_share"), s => Assert.Equal(0, s.Value));
         Assert.All(seeded.Where(s => s.Name == "pulse_mod_tick_seconds_total"), s => Assert.Equal(0, s.Value));
+        // Assert.All over a Where(...) passes vacuously on zero matches, which is exactly what a
+        // dropped per-modid Add would produce: this is what actually proves the family is there.
+        Assert.Equal(2, seeded.Count(s => s.Name == "pulse_mod_tick_seconds_total"));
 
         Assert.Equal(EnumCommandStatus.Success, metrics.Switch(false).Status);
         Assert.True(profiler.Enabled); // Switch alone does not touch the flag.
