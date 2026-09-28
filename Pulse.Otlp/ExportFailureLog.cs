@@ -97,13 +97,7 @@ internal sealed partial class ExportFailureLog(IReadOnlyCollection<string> secre
 
         if (eventData.EventId == ExportSucceeded)
         {
-            // Only the first delivery, and the first one after a logged failure, are worth a line.
-            if (reportSuccess)
-            {
-                reportSuccess = false;
-                pending.Enqueue((true, $"Pulse OTLP export to {Clip(eventEndpoint)} succeeded."));
-            }
-
+            HandleSuccess(eventEndpoint);
             return;
         }
 
@@ -119,40 +113,68 @@ internal sealed partial class ExportFailureLog(IReadOnlyCollection<string> secre
         // is what keeps either from earning a line, and a tracked kind, per export forever.
         string key = eventData.EventId + " " + TrimDetail(cause);
         long now = Environment.TickCount64;
-
-        if (lastLogged.TryGetValue(key, out long last))
+        if (ShouldSkip(key, now))
         {
-            if (now - last < RepeatMs)
-            {
-                return;
-            }
-        }
-        else if (lastLogged.Count >= MaxKinds)
-        {
-            // Stale entries no longer rate-limit anything, so they are the first thing to give up
-            // before a new kind is dropped: without this, a server old enough to have once seen
-            // 32 different kinds, all long since resolved, would refuse to log a brand new one
-            // ever again.
-            foreach (KeyValuePair<string, long> entry in lastLogged)
-            {
-                if (now - entry.Value >= RepeatMs)
-                {
-                    lastLogged.TryRemove(entry.Key, out _);
-                }
-            }
-
-            // ponytail: only if every one of the 32 tracked kinds is still inside its own repeat
-            // window is a new kind ever dropped outright; raise MaxKinds if a real deployment ever
-            // needs more than that many distinct kinds live at once.
-            if (lastLogged.Count >= MaxKinds)
-            {
-                return;
-            }
+            return;
         }
 
         lastLogged[key] = now;
         reportSuccess = true;
-        string endpointText = Clip(eventEndpoint);
+        EnqueueFailure(eventEndpoint, eventData, cause);
+    }
+
+    /// <summary>Only the first delivery, and the first one after a logged failure, are worth a
+    /// line.</summary>
+    private void HandleSuccess(string endpoint)
+    {
+        if (reportSuccess)
+        {
+            reportSuccess = false;
+            pending.Enqueue((true, $"Pulse OTLP export to {Clip(endpoint)} succeeded."));
+        }
+    }
+
+    /// <summary>Whether <paramref name="key"/> is still rate-limited: already logged inside its
+    /// repeat window, or new but the cap has no room even after evicting whatever has aged out of
+    /// its own window.</summary>
+    private bool ShouldSkip(string key, long now)
+    {
+        if (lastLogged.TryGetValue(key, out long last))
+        {
+            return now - last < RepeatMs;
+        }
+
+        if (lastLogged.Count < MaxKinds)
+        {
+            return false;
+        }
+
+        // Stale entries no longer rate-limit anything, so they are the first thing to give up
+        // before a new kind is dropped: without this, a server old enough to have once seen 32
+        // different kinds, all long since resolved, would refuse to log a brand new one ever
+        // again.
+        EvictStaleKinds(now);
+
+        // ponytail: only if every one of the 32 tracked kinds is still inside its own repeat
+        // window is a new kind ever dropped outright; raise MaxKinds if a real deployment ever
+        // needs more than that many distinct kinds live at once.
+        return lastLogged.Count >= MaxKinds;
+    }
+
+    private void EvictStaleKinds(long now)
+    {
+        foreach (KeyValuePair<string, long> entry in lastLogged)
+        {
+            if (now - entry.Value >= RepeatMs)
+            {
+                lastLogged.TryRemove(entry.Key, out _);
+            }
+        }
+    }
+
+    private void EnqueueFailure(string endpoint, EventWrittenEventArgs eventData, string cause)
+    {
+        string endpointText = Clip(endpoint);
         string safeCause = Redact(cause);
         string response = Payload(eventData, "response") is { Length: > 0 } body
             ? $" The backend answered: {Clip(Redact(body))}"
@@ -233,8 +255,7 @@ internal sealed partial class ExportFailureLog(IReadOnlyCollection<string> secre
         }
         catch (RegexMatchTimeoutException)
         {
-            // The exact-value pass above already removed every secret this mod itself configured;
-            // a scheme this pass cannot finish checking in time is not one more chance to leak.
+            // Best effort only: keep whatever the exact-value pass above already redacted.
         }
 
         return result;
