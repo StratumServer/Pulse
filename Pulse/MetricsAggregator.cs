@@ -6,7 +6,7 @@ namespace Pulse;
 /// <summary>Accumulates the measurements of a set of Meters into Prometheus-shaped series.</summary>
 /// <remarks>Records arrive on the server's main thread (the tick listener), on the worldgen
 /// thread and on whatever thread logged, while a scrape reads from whichever of the metrics
-/// endpoint's handler threads accepted that connection, so every path takes the same lock. At a
+/// endpoint's handler threads is serving that connection, so every path takes the same lock. At a
 /// handful of records per tick and one scrape per few seconds per caller, a single lock is not
 /// worth refining away.</remarks>
 public sealed class MetricsAggregator : IDisposable

@@ -138,12 +138,12 @@ That default is deliberate. A Vintage Story server is usually a public host, and
 endpoint has no authentication of any kind, so widening `Bind` to `0.0.0.0` publishes your
 player count and tick health to whoever asks. Anyone who can reach the port can also occupy its
 (small, fixed) number of connection slots and blind your own scraper behind them, so a `Bind`
-beyond loopback wants a firewall rule limiting the port to the scraper, not just a reverse proxy
-or a tunnel in front of it. Changing `Bind` is a choice you should make on purpose, not a default
-you inherit.
+beyond loopback wants a firewall rule limiting the port to the scraper. Changing `Bind` is a
+choice you should make on purpose, not a default you inherit.
 
-If you need to scrape from elsewhere, put the endpoint behind a reverse proxy or a firewall rule,
-or tunnel to it.
+If you need to scrape from elsewhere, the safest options leave `Bind` on loopback: tunnel to it,
+or put a reverse proxy in front of it that only your scraper can reach. If you widen `Bind`
+instead, add the firewall rule above.
 
 `Bind` is a plain socket address, not a URL prefix. `0.0.0.0` binds every IPv4 interface, and
 `localhost` binds the IPv4 loopback directly, so both `localhost` and `127.0.0.1` reach it,

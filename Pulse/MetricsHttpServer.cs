@@ -82,7 +82,7 @@ internal sealed class MetricsHttpServer : IDisposable
 
     [SuppressMessage(
         "Blocker Bug", "S2930:\"IDisposable\" objects should be disposed",
-        Justification = "Deliberately never disposed, along with connectionSlots below: see the comment in Dispose. Neither one's underlying wait handle is ever allocated, so disposing either races a handler thread that outlives Dispose's own join into calling Release or observing cancellation on an already-disposed object from another thread, an unhandled exception that crashes the whole game server. Left for the garbage collector once this instance is no longer reachable.")]
+        Justification = "Deliberately never disposed, along with connectionSlots: see the comment in Dispose. Neither one's underlying wait handle is ever allocated, so disposing either races a handler thread that outlives Dispose's own join into calling Release or observing cancellation on an already-disposed object from another thread, an unhandled exception that crashes the whole game server. Left for the garbage collector once this instance is no longer reachable.")]
     private readonly CancellationTokenSource stoppingSource = new();
     private readonly AcceptBackoff acceptBackoff = new();
     private readonly List<ActiveConnection> activeConnections = [];
@@ -191,12 +191,7 @@ internal sealed class MetricsHttpServer : IDisposable
             connection.Client.Close();
         }
 
-        long joinDeadline = Environment.TickCount64 + 1000;
-        foreach (ActiveConnection connection in connections)
-        {
-            int remaining = (int)Math.Clamp(joinDeadline - Environment.TickCount64, 0, 1000);
-            connection.Thread.Join(remaining);
-        }
+        JoinStarted(connections.Select(connection => connection.Thread), 1000);
 
         if (thread.IsAlive)
         {
@@ -211,9 +206,26 @@ internal sealed class MetricsHttpServer : IDisposable
         // SemaphoreSlim from its own finally block. That threw ObjectDisposedException on a
         // background thread with nothing above it to catch it, which crashes the entire game
         // server, not just this mod: a render taking longer than the join budget, or an ordinary
-        // connection accepted in the instant between listener.Stop() and the snapshot above and
-        // so missed by it, was enough to trigger it. Both objects are left for the garbage
-        // collector once this instance is no longer reachable.
+        // connection accepted just before listener.Stop() but registered only after the snapshot
+        // above, and so missed by it, was enough to trigger it. Both objects are left for the
+        // garbage collector once this instance is no longer reachable.
+    }
+
+    /// <summary>Joins every handler thread that has actually started, all within one shared
+    /// budget. A connection is registered just before its thread's Start(), so the snapshot
+    /// Dispose takes can hold a thread that has not started yet: Join throws ThreadStateException
+    /// on that one, and it needs no join anyway, since it starts to find its socket already
+    /// closed and stopping already set, and ends on its own.</summary>
+    internal static void JoinStarted(IEnumerable<Thread> threads, int budgetMs)
+    {
+        long joinDeadline = Environment.TickCount64 + budgetMs;
+        foreach (Thread handler in threads)
+        {
+            if (handler.IsAlive)
+            {
+                handler.Join((int)Math.Clamp(joinDeadline - Environment.TickCount64, 0, budgetMs));
+            }
+        }
     }
 
     // Each accepted connection gets its own short-lived thread, up to MaxConcurrentConnections at

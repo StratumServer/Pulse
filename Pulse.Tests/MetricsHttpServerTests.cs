@@ -588,6 +588,32 @@ public class MetricsHttpServerTests
             $"took {watch.Elapsed} to drop a fast-dribbling client, past the 1 s deadline it should be bounded by");
     }
 
+    /// <summary>The deterministic companion to the test above, whose sub-millisecond pacing Nagle
+    /// or a loaded machine can break: with the deadline already past at accept and a whole request
+    /// waiting in the socket, only the explicit check before each Read stops the server from
+    /// reading it, since a clamped read timeout still waits its 1 ms floor and a buffered request
+    /// beats that every time.</summary>
+    [Fact]
+    public async Task ExpiredDeadline_StopsTheConnection_BeforeItReadsEvenABufferedRequest()
+    {
+        int port = FreePort();
+        using MetricsHttpServer server = new("127.0.0.1", port, () => "x", new FakeLogger(), requestTimeoutMs: -1000);
+        server.Start();
+
+        string response;
+        try
+        {
+            response = await RawRequestAsync(port, "GET /metrics HTTP/1.1\r\nHost: x\r\n\r\n");
+        }
+        catch (IOException)
+        {
+            // Closing a socket with the request still unread in its receive buffer resets it.
+            response = string.Empty;
+        }
+
+        Assert.DoesNotContain("200 OK", response);
+    }
+
     [Fact]
     public async Task RenderThrows_TheServeThreadSurvives_AndTheFailureIsLoggedAtMostOncePerInterval()
     {
@@ -708,12 +734,13 @@ public class MetricsHttpServerTests
     {
         int port = FreePort();
         using ManualResetEventSlim renderStarted = new();
+        FakeLogger logger = new();
         MetricsHttpServer server = new("127.0.0.1", port, () =>
         {
             renderStarted.Set();
             Thread.Sleep(1500);
             return "x";
-        }, new FakeLogger());
+        }, logger);
         server.Start();
 
         using HttpClient client = new();
@@ -728,6 +755,10 @@ public class MetricsHttpServerTests
         await Task.Delay(1700);
         Assert.Empty(server.GetActiveHandlerThreads());
 
+        // The thread-level catch-alls would swallow a Release on a disposed semaphore, so the
+        // process surviving is not enough on its own: nothing may have reached them either.
+        Assert.Empty(logger.Entries);
+
         try
         {
             using HttpResponseMessage response = await scrape;
@@ -738,6 +769,20 @@ public class MetricsHttpServerTests
             // socket; this test only cares that nothing crashed and that the handler thread
             // cleaned up after itself, not what this half-abandoned response looks like.
         }
+    }
+
+    /// <summary>A connection is registered just before its handler thread starts, so the snapshot
+    /// Dispose takes can hold a thread that has not started yet. Joining one throws
+    /// ThreadStateException, which escaped Dispose and skipped the rest of PulseModSystem's own
+    /// cleanup; a reviewer's probe hit it in 81 of 400 Disposes under a busy accept loop.</summary>
+    [Fact]
+    public void JoinStarted_SkipsAThreadThatHasNotStartedYet()
+    {
+        Thread notStarted = new(() => { });
+
+        Exception? thrown = Record.Exception(() => MetricsHttpServer.JoinStarted([notStarted], 100));
+
+        Assert.Null(thrown);
     }
 
     [Fact]
