@@ -74,7 +74,7 @@ internal sealed class FakeGrpcFailureCollector : IDisposable
         }
     }
 
-    private async Task Serve(TcpClient client, CancellationToken token)
+    private static async Task Serve(TcpClient client, CancellationToken token)
     {
         using (client)
         {
