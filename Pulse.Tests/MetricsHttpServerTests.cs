@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Http;
 using System.Net.Sockets;
@@ -700,6 +701,9 @@ public class MetricsHttpServerTests
     /// handler thread exactly there. Reaching the end of this test at all is most of the proof:
     /// the old bug took the whole test host down with it, not just this one test.</summary>
     [Fact]
+    [SuppressMessage(
+        "Major Code Smell", "S2925:Thread.Sleep should not be used in tests",
+        Justification = "This is the render callback, synchronous by contract like the real one, not the test body; it has to actually block the handler thread for a real duration to reproduce a race against Dispose's own timed join, which an awaited delay could not do from inside a synchronous Func<string>.")]
     public async Task Dispose_DuringASlowRender_TheProcessSurvives_AndTheHandlerEndsCleanly()
     {
         int port = FreePort();
@@ -743,7 +747,9 @@ public class MetricsHttpServerTests
         server.Start();
 
         server.Dispose();
-        server.Dispose();
+        Exception? secondCall = Record.Exception(server.Dispose);
+
+        Assert.Null(secondCall);
     }
 
     [Fact]
@@ -752,9 +758,11 @@ public class MetricsHttpServerTests
         MetricsHttpServer server = new("127.0.0.1", FreePort(), () => "x", new FakeLogger());
         server.Start();
 
-        await Task.WhenAll(
+        Exception? thrown = await Record.ExceptionAsync(() => Task.WhenAll(
             Task.Run(server.Dispose),
-            Task.Run(server.Dispose));
+            Task.Run(server.Dispose)));
+
+        Assert.Null(thrown);
     }
 
     /// <summary>A persistent AcceptTcpClient failure, the process out of file descriptors being

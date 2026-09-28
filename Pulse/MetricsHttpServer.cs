@@ -79,6 +79,10 @@ internal sealed class MetricsHttpServer : IDisposable
     private readonly Thread thread;
     private readonly int requestTimeoutMs;
     private readonly SemaphoreSlim connectionSlots = new(MaxConcurrentConnections, MaxConcurrentConnections);
+
+    [SuppressMessage(
+        "Blocker Bug", "S2930:\"IDisposable\" objects should be disposed",
+        Justification = "Deliberately never disposed, along with connectionSlots below: see the comment in Dispose. Neither one's underlying wait handle is ever allocated, so disposing either races a handler thread that outlives Dispose's own join into calling Release or observing cancellation on an already-disposed object from another thread, an unhandled exception that crashes the whole game server. Left for the garbage collector once this instance is no longer reachable.")]
     private readonly CancellationTokenSource stoppingSource = new();
     private readonly AcceptBackoff acceptBackoff = new();
     private readonly List<ActiveConnection> activeConnections = [];
@@ -217,9 +221,6 @@ internal sealed class MetricsHttpServer : IDisposable
     // it. A connection past the cap waits in the kernel's own accept backlog instead of being
     // accepted and then dropped, since the accept thread does not call AcceptTcpClient again
     // until a slot frees up.
-    [SuppressMessage(
-        "Critical Bug", "S2222:Locks should be released",
-        Justification = "connectionSlots.Wait acquires a slot this method itself releases on every path that does not hand the connection to a handler thread; once StartHandler succeeds, ownership of that slot passes to HandleConnection, which releases it in its own finally when that thread finishes. The analysis has no way to see a release deliberately made from a different method on a different thread.")]
     private void Serve()
     {
         try
@@ -238,6 +239,9 @@ internal sealed class MetricsHttpServer : IDisposable
         }
     }
 
+    [SuppressMessage(
+        "Critical Bug", "S2222:Locks should be released",
+        Justification = "connectionSlots.Wait acquires a slot this method itself releases on every path that does not hand the connection to a handler thread; once StartHandler succeeds, ownership of that slot passes to HandleConnection, which releases it in its own finally when that thread finishes. The analysis has no way to see a release deliberately made from a different method on a different thread.")]
     private void ServeUntilStopped()
     {
         while (!stopping)

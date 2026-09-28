@@ -27,9 +27,11 @@ jobs:
   build-and-test:
     name: Build & tests
     runs-on: ubuntu-latest
-    # 15 was enough until tools/mutation-check.sh grew past 70 mutations and Pulse.Otlp.Tests
-    # past 80 cases: a run timed out at 15m15s with nothing wrong, just out of budget.
-    timeout-minutes: 20
+    # 15, then 20, were enough until tools/mutation-check.sh and the unit suites kept growing
+    # across several branches landing around the same time: a run timed out at 15m15s, then
+    # another at 20m4s, both with nothing actually wrong, just out of budget. 30 gives real
+    # headroom instead of chasing the same timeout a third time.
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v7
