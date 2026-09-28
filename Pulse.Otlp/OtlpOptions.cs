@@ -75,10 +75,17 @@ public static partial class OtlpOptions
             return true;
         }
 
-        string text = parsed.AbsoluteUri.TrimEnd('/');
-        uri = new Uri(text.EndsWith(MetricsPath, StringComparison.OrdinalIgnoreCase)
-            ? text
-            : text + MetricsPath);
+        // Built from AbsolutePath through UriBuilder, not from AbsoluteUri with a string
+        // concatenation: a configured endpoint can carry a query string (a backend that
+        // authenticates through a signed URL, say), and appending the signal path to the whole
+        // URI string would land it after the query instead of before it.
+        string path = parsed.AbsolutePath.TrimEnd('/');
+        if (!path.EndsWith(MetricsPath, StringComparison.OrdinalIgnoreCase))
+        {
+            path += MetricsPath;
+        }
+
+        uri = new UriBuilder(parsed) { Path = path }.Uri;
         return true;
     }
 

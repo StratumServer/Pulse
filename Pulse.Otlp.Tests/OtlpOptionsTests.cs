@@ -37,10 +37,24 @@ public class OtlpOptionsTests
     [InlineData("https://otlp.example.com/otlp", "https://otlp.example.com/otlp/v1/metrics")]
     [InlineData("http://localhost:4318/v1/metrics", "http://localhost:4318/v1/metrics")]
     [InlineData("http://localhost:4318/v1/metrics/", "http://localhost:4318/v1/metrics")]
+    // Starts with, but does not end with, the metrics path: distinct from the "already has it"
+    // case above, and the one shape that tells an EndsWith check apart from a StartsWith one.
+    [InlineData("http://localhost:4318/v1/metrics/extra", "http://localhost:4318/v1/metrics/extra/v1/metrics")]
     public void TryResolveEndpoint_Appends_TheMetricsPath_ForHttpProtobuf(string endpoint, string expected)
     {
         Assert.True(OtlpOptions.TryResolveEndpoint(endpoint, OtlpExportProtocol.HttpProtobuf, out Uri? uri));
         Assert.Equal(expected, uri.AbsoluteUri);
+    }
+
+    /// <summary>A backend that authenticates through a signed URL puts its own secret in the query
+    /// string. Appending the signal path to the endpoint as a whole, rather than to its path alone,
+    /// would land "/v1/metrics" after that query instead of before it.</summary>
+    [Fact]
+    public void TryResolveEndpoint_AppendsTheMetricsPath_BeforeAnExistingQueryString()
+    {
+        Assert.True(OtlpOptions.TryResolveEndpoint(
+            "https://host/otlp?key=abc", OtlpExportProtocol.HttpProtobuf, out Uri? uri));
+        Assert.Equal("https://host/otlp/v1/metrics?key=abc", uri.AbsoluteUri);
     }
 
     [Fact]

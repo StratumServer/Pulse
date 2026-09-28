@@ -300,7 +300,7 @@ mutate Pulse.Otlp/OtlpOptions.cs \
     "otlp: the signal path goes to grpc and not to http/protobuf"
 
 mutate Pulse.Otlp/OtlpOptions.cs \
-    's/text\.EndsWith\(MetricsPath, StringComparison\.OrdinalIgnoreCase\)/text.StartsWith(MetricsPath, StringComparison.OrdinalIgnoreCase)/' \
+    's/path\.EndsWith\(MetricsPath, StringComparison\.OrdinalIgnoreCase\)/path.StartsWith(MetricsPath, StringComparison.OrdinalIgnoreCase)/' \
     "otlp: an endpoint already carrying /v1/metrics gets a second one"
 
 mutate Pulse.Otlp/OtlpOptions.cs \
