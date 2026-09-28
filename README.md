@@ -373,9 +373,13 @@ dotnet test Pulse.Scenarios --filter "Category=Cost"`; CI filters the `Cost` tra
 it is a no-op unless that variable is set, because spawning four thousand entities, three times
 over, is slow.
 
-One visible side effect: the engine logs "Over 400ms tick. Skipping N physics ticks" only when its
-profiler is on. If your server is already overloaded you will see that warning appear during
-bursts. It is the engine reporting a real condition it otherwise keeps to itself.
+One visible side effect: the engine logs "Over 400ms tick. Skipping N physics ticks" only while its
+frame profiler is on, and Pulse is what turns it on. It does so for the first tick after every
+start, attribution enabled or not, to prime the profiler so attribution can be switched on later
+without a restart. That first tick loads the spawn area and usually runs long, so one such line
+at startup is normal and harmless; it also counts once in `pulse_log_entries_total{level="warning"}`.
+During attribution bursts the same line appears whenever physics falls behind: that is the engine
+reporting a real condition it otherwise keeps to itself.
 
 ### What it cannot see
 
