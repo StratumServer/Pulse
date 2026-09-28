@@ -228,7 +228,7 @@ public class PrometheusTextTests
     /// <summary>One row per instrument in harness/instruments.tsv from the naming investigation,
     /// with the three fixed units and the expected name each produces through
     /// github.com/prometheus/otlptranslator v1.0.0 (UnderscoreEscapingWithSuffixes, no namespace).</summary>
-    public static IEnumerable<object[]> AllInstruments()
+    public static TheoryData<string, MetricKind, string, string> AllInstruments()
     {
         (string Instrument, MetricKind Kind, string Unit, string Expected)[] rows =
         [
@@ -282,10 +282,13 @@ public class PrometheusTextTests
         ];
 
         Assert.Equal(47, rows.Length);
+        TheoryData<string, MetricKind, string, string> data = [];
         foreach ((string instrument, MetricKind kind, string unit, string expected) in rows)
         {
-            yield return [instrument, kind, unit, expected];
+            data.Add(instrument, kind, unit, expected);
         }
+
+        return data;
     }
 
     [Fact]
