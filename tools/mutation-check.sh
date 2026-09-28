@@ -24,8 +24,9 @@ TEST_PROJECT="Pulse.Tests/Pulse.Tests.csproj"
 # time in a loop that rebuilds the same projects dozens of times.
 dotnet restore Pulse.slnx --nologo -v q >/dev/null 2>&1
 
-run_tests() {
-    dotnet test "$TEST_PROJECT" -c Release --no-restore --nologo -v q >/dev/null 2>&1
+run_tests() { # [test filter]
+    local filter="${1:-}"
+    dotnet test "$TEST_PROJECT" -c Release --no-restore --nologo -v q ${filter:+--filter "$filter"} >/dev/null 2>&1
     return $?
 }
 
@@ -38,11 +39,15 @@ mutate() { # <file> <sed -E expression> <label>
         FAILS=$((FAILS + 1))
         return
     fi
-    if run_tests; then
+    # The mutated file's own test class runs first: it kills almost every mutant in a second or
+    # two. Only a mutant it misses pays for the whole suite, so SURVIVED still means the full
+    # suite passed with the mutation in place. Running the full suite for every mutant cost CI
+    # about a quarter of an hour once the socket server's timing tests joined it.
+    if ! run_tests "FullyQualifiedName~$(basename "$file" .cs)Tests" || ! run_tests; then
+        echo "killed:   $label"
+    else
         echo "SURVIVED: $label"
         FAILS=$((FAILS + 1))
-    else
-        echo "killed:   $label"
     fi
     git checkout -- "$file"
 }
