@@ -294,7 +294,7 @@ mutate Pulse/ConfigUpgrade.cs \
     "config upgrade: a key inside a block is reported without the block it lives in"
 
 mutate Pulse/ConfigUpgrade.cs \
-    's/if \(!known\.Contains\(group\.Key\)\)/if (false)/' \
+    's/byKey\.Where\(g => !known\.Contains\(g\.Key\)\)/byKey.Where(g => false)/' \
     "config upgrade: a key the config does not know goes unreported and is dropped in silence"
 
 mutate Pulse/ConfigUpgrade.cs \

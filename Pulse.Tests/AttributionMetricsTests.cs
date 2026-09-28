@@ -103,6 +103,93 @@ public class AttributionMetricsTests
         Assert.DoesNotContain(aggregator.Collect(), s => s.Name == "pulse_mod_tick_share");
     }
 
+    private const string AttributionWarning =
+        "Pulse could not read the engine's frame profiler ({0}). Per-mod tick attribution is off "
+        + "for the rest of this run and its families stop updating; every other metric is "
+        + "unaffected.";
+
+    /// <summary>A resolver that returns null rather than throwing (the world is not the type Pulse
+    /// expects, say) is not a failure: <c>Tick</c> is simply a no-op for that call, attribution
+    /// stays alive, and nothing is warned.</summary>
+    [Fact]
+    public void Tick_DoesNothing_WhenTheProfilerCannotBeResolvedAtAll()
+    {
+        using Meter meter = new(UniqueMeterName());
+        List<(string Template, string Message)> warnings = [];
+        AttributionMetrics metrics = new(
+            meter,
+            new AttributionConfig { Enabled = true, BurstTicks = 5, IntervalSeconds = 1 },
+            () => null,
+            _ => { },
+            (template, message) => warnings.Add((template, message)));
+
+        metrics.Tick(1.0);
+
+        Assert.Empty(warnings);
+        Assert.Equal(EnumCommandStatus.Success, metrics.Status().Status);
+    }
+
+    /// <summary>Item 4: a resolver that throws, the shape a future engine reshaping
+    /// FrameProfilerUtil or ProfileEntryRange would take, degrades once instead of crashing or
+    /// repeating on every tick. The retry right after, from the give-up path's own best-effort
+    /// shutdown, still succeeds here because the resolver only fails the first time.</summary>
+    [Fact]
+    public void Tick_Degrades_WhenTheProfilerResolverThrows_AndStillDisablesTheProfilerAfterward()
+    {
+        using Meter meter = new(UniqueMeterName());
+        FrameProfilerUtil profiler = new("test") { Enabled = true };
+        profiler.Begin("tick");
+        profiler.End();
+        List<(string Template, string Message)> warnings = [];
+        int calls = 0;
+        AttributionMetrics metrics = new(
+            meter,
+            new AttributionConfig { Enabled = false, BurstTicks = 5, IntervalSeconds = 1 },
+            () =>
+            {
+                calls++;
+                if (calls == 1)
+                {
+                    throw new TypeLoadException("FrameProfilerUtil reshaped");
+                }
+
+                return profiler;
+            },
+            _ => { },
+            (template, message) => warnings.Add((template, message)));
+
+        metrics.Tick(1.0);
+
+        (string template, string message) = Assert.Single(warnings);
+        Assert.Equal(AttributionWarning, template);
+        Assert.Equal("FrameProfilerUtil reshaped", message);
+        Assert.False(profiler.Enabled);
+        Assert.Equal(EnumCommandStatus.Error, metrics.Status().Status);
+    }
+
+    /// <summary>The retry itself can fail too, the same reshape breaking both reads: the second
+    /// failure is swallowed rather than escaping the tick listener a second time.</summary>
+    [Fact]
+    public void Tick_Degrades_WhenTheProfilerResolverThrows_AndTheRetryAlsoFails()
+    {
+        using Meter meter = new(UniqueMeterName());
+        List<(string Template, string Message)> warnings = [];
+        AttributionMetrics metrics = new(
+            meter,
+            new AttributionConfig { Enabled = false, BurstTicks = 5, IntervalSeconds = 1 },
+            () => throw new TypeLoadException("FrameProfilerUtil reshaped"),
+            _ => { },
+            (template, message) => warnings.Add((template, message)));
+
+        Exception? escaped = Record.Exception(() => metrics.Tick(1.0));
+
+        Assert.Null(escaped);
+        (string template, string message) = Assert.Single(warnings);
+        Assert.Equal(AttributionWarning, template);
+        Assert.Equal("FrameProfilerUtil reshaped", message);
+        Assert.Equal(EnumCommandStatus.Error, metrics.Status().Status);
+    }
+
     /// <summary>The bug this class exists to fix: pulse_mod_tick_share is an observable gauge
     /// precisely so that switching attribution off makes the family disappear from a scrape, rather
     /// than serve the shares of whichever mod was profiled in the last burst before the restart.

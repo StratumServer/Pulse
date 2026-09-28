@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Vintagestory.API.Common;
@@ -51,7 +52,18 @@ internal static class ConfigUpgrade
     /// ModConfig read-only or tracks it. The same rewrite is what drops a key the config does not
     /// know, which is why an unknown key is worth a warning rather than silence.
     /// <para>Nothing in here may take a server down over a config file, so a read or a write that
-    /// fails is one warning and then the server carries on unchanged.</para></remarks>
+    /// fails is one warning and then the server carries on unchanged.</para>
+    /// <para>Excluded from coverage for the same reason <c>PulseModSystem</c>,
+    /// <c>AttributionMetrics.Server.cs</c> and the two probes are: this is the ordinary
+    /// <see cref="ICoreServerAPI"/> wiring around <see cref="Compare"/>, the part a unit test
+    /// cannot reach without a live server, and it is what the Atlas scenarios in
+    /// <c>ConfigUpgradeScenarios.cs</c> exercise instead. It cannot join the file-level
+    /// <c>sonar.coverage.exclusions</c> list the others use: this file also holds
+    /// <see cref="Compare"/>, which is exactly the half a unit test can and does drive, and
+    /// <c>ConfigUpgrade.cs</c> cannot be split the way <c>AttributionMetrics</c> was without also
+    /// touching Pulse.Otlp's own project file, which links this file in and belongs to a separate
+    /// PR.</para></remarks>
+    [ExcludeFromCodeCoverage]
     public static void Upgrade<T>(ICoreServerAPI api, T config, string filename, string modName)
         where T : class
     {
@@ -123,14 +135,11 @@ internal static class ConfigUpgrade
         HashSet<string> known = new(config.Select(entry => entry.Key), StringComparer.OrdinalIgnoreCase);
 
         // This level before the blocks under it, so both lists read outermost key first.
-        foreach (IGrouping<string, KeyValuePair<string, JsonNode?>> group in byKey)
+        foreach (IGrouping<string, KeyValuePair<string, JsonNode?>> group in byKey.Where(g => !known.Contains(g.Key)))
         {
-            if (!known.Contains(group.Key))
+            foreach (KeyValuePair<string, JsonNode?> entry in group)
             {
-                foreach (KeyValuePair<string, JsonNode?> entry in group)
-                {
-                    unknown.Add(prefix + entry.Key);
-                }
+                unknown.Add(prefix + entry.Key);
             }
         }
 
