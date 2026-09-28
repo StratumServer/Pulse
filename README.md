@@ -299,8 +299,9 @@ behind the `controlserver` privilege, so admins and a panel console can run them
 
 - `/pulse attribution on` starts the duty cycle straight away, on whatever `BurstTicks` and
   `IntervalSeconds` are in force. The first burst lands one interval later.
-- `/pulse attribution off` stops it and puts the engine's frame profiler back down. A burst in
-  progress is dropped rather than published half-measured.
+- `/pulse attribution off` stops it and puts the engine's frame profiler back down, unless the
+  engine's own `/debug logticks` still wants it running. A burst in progress is dropped rather
+  than published half-measured.
 - `/pulse attribution status` reports whether it is running, the cycle it is using, how many ticks
   it has profiled and whether it is inside a burst right now.
 - `/pulse reload` re-reads `pulse.json` and applies the `Attribution` block live. The reply names

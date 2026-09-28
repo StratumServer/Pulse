@@ -106,7 +106,9 @@ internal sealed partial class AttributionMetrics
                     .HandleWith(_ => Switch(true))
                 .EndSubCommand()
                 .BeginSubCommand("off")
-                    .WithDescription("Stop it, and switch the engine's frame profiler back off.")
+                    .WithDescription(
+                        "Stop it, and switch the engine's frame profiler back off, unless the "
+                        + "engine's own /debug logticks still wants it running.")
                     .HandleWith(_ => Switch(false))
                 .EndSubCommand()
                 .BeginSubCommand("status")

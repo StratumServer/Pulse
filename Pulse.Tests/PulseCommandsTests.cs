@@ -69,8 +69,11 @@ public class PulseCommandsTests
         => Assert.StartsWith("Attribution is on: bursts of 30 ticks every 10s.", PulseCommands.Switched(true, 30, 10));
 
     [Fact]
-    public void Switched_Reports_TheProfilerGoingOffToo()
-        => Assert.StartsWith("Attribution is off, and the engine's frame profiler with it.", PulseCommands.Switched(false, 30, 10));
+    public void Switched_Reports_TheProfilerGoingOffToo_UnlessLogticksStillWantsIt()
+        => Assert.StartsWith(
+            "Attribution is off, and the engine's frame profiler with it, unless the engine's "
+                + "own /debug logticks still wants it running.",
+            PulseCommands.Switched(false, 30, 10));
 
     [Fact]
     public void Status_Reports_TheCycle_TheTicksProfiled_AndTheBurstInProgress()
