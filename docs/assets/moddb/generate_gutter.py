@@ -3,7 +3,7 @@
 Deterministic generator for the Pulse ModDB page's side-gutter Matrix rain
 tile. Same glyph set, font and greens as the hero (generate.py).
 
-200x400, transparent (real alpha), animated WebP. Seamless when tiles are
+400x400, transparent (real alpha), animated WebP. Seamless when tiles are
 stacked vertically (the column pattern's cycle length equals the tile's row
 count, so row R lines up exactly with row 0) and placed side by side
 horizontally (cell size divides the tile width exactly, so there is no
@@ -18,10 +18,10 @@ from PIL import Image, ImageDraw, ImageFont
 
 OUT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-W, H = 200, 400
-CELL = 40            # horizontal glyph spacing (5 columns, exact divisor of W)
+W, H = 400, 400
+CELL = 40            # horizontal glyph spacing (10 columns, exact divisor of W)
 ROW_H = 40           # vertical row pitch
-                      # stay small enough to fit the 60 KB budget
+                      # stay small enough to fit the 110 KB budget
 COLS = W // CELL     # 10, exact -> no partial column at the horizontal seam
 ROWS = H // ROW_H    # 10, exact -> tile's own height is a whole number of rows
 N_FRAMES = ROWS       # temporal cycle == spatial cycle: one loop == one tile
@@ -106,7 +106,7 @@ def main():
         method=6, minimize_size=True,
     )
     size = os.path.getsize(webp_path)
-    assert size <= 60 * 1024, f"over the 60 KB gutter budget: {size} bytes"
+    assert size <= 110 * 1024, f"over the 110 KB gutter budget: {size} bytes"
 
     # 3x2 preview grid of frame 0, on a near-black page background, so the
     # vertical (top/bottom) and horizontal (left/right) seams can be checked.

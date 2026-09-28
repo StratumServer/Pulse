@@ -416,6 +416,8 @@ assert LENS_RY * 2 >= 1.5 * CAP_H, (
 
 TRAIL_N = 46
 TRAIL_STEP = 4.2  # logical arclength px between trail samples
+HEAD_R = 7  # logical px: the travelling dot's radius, kept close to the ECG stroke width
+TAIL_R = 2  # logical px: the radius the trail tapers down to
 
 
 def render_sweep(frame_idx):
@@ -427,13 +429,13 @@ def render_sweep(frame_idx):
         x, y = point_at_length(length)
         x, y = S(x), S(y)
         t = 1.0 - k / TRAIL_N
-        r = S(3) + S(11) * t
+        r = S(TAIL_R) + S(HEAD_R - TAIL_R) * t
         alpha = int(255 * (0.06 + 0.94 * t**1.3))
         color = (HEAD_WHITE[0], HEAD_WHITE[1], HEAD_WHITE[2], 255) if k == 0 \
             else (0, 255, 65, alpha)
         d.ellipse([x - r, y - r, x + r, y + r], fill=color)
     base = new_layer()
-    glow_composite(base, layer, blur=6, glow_alpha_mult=1.6)
+    glow_composite(base, layer, blur=5, glow_alpha_mult=1.3)
     return base
 
 
