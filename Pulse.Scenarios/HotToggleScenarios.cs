@@ -55,7 +55,10 @@ public class HotToggleScenarios : AtlasScenarioBase
 
         CommandResult stop = await World.ExecuteCommand("/pulse attribution off");
         Assert.True(stop.Ok, stop.Message);
-        Assert.StartsWith("Attribution is off, and the engine's frame profiler with it.", stop.Message);
+        Assert.StartsWith(
+            "Attribution is off, and the engine's frame profiler with it, unless the engine's "
+                + "own /debug logticks still wants it running.",
+            stop.Message);
 
         await World.Ticks(5);
 
@@ -120,7 +123,10 @@ public class HotToggleScenarios : AtlasScenarioBase
 
         CommandResult off = await World.ExecuteCommand("/pulse attribution off");
         Assert.True(off.Ok, off.Message);
-        Assert.StartsWith("Attribution is off, and the engine's frame profiler with it.", off.Message);
+        Assert.StartsWith(
+            "Attribution is off, and the engine's frame profiler with it, unless the engine's "
+                + "own /debug logticks still wants it running.",
+            off.Message);
 
         await World.Ticks(5);
 
