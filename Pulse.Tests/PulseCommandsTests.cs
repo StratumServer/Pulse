@@ -99,6 +99,16 @@ public class PulseCommandsTests
                 + "Nothing else in the file differs from what the server is running.",
             PulseCommands.Reloaded(true, 7, 2, []));
 
+    /// <summary>The off-branch's own wording, not just the on-branch's: the two on=false tests
+    /// below only check the restart-keys suffix, so neither one actually reads the sentence this
+    /// pins down.</summary>
+    [Fact]
+    public void Reloaded_Reports_AttributionOff_WhenItIsOff()
+        => Assert.Equal(
+            "Reloaded pulse.json. Attribution is off. "
+                + "Nothing else in the file differs from what the server is running.",
+            PulseCommands.Reloaded(false, 30, 10, []));
+
     [Fact]
     public void Reloaded_Names_TheOneKeyThatNeedsARestart()
         => Assert.EndsWith(
