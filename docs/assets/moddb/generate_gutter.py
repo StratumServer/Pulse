@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
 """
 Deterministic generator for the Pulse ModDB page's side-gutter Matrix rain
-tile. Same glyph set, font and greens as the hero (generate.py).
+tiles. Same glyph set, font and greens as the hero (generate.py).
 
-400x400, transparent (real alpha), animated WebP. Seamless when tiles are
-stacked vertically (the column pattern's cycle length equals the tile's row
-count, so row R lines up exactly with row 0) and placed side by side
-horizontally (cell size divides the tile width exactly, so there is no
-partial column at the edges). Seeded RNG only -> byte-identical output.
+Three 400x400, transparent (real alpha), animated WebP variants, one seed
+each, everything else identical: a wide page tiles the same 400x400 image
+many times side by side, and one tile repeating verbatim reads as an
+obvious grid. Rotating variants across page columns breaks that up.
+
+Each variant is seamless when stacked vertically on itself (the column
+pattern's cycle length equals the tile's row count, so row R lines up
+exactly with row 0) and placed side by side horizontally (cell size divides
+the tile width exactly, so there is no partial column at the edges). Those
+two properties depend only on a tile's own geometry, never on a
+neighbour's content, so mixing variants left-to-right is always safe; the
+one rule that does not come for free is vertical -- a falling glyph that
+runs off a tile's bottom must land back at the SAME variant's top, so any
+page column of stacked tiles has to stick to one variant for its whole
+height (enforced in docs/moddb/listing.html, not here). Seeded RNG only ->
+byte-identical output per variant.
 
 Run: python3 generate_gutter.py
 """
@@ -21,12 +32,19 @@ OUT_DIR = os.path.dirname(os.path.abspath(__file__))
 W, H = 400, 400
 CELL = 40            # horizontal glyph spacing (10 columns, exact divisor of W)
 ROW_H = 40           # vertical row pitch
-                      # stay small enough to fit the 110 KB budget
+                      # stay small enough to fit the 100 KB per-variant budget
 COLS = W // CELL     # 10, exact -> no partial column at the horizontal seam
 ROWS = H // ROW_H    # 10, exact -> tile's own height is a whole number of rows
 N_FRAMES = ROWS       # temporal cycle == spatial cycle: one loop == one tile
 FPS = 8
-SEED = 42
+
+# (output filename, seed). Variant A keeps the original seed so its file
+# stays byte-identical to the pre-variants tile.
+VARIANTS = [
+    ("pulse-gutter.webp", 42),
+    ("pulse-gutter-b.webp", 43),
+    ("pulse-gutter-c.webp", 44),
+]
 
 DIM_RAIN = (13, 130, 52, 255)
 RAIN_HILITE = (170, 255, 195, 255)
@@ -39,23 +57,20 @@ JP_FONT = "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"  # index 0 = JP
 glyph_font = ImageFont.truetype(JP_FONT, 17, index=0)
 
 
-def build_columns():
+def build_columns(seed):
     data = []
     for j in range(COLS):
         x = j * CELL + CELL // 2
-        r = random.Random(SEED * 1000 + j)
+        r = random.Random(seed * 1000 + j)
         cells = [(r.choice(GLYPHS), r.random() < 0.13) for _ in range(N_FRAMES)]
         data.append((x, cells))
     return data
 
 
-RAIN_COLS = build_columns()
-
-
-def render_frame(frame_idx):
+def render_frame(frame_idx, columns):
     frame = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     d = ImageDraw.Draw(frame)
-    for x, cells in RAIN_COLS:
+    for x, cells in columns:
         for row in range(ROWS):
             # (row - frame) mod ROWS: same falling-glyph rule as the hero,
             # and periodic in row with period ROWS -> tiles seamlessly.
@@ -69,10 +84,10 @@ def render_frame(frame_idx):
     return frame
 
 
-def selfcheck(frames):
+def selfcheck(frames, columns, label):
     import numpy as np
-    again = render_frame(0)
-    assert again.tobytes() == frames[0].tobytes(), "frame 0 is not deterministic"
+    again = render_frame(0, columns)
+    assert again.tobytes() == frames[0].tobytes(), f"{label}: frame 0 is not deterministic"
 
     # vertical seam: the tile's own bottom edge must continue its top edge.
     # A glyph is drawn straddling row 0 (cut off above y=0) and the matching
@@ -80,45 +95,62 @@ def selfcheck(frames):
     # copies must reproduce the same pixels across that seam as one
     # uninterrupted tile would. Check by stacking the frame on itself and
     # comparing the seam band against a fresh render shifted by one row.
-    f = np.asarray(frames[0])
     stacked = Image.new("RGBA", (W, H * 2), (0, 0, 0, 0))
     stacked.alpha_composite(frames[0], (0, 0))
     stacked.alpha_composite(frames[0], (0, H))
     band = np.asarray(stacked)[H - ROW_H:H + ROW_H]
     # the seam band must not be uniformly empty (i.e. glyphs really do
     # straddle the boundary) -- a blank band would hide a broken wrap.
-    assert band[..., 3].max() > 0, "seam band is empty, wrap not exercised"
+    assert band[..., 3].max() > 0, f"{label}: seam band is empty, wrap not exercised"
 
     # horizontal: COLS * CELL must equal W exactly (no partial column)
     assert COLS * CELL == W, "cell size does not divide tile width evenly"
-    print("selfcheck OK: deterministic, vertical seam exercised, "
-          f"{COLS}x{CELL}={COLS*CELL} == W={W}")
+
+
+def mixed_grid_preview(variant_frames):
+    """3x2 grid, one variant per column, the same variant top and bottom in
+    that column -- exactly the rule listing.html follows for its page-wide
+    grid. Renders both claims in one image: no vertical seam within a
+    column (same variant stacked twice), and nothing to mismatch at the
+    column boundaries either, since a glyph never straddles two tiles
+    horizontally in the first place (COLS * CELL == W already guarantees
+    that column-of-glyphs sit entirely inside one tile)."""
+    names = [name for name, _ in VARIANTS]
+    preview = Image.new("RGB", (W * len(names), H * 2), (3, 6, 3))
+    for gx, name in enumerate(names):
+        frame0 = variant_frames[name][0]
+        preview.paste(frame0, (gx * W, 0), frame0)
+        preview.paste(frame0, (gx * W, H), frame0)
+    return preview
 
 
 def main():
-    frames = [render_frame(i) for i in range(N_FRAMES)]
-    selfcheck(frames)
+    variant_frames = {}
+    for name, seed in VARIANTS:
+        columns = build_columns(seed)
+        frames = [render_frame(i, columns) for i in range(N_FRAMES)]
+        selfcheck(frames, columns, name)
+        variant_frames[name] = frames
 
-    webp_path = f"{OUT_DIR}/pulse-gutter.webp"
-    frames[0].save(
-        webp_path, save_all=True, append_images=frames[1:], loop=0,
-        duration=round(1000 / FPS), format="WEBP", lossless=False, quality=50,
-        method=6, minimize_size=True,
-    )
-    size = os.path.getsize(webp_path)
-    assert size <= 110 * 1024, f"over the 110 KB gutter budget: {size} bytes"
+        webp_path = f"{OUT_DIR}/{name}"
+        frames[0].save(
+            webp_path, save_all=True, append_images=frames[1:], loop=0,
+            duration=round(1000 / FPS), format="WEBP", lossless=False, quality=50,
+            method=6, minimize_size=True,
+        )
+        size = os.path.getsize(webp_path)
+        assert size <= 100 * 1024, f"{name}: over the 100 KB gutter budget: {size} bytes"
+        print(f"{name}: {size} bytes ({size / 1024:.1f} KB)")
 
-    # 3x2 preview grid of frame 0, on a near-black page background, so the
-    # vertical (top/bottom) and horizontal (left/right) seams can be checked.
-    grid_cols, grid_rows = 3, 2
-    preview = Image.new("RGB", (W * grid_cols, H * grid_rows), (3, 6, 3))
-    for gy in range(grid_rows):
-        for gx in range(grid_cols):
-            preview.paste(frames[0], (gx * W, gy * H), frames[0])
-    preview.save(f"{OUT_DIR}/gutter-preview-3x2.png")
+    # 3x2 preview grid mixing all variants, on a near-black page background,
+    # so the vertical (top/bottom, same variant) and horizontal (left/right,
+    # different variants) seams can both be checked by eye.
+    preview = mixed_grid_preview(variant_frames)
+    preview.save(f"{OUT_DIR}/gutter-preview-mixed-3x2.png")
 
-    print(f"webp: {webp_path} ({size} bytes, {size/1024:.1f} KB)")
     print(f"frames={N_FRAMES} fps={FPS} size={W}x{H} cell={CELL} rows={ROWS} cols={COLS}")
+    print("selfcheck OK for all variants: deterministic, vertical seam exercised, "
+          f"{COLS}x{CELL}={COLS * CELL} == W={W}")
 
 
 if __name__ == "__main__":
