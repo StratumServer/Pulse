@@ -282,6 +282,18 @@ mutate Pulse.Otlp/ExportFailureLog.cs \
     's/MaxKinds = 32;/MaxKinds = 320;/' \
     "otlp failure log: the tracked-kinds cap stops bounding memory"
 
+mutate Pulse.Otlp/ExportFailureLog.cs \
+    's/now - entry\.Value >= RepeatMs/false/' \
+    "otlp failure log: stale kinds are never evicted, so the cap holds a full log hostage forever"
+
+mutate Pulse.Otlp/ExportFailureLog.cs \
+    's/candidate == ownEndpoint/true/' \
+    "otlp failure log: every exporter in the process is read as Pulse's own"
+
+mutate Pulse.Otlp/ExportFailureLog.cs \
+    's/result\.Replace\(secret, Redacted, StringComparison\.Ordinal\)/result/' \
+    "otlp failure log: a configured header value survives into the log verbatim"
+
 # Every mutation is reverted in the source, but the last one of each block was built before it
 # was, so the binaries on disk still carry it. Leave them matching the tree: anything running
 # with --no-build after this script would otherwise fail for reasons that are nowhere in the

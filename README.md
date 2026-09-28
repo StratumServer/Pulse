@@ -475,11 +475,13 @@ minutes.
 ```
 
 A matching line reports the first successful export after a failure, so recovery shows up too.
-Neither line ever carries a header value, whatever the backend sends back; the backend's answer is
-clipped to 200 characters. A malformed `Endpoint` is still the one case Pulse checks itself,
-because that one would throw while the exporter is being built: it logs an error and registers
-nothing. For anything these lines do not explain, the SDK's own, far more verbose self-diagnostics
-turn on by dropping an `OTEL_DIAGNOSTICS.json` file next to the server.
+Neither line ever carries a header value: each configured value, and anything shaped like a bearer
+or basic credential, is redacted out before a line is queued, whatever the backend echoes back. The
+backend's answer, once redacted, is clipped to 200 characters. A malformed `Endpoint` is still the
+one case Pulse checks itself, because that one would throw while the exporter is being built: it
+logs an error and registers nothing. For anything these lines do not explain, the SDK's own, far
+more verbose self-diagnostics turn on by dropping an `OTEL_DIAGNOSTICS.json` file next to the
+server.
 
 ## Building and testing
 

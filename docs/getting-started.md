@@ -305,7 +305,8 @@ normally.
 
   ```
   Pulse OTLP export to https://otlp-gateway-<region>.grafana.net/otlp/v1/metrics failed:
-  Response status code does not indicate success: 401 (Unauthorized). Metrics are not reaching
+  Response status code does not indicate success: 401 (Unauthorized). The backend answered:
+  {"code":16,"message":"authentication error: invalid scope provided"} Metrics are not reaching
   the backend; check Endpoint and Headers in pulse-otlp.json. This is logged again at most every
   10 minutes.
   ```

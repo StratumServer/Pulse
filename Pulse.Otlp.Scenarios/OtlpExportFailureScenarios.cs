@@ -20,13 +20,18 @@ public class OtlpExportFailureScenarios : AtlasScenarioBase, IDisposable
     private const string FailureMarker = "Pulse OTLP export to";
     private const string ConfiguredSecret = "scenario-secret-token";
 
+    // Braces in the backend's own body: the same shape that would throw if PulseOtlpModSystem
+    // ever regressed to passing the queued line as the game logger's format string instead of as
+    // an argument to a fixed "{0}" template.
+    private const string RejectionBody = "{\"error\":\"invalid credentials\",\"detail\":\"token {expired}\"}";
+
     private readonly FakeCollector collector;
 
     public OtlpExportFailureScenarios()
     {
         // xUnit builds the test class before Atlas boots the host, so the collector is already
         // listening by the time the exporter's first export goes out.
-        collector = new FakeCollector(CollectorPort, HttpStatusCode.Unauthorized);
+        collector = new FakeCollector(CollectorPort, HttpStatusCode.Unauthorized, RejectionBody);
     }
 
     public void Dispose()
@@ -40,11 +45,20 @@ public class OtlpExportFailureScenarios : AtlasScenarioBase, IDisposable
     {
         string log = await WaitForFailureLine();
 
-        Assert.Contains(FailureMarker, log);
-        Assert.Contains("failed:", log);
+        // The failure line itself, not just the log as a whole: at Warning (never Error, so
+        // DieAboveErrorCount cannot count it), naming the status and carrying the backend's body
+        // intact, braces and all, which only holds if the line reached the logger as an argument
+        // rather than as the format string.
+        string line = Assert.Single(
+            log.Split('\n'), l => l.Contains(FailureMarker, StringComparison.Ordinal));
+        Assert.Contains("[Warning]", line);
+        Assert.Contains("401", line);
+        Assert.Contains(RejectionBody, line);
 
-        // The whole reason this reads the SDK's own EventSource instead of the request: the
-        // configured header never reaches the log, however the backend answers.
+        // The configured header never reaches the log, however the backend answers: reading the
+        // SDK's own EventSource instead of the request keeps it out of every payload to begin
+        // with, and ExportFailureLog redacts the configured value out of the backend's own body
+        // too, in case a collector ever echoes back what it was sent.
         Assert.DoesNotContain(ConfiguredSecret, log);
     }
 

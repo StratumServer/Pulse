@@ -123,7 +123,7 @@ public sealed class PulseOtlpModSystem : ModSystem
         //
         // Constructed before the provider that creates the exporter, so the listener is already
         // attached to the exporter's EventSource by the time the first export can happen.
-        exportFailureLog = new ExportFailureLog();
+        exportFailureLog = new ExportFailureLog(config.Headers.Values, endpoint);
 
         provider = Sdk.CreateMeterProviderBuilder()
             .AddMeter(meters)
@@ -159,7 +159,11 @@ public sealed class PulseOtlpModSystem : ModSystem
     {
         // Order matters. Disposing the provider shuts the reader down, which force-flushes one
         // last export before the process goes away; draining right after that flush, rather than
-        // before it, is what catches a failure on that very last attempt. The tick listener comes
+        // before it, is what catches a failure on that very last attempt, for a failure quick
+        // enough to surface within the shutdown budget: MeterProviderSdk.Dispose gives the reader
+        // only 5 seconds (OpenTelemetry 1.19.1), while the exporter's own default timeout is 10, so
+        // a collector that hangs rather than answers can still lose its very last failure to a
+        // process that exits before the timeout would have reported one. The tick listener comes
         // down only once nothing more will be queued, and the event listener only once nothing is
         // left to drain.
         provider?.Dispose();
@@ -182,6 +186,10 @@ public sealed class PulseOtlpModSystem : ModSystem
 
     /// <summary>Passed as an argument, never as the format string: the game's logger runs every
     /// message through string.Format, and a backend's JSON error body can carry braces that would
-    /// throw and lose the line.</summary>
-    private void DrainExportFailures() => exportFailureLog?.Drain(line => sapi?.Logger.Warning("{0}", line));
+    /// throw and lose the line. Failures are Warning, since DieAboveErrorCount counts Error and
+    /// Fatal; the "succeeded" line is Notification, so the very first export on a healthy server
+    /// does not read as a warning about anything.</summary>
+    private void DrainExportFailures() => exportFailureLog?.Drain(
+        line => sapi?.Logger.Warning("{0}", line),
+        line => sapi?.Logger.Notification("{0}", line));
 }

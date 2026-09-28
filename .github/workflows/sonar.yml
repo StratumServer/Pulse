@@ -132,11 +132,12 @@ jobs:
 
       # Has to run after the build and before the end step, so the reports exist by the time the
       # scanner uploads them. The opencover format comes from coverlet.collector, referenced by
-      # every test project; the scenarios boot a real server, which is where the ModSystems and
-      # the HTTP path get their coverage. Pulse.Otlp.Tests joined this loop with the OTLP export
-      # failure log: before it, nothing ever ran Pulse.Otlp's own unit tests under coverage, so
-      # Sonar saw every line in Pulse.Otlp as uncovered new code regardless of what the suite
-      # actually exercised.
+      # every test project; the scenarios boot a real server, which is where the HTTP path gets
+      # its coverage (the ModSystems stay excluded above regardless: the loader loads them outside
+      # coverlet's instrumentation, whatever a scenario exercises). Pulse.Otlp.Tests joined this
+      # loop with the OTLP export failure log: before it, nothing ever ran Pulse.Otlp's own unit
+      # tests under coverage, so Sonar saw every line in Pulse.Otlp as uncovered new code
+      # regardless of what the suite actually exercised.
       - name: Tests with coverage
         run: |
           set -e
