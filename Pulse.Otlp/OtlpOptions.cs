@@ -82,6 +82,16 @@ public static partial class OtlpOptions
         return true;
     }
 
+    /// <summary>Everything about <paramref name="endpoint"/> that is safe to put in a log line at
+    /// any level: scheme, host, port and path. A query string is never included, only noted as
+    /// present, since a backend that authenticates through a signed URL keeps its own secret
+    /// there.</summary>
+    public static string LoggableEndpoint(Uri endpoint)
+    {
+        string safe = endpoint.GetComponents(UriComponents.SchemeAndServer | UriComponents.Path, UriFormat.UriEscaped);
+        return endpoint.Query.Length > 0 ? safe + " (query string kept, not logged)" : safe;
+    }
+
     /// <summary>The header values ExportFailureLog should treat as secrets: null-safe against
     /// both a null Headers block and a null value inside it, either of which Newtonsoft accepts
     /// ("Headers": null, or an entry with a null value) despite the property's own non-nullable C#

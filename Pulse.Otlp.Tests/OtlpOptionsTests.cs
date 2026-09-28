@@ -85,6 +85,31 @@ public class OtlpOptionsTests
         Assert.Equal(string.Empty, OtlpOptions.RenderHeaders(new Dictionary<string, string>()));
     }
 
+    [Fact]
+    public void LoggableEndpoint_NeverIncludes_UserinfoOrAQueryString()
+    {
+        Uri endpoint = new("https://user:s3cret@host:8443/otlp/path?api_key=alsosecret");
+
+        string loggable = OtlpOptions.LoggableEndpoint(endpoint);
+
+        Assert.DoesNotContain("user", loggable);
+        Assert.DoesNotContain("s3cret", loggable);
+        Assert.DoesNotContain("alsosecret", loggable);
+        Assert.DoesNotContain("api_key", loggable);
+        Assert.StartsWith("https://host:8443/otlp/path", loggable, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LoggableEndpoint_SaysAQueryStringExists_WithoutIncludingIt()
+    {
+        Assert.Equal(
+            "https://host/otlp",
+            OtlpOptions.LoggableEndpoint(new Uri("https://host/otlp")));
+        Assert.Equal(
+            "https://host/otlp (query string kept, not logged)",
+            OtlpOptions.LoggableEndpoint(new Uri("https://host/otlp?key=abc")));
+    }
+
     /// <summary>Newtonsoft accepts "Headers": null, and a null value for any one key inside it,
     /// despite PulseOtlpConfig.Headers's own non-nullable C# type; a null value used to make
     /// ExportFailureLog.Redact throw at secret.Length, silently losing every failure line for the

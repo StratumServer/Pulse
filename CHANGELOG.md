@@ -34,6 +34,10 @@ first.
   loses a genuinely new one to it. `PulseOtlpConfig.Headers` being `null`, or holding a `null`
   value for one key, both accepted on the config side already, no longer turns exporting off for
   the session.
+- The startup `Pulse OTLP exporting ...` log line no longer names the full configured `Endpoint`.
+  Userinfo or a query string in it (a backend that authenticates through a signed URL, say) had no
+  business there; only scheme, host, port and path are logged now, the same components every
+  export failure or success line already named.
 - `docs/getting-started.md`, a walkthrough for a server owner who has never used Prometheus or
   Grafana, routed by how their server is hosted: installing the base mod, then either a local
   Prometheus and Grafana pair or Grafana Cloud's free tier over OTLP, ending at the shared

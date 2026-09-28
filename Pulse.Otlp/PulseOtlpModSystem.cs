@@ -149,9 +149,12 @@ public sealed class PulseOtlpModSystem : ModSystem
         exportFailureLogListenerId = api.Event.RegisterGameTickListener(
             OnDrainExportFailures, OnDrainExportFailuresError, ExportFailureDrainIntervalMs);
 
+        // Scheme, host, port and path only, the same components the exporter's own diagnostics
+        // ever carry: userinfo or a query string in the configured endpoint (a backend that
+        // authenticates through a signed URL, say) has no business in a log line at any level.
         api.Logger.Notification(
             "Pulse OTLP exporting {0} to {1} over {2} every {3}s as service '{4}'",
-            string.Join(", ", meters), endpoint,
+            string.Join(", ", meters), OtlpOptions.LoggableEndpoint(endpoint),
             protocol == OtlpExportProtocol.Grpc ? "grpc" : "http/protobuf", intervalMs / 1000, serviceName);
     }
 
