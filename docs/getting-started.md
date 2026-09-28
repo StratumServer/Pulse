@@ -247,8 +247,8 @@ Once the numbers are flowing, bring in the dashboard:
    can pull numbers from). Pick the one your Grafana Cloud stack already created for you:
    Grafana Cloud stores OTLP metrics in its own Prometheus-compatible store, so this is the same
    data source your other Grafana Cloud graphs use.
-4. Open the imported dashboard. It is the same "Pulse server overview" dashboard as path A, with
-   one difference, covered next.
+4. Open the imported dashboard. It is the same "Pulse server overview" dashboard as path A, and
+   every panel on it reads the same way over this OTLP path too.
 
 Every panel on this dashboard reads the same over OTLP as it does from a direct scrape. That used
 to not be true: nine panels (the two per-second network panels, the two attribution share panels,
@@ -295,7 +295,7 @@ dashboard or alert you built against the old names still needs updating.
   Attribution row stays empty until you turn attribution on (see the main README's Attribution
   section), and a handful of engine-level panels (busy time, per-second network rates, the
   connection queue) go blank if Pulse is running in degraded mode, also covered in the main
-  README. On path B, see the Grafana Cloud panel list above.
+  README. Both apply the same way on path B.
 - **Path B: numbers never show up, and the server logs nothing about it.** That is expected, not
   a sign something crashed: today, an OTLP push that Grafana Cloud rejects (a wrong token gets a
   401, for example) costs nothing on the game side and logs nothing either; it just quietly does

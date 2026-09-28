@@ -81,11 +81,12 @@ first.
 ### Changed
 
 - **Breaking for anything scraping the runtime series directly:** nine `dotnet_*` families on
-  `/metrics` are renamed to the name Grafana derives when it translates the OTLP export, and the
-  one opentelemetry-dotnet's own Prometheus exporter gives the same instrument in process. The
-  writer now derives a name from the instrument's unit the same way that translation does, instead
-  of only mapping dots to underscores and appending `_total`, which is what left these nine out of
-  step with every other OTLP consumer in the first place.
+  `/metrics` are renamed to the name Prometheus's otlptranslator derives from the same instrument,
+  the library Prometheus's own OTLP receiver, Mimir and Grafana Cloud use to turn an OTLP
+  instrument into a Prometheus name. The writer now derives a name from the instrument's unit the
+  same way that translation does, instead of only mapping dots to underscores and appending
+  `_total`, which is what left these nine out of step with every other OTLP consumer in the first
+  place.
 
   | Old name | New name |
   | --- | --- |
@@ -107,7 +108,17 @@ first.
   (`pulse_network_packets_per_second`, `pulse_network_bytes_per_second`,
   `pulse_mod_tick_share`), which over OTLP was adding a spurious `_per_second` or `_ratio` suffix
   on top of a name that already spelled the rate or the ratio out in words. `/metrics` is
-  unaffected: no name served locally changes.
+  unaffected: no name served locally changes. The two network families shipped with the OTLP mod
+  back in 0.1.0, so a Grafana Cloud stack that has been receiving OTLP since then stored them under
+  the doubled name; old to new on that side only:
+
+  | Old OTLP name | New OTLP name |
+  | --- | --- |
+  | `pulse_network_packets_per_second_per_second` | `pulse_network_packets_per_second` |
+  | `pulse_network_bytes_per_second_per_second` | `pulse_network_bytes_per_second` |
+
+  `pulse_mod_tick_share_ratio` never reached a stable release: attribution, and the unit behind it,
+  only existed in 0.2 prereleases, so there is no 0.1.0-era OTLP data under that name to migrate.
 - Bumped `OpenTelemetry` and `OpenTelemetry.Exporter.OpenTelemetryProtocol` from 1.18.0 to 1.19.1
   in the OTLP mod. Nothing Pulse depends on in the endpoint, header or service name handling
   changed between the two releases, but the resources the SDK builds by default now carry a schema
