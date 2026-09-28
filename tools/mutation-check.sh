@@ -337,8 +337,8 @@ mutate Pulse/PulseCommands.cs \
 TEST_PROJECT="Pulse.Otlp.Tests/Pulse.Otlp.Tests.csproj"
 
 mutate Pulse.Otlp/OtlpOptions.cs \
-    's/Math\.Max\(MinimumIntervalSeconds, intervalSeconds\)/Math.Min(MinimumIntervalSeconds, intervalSeconds)/' \
-    "otlp: the interval floor becomes a ceiling"
+    's/Math\.Clamp\(intervalSeconds, MinimumIntervalSeconds, MaximumIntervalSeconds\)/Math.Clamp(intervalSeconds, MinimumIntervalSeconds, MinimumIntervalSeconds)/' \
+    "otlp: the interval clamp collapses to the floor, so anything above 5 seconds is floored too"
 
 mutate Pulse.Otlp/OtlpOptions.cs \
     's/if \(protocol == OtlpExportProtocol\.Grpc\)/if (protocol != OtlpExportProtocol.Grpc)/' \
@@ -404,11 +404,11 @@ mutate Pulse.Otlp/OtlpOptions.cs \
     "otlp: the interval ceiling disappears, so a large enough config value overflows on the multiply again"
 
 mutate Pulse.Otlp/OtlpOptions.cs \
-    "s/header\.Value\?\.Contains(',') \?\? false/false/" \
+    "s/header\.Value\?\.Contains\(','\) \?\? false/false/" \
     "otlp: a header value containing a comma is no longer refused, reopening the exporter's own crash on it"
 
 mutate Pulse.Otlp/OtlpOptions.cs \
-    's/!seenNames\.Add(name)/false/' \
+    's/!seenNames\.Add\(name\)/false/' \
     "otlp: two header names that collide once trimmed are no longer refused, reopening the exporter's own duplicate-key crash"
 
 mutate Pulse.Otlp/OtlpOptions.cs \
