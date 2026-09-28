@@ -47,7 +47,7 @@ mutate() { # <file> <sed -E expression> <label>
     git checkout -- "$file"
 }
 
-MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse/EngineSample.cs Pulse/PingSummary.cs Pulse/EntityBreakdown.cs Pulse/SuspendBookkeeper.cs Pulse/TickAttribution.cs Pulse/ModOwners.cs Pulse/ConfigUpgrade.cs Pulse/ConfigLoad.cs Pulse/PulseCommands.cs Pulse/AttributionMetrics.cs Pulse.Otlp/OtlpOptions.cs"
+MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse/EngineSample.cs Pulse/PingSummary.cs Pulse/EntityBreakdown.cs Pulse/SuspendBookkeeper.cs Pulse/TickAttribution.cs Pulse/ModOwners.cs Pulse/ConfigUpgrade.cs Pulse/ConfigLoad.cs Pulse/PulseCommands.cs Pulse/AttributionMetrics.cs Pulse.Otlp/OtlpOptions.cs Pulse.Otlp/ExportFailureLog.cs"
 
 if ! git diff --quiet -- $MUTATED; then
     echo "One of $MUTATED has uncommitted changes; refusing to mutate over them."
@@ -332,7 +332,7 @@ mutate Pulse.Otlp/OtlpOptions.cs \
     "otlp: the signal path goes to grpc and not to http/protobuf"
 
 mutate Pulse.Otlp/OtlpOptions.cs \
-    's/text\.EndsWith\(MetricsPath, StringComparison\.OrdinalIgnoreCase\)/text.StartsWith(MetricsPath, StringComparison.OrdinalIgnoreCase)/' \
+    's/path\.EndsWith\(MetricsPath, StringComparison\.OrdinalIgnoreCase\)/path.StartsWith(MetricsPath, StringComparison.OrdinalIgnoreCase)/' \
     "otlp: an endpoint already carrying /v1/metrics gets a second one"
 
 mutate Pulse.Otlp/OtlpOptions.cs \
@@ -346,6 +346,45 @@ mutate Pulse.Otlp/OtlpOptions.cs \
 mutate Pulse.Otlp/OtlpOptions.cs \
     's/string\.IsNullOrWhiteSpace\(configuredName\)/!string.IsNullOrWhiteSpace(configuredName)/' \
     "otlp: a blank ServiceName exports as-is and a real one is replaced by the default"
+
+# The failure log turns a silent export into one rate-limited line; both of its limits exist to
+# bound the log itself, and a mutation that erases either one is exactly what would let a stuck
+# collector or a churning cause flood it.
+mutate Pulse.Otlp/ExportFailureLog.cs \
+    's/RepeatMs = 10 \* 60_000;/RepeatMs = 0;/' \
+    "otlp failure log: the ten-minute repeat window disappears, so a standing outage floods the log"
+
+mutate Pulse.Otlp/ExportFailureLog.cs \
+    's/MaxKinds = 32;/MaxKinds = 320;/' \
+    "otlp failure log: the tracked-kinds cap stops bounding memory"
+
+mutate Pulse.Otlp/ExportFailureLog.cs \
+    's/now - entry\.Value >= RepeatMs/false/' \
+    "otlp failure log: stale kinds are never evicted, so the cap holds a full log hostage forever"
+
+mutate Pulse.Otlp/ExportFailureLog.cs \
+    's/candidate == ownEndpoint/true/' \
+    "otlp failure log: every exporter in the process is read as Pulse's own"
+
+mutate Pulse.Otlp/ExportFailureLog.cs \
+    's/result\.Replace\(target, Redacted, StringComparison\.OrdinalIgnoreCase\)/result/' \
+    "otlp failure log: a configured header value survives into the log verbatim"
+
+mutate Pulse.Otlp/ExportFailureLog.cs \
+    's/candidate == ownGrpcExportPath/false/' \
+    "otlp failure log: a real grpc export of Pulse's own is never recognised as its own"
+
+mutate Pulse.Otlp/ExportFailureLog.cs \
+    's/if \(space > 0\)/if (false)/' \
+    "otlp failure log: a credential echoed back without its scheme is never redacted"
+
+mutate Pulse.Otlp/ExportFailureLog.cs \
+    's/\.OrderByDescending\(target => target\.Length\)//' \
+    "otlp failure log: redaction targets are no longer applied longest first, so a short value can gnaw a hole in a longer one"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/headers\?\.Values\.Where/headers.Values.Where/' \
+    "otlp: a null Headers block throws instead of exporting with no secrets tracked"
 
 # Every mutation is reverted in the source, but the last one of each block was built before it
 # was, so the binaries on disk still carry it. Leave them matching the tree: anything running
