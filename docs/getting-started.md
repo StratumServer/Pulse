@@ -299,8 +299,9 @@ normally.
   connection queue) go blank if Pulse is running in degraded mode, also covered in the main
   README. On path B, see the Grafana Cloud panel list above.
 - **Path B: numbers never show up.** An OTLP push that Grafana Cloud rejects costs nothing on the
-  game side, but it no longer stays quiet: check the server's log (`VintagestoryData/Logs/` by
-  default) for a line starting `Pulse OTLP export to`. A wrong or expired token reads like this:
+  game side, but it no longer stays quiet: check the server's log, the console or
+  `Logs/server-main.log` from step 4 of installing the mod above, for a line starting `Pulse OTLP
+  export to`. A wrong or expired token reads like this:
 
   ```
   Pulse OTLP export to https://otlp-gateway-<region>.grafana.net/otlp/v1/metrics failed:
