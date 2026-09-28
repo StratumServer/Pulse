@@ -1,4 +1,5 @@
 using System.Diagnostics.Metrics;
+using System.Runtime.CompilerServices;
 using Vintagestory.API.Common;
 using Vintagestory.API.Server;
 
@@ -66,6 +67,18 @@ internal sealed partial class AttributionMetrics
     private PulseConfig? booted;
     private int unprimedTicks;
 
+    /// <summary>Whether the first primed tick has been seen yet. PrimeFrameProfiler turns the
+    /// profiler on before this class's own duty cycle has had a say; the first primed tick is
+    /// Pulse's one chance to turn it back off, exactly once, if nothing else wants it running.</summary>
+    private bool primed;
+
+    /// <summary>The value Pulse itself last wrote to <c>FrameProfilerUtil.Enabled</c>, meaningful
+    /// only once <see cref="primed"/> is true. Compared against <see cref="TickAttribution.Profiling"/>
+    /// instead of this tick's own before/after: <c>Switch</c> and <c>Reload</c> restart the duty
+    /// cycle through <see cref="TickAttribution.Apply"/> between ticks, off the flag entirely, so a
+    /// tick that starts already out of sync with what Pulse last wrote still has to catch up.</summary>
+    private bool profilerEnabledLastWritten;
+
     /// <summary>Creates the duty cycle and the instruments it publishes to, with the profiler
     /// resolver, the listener walk and the warning sink supplied directly rather than read off a
     /// live server: what a unit test calls to drive the unprimed-tick give-up path, a failed
@@ -127,12 +140,34 @@ internal sealed partial class AttributionMetrics
 
     /// <summary>Advances the attribution duty cycle by one tick, and gives up on it for good if
     /// that ever throws.</summary>
-    /// <remarks>Same bargain as the engine probe, with one addition: the profiler flag is put back
-    /// before giving up, because leaving it on would charge every later tick close to a quarter of
-    /// the budget for data nobody is reading any more.</remarks>
+    /// <remarks>The profiler-touching work sits in <see cref="RunProfiledTick"/>, a separate
+    /// non-inlinable method, so a future engine reshaping <c>FrameProfilerUtil</c> or
+    /// <c>ProfileEntryRange</c> throws at that call, inside this try, rather than while this method
+    /// itself is being JIT compiled (a method's own try/catch cannot catch a failure to JIT the
+    /// method; see <see cref="EngineProbe"/> for the same split and why it matters).</remarks>
     public void Tick(double elapsedSeconds)
     {
-        if (attribution == null || resolveProfiler() is not { } profiler)
+        if (attribution == null)
+        {
+            return;
+        }
+
+        try
+        {
+            RunProfiledTick(elapsedSeconds);
+        }
+        catch (Exception e)
+        {
+            attribution = null;
+            DisableProfilerBestEffort();
+            warn(AttributionWarning, e.Message);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void RunProfiledTick(double elapsedSeconds)
+    {
+        if (resolveProfiler() is not { } profiler)
         {
             return;
         }
@@ -150,36 +185,130 @@ internal sealed partial class AttributionMetrics
             if (++unprimedTicks > UnprimedTickLimit)
             {
                 attribution = null;
-                profiler.Enabled = false;
+                SetProfilerEnabled(profiler, false);
                 warn(AttributionWarning, "the engine's profiler never completed a primed tick");
             }
 
             return;
         }
 
-        try
+        if (!primed)
         {
-            bool starting = !attribution.Profiling;
-            AttributionBurst? burst = attribution.OnTick(elapsedSeconds, profiler.PrevRootEntry, owners!.Owner);
-            if (starting && attribution.Profiling)
-            {
-                RefreshOwners();
-            }
-
-            if (burst != null)
-            {
-                PublishBurst(burst);
-            }
-
-            profiler.Enabled = attribution.Profiling;
+            // PrimeFrameProfiler turned the profiler on before the tick loop existed, on the
+            // chance a burst starts on the very first tick. Nothing else has written the flag
+            // since: this is the one write that undoes priming when nothing (attribution or
+            // another mod's own /debug logticks) wants the profiler running yet.
+            primed = true;
+            profilerEnabledLastWritten = attribution!.Profiling;
+            SetProfilerEnabled(profiler, profilerEnabledLastWritten);
         }
-        catch (Exception e)
+
+        bool wasProfiling = attribution!.Profiling;
+        AttributionBurst? burst = attribution.OnTick(elapsedSeconds, profiler.PrevRootEntry, owners!.Owner);
+        if (!wasProfiling && attribution.Profiling)
         {
-            attribution = null;
-            profiler.Enabled = false;
-            warn(AttributionWarning, e.Message);
+            RefreshOwners();
+        }
+
+        if (burst != null)
+        {
+            PublishBurst(burst);
+        }
+
+        // Two different rules for the two directions, not one "on a transition" rule: turning the
+        // profiler on is always safe (SetProfilerEnabled's own guard only ever holds an off write
+        // back), so this re-asserts it on every tick a burst is running, not only the tick the
+        // burst starts on. That is what stops /debug logticks or another mod turning the profiler
+        // off mid-burst from folding the same stale tick tree into the rest of the burst. Turning
+        // it off compares against profilerEnabledLastWritten rather than wasProfiling above,
+        // because Switch and Reload restart the duty cycle through TickAttribution.Apply between
+        // ticks: by the time this method runs, Profiling has already moved and wasProfiling reads
+        // the post-restart value too, so the two would never disagree and the write this replaced
+        // would never fire, leaving the profiler on for the rest of the run or the whole idle
+        // interval until the next burst.
+        if (attribution.Profiling)
+        {
+            SetProfilerEnabled(profiler, true);
+            profilerEnabledLastWritten = true;
+        }
+        else if (profilerEnabledLastWritten)
+        {
+            SetProfilerEnabled(profiler, false);
+            profilerEnabledLastWritten = false;
         }
     }
+
+    /// <summary>Best-effort profiler shutdown for the give-up path in <see cref="Tick"/>: leaving
+    /// the profiler on would charge every later tick close to a quarter of the budget for data
+    /// nobody is reading any more, but the failure that triggered the give-up may be the profiler
+    /// itself, so a second failure here is swallowed rather than left to escape the already-open
+    /// catch block above.</summary>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void DisableProfilerBestEffort()
+    {
+        try
+        {
+            if (resolveProfiler() is { } profiler)
+            {
+                DisableProfilerForcefully(profiler);
+            }
+        }
+        catch
+        {
+            // Whatever just failed to resolve for the tick above is not going to resolve here
+            // either. Nothing more Pulse can do about the engine's own flag.
+        }
+    }
+
+    /// <summary>The one place this class writes <c>FrameProfilerUtil.Enabled</c>.</summary>
+    /// <remarks>Turning it on is always safe: nothing else that could want the profiler running
+    /// minds it already being on. Turning it off is not, while <c>PrintSlowTicks</c> is set:
+    /// that flag is <c>/debug logticks</c>'s own, read from <c>ServerMain.Process</c> together
+    /// with <c>Enabled</c>, and clearing the flag out from under it would silently stop a report
+    /// the operator explicitly asked for.</remarks>
+    private static void SetProfilerEnabled(FrameProfilerUtil profiler, bool enabled)
+    {
+        if (enabled || !profiler.PrintSlowTicks)
+        {
+            profiler.Enabled = enabled;
+        }
+    }
+
+    /// <summary>Turns the profiler off no matter what, for the two callers (the give-up path's own
+    /// shutdown and <see cref="Stop"/>) that must not leave a primed profiler running for the rest
+    /// of the process over this.</summary>
+    /// <remarks>The guarded write above reads <c>PrintSlowTicks</c> before it reads or writes
+    /// <c>Enabled</c>, so a future engine reshape of that field alone throws there, before
+    /// <c>Enabled</c> is ever touched, and is otherwise indistinguishable from every other reshape
+    /// this class already degrades on. Both callers already give up on attribution for the reasons
+    /// that get them here; leaving the engine paying close to a quarter of its tick budget forever
+    /// on top of that is the one outcome worth a second attempt for. The fallback write sits in its
+    /// own non-inlinable method for the same reason as <see cref="RunProfiledTick"/>: so a reshape
+    /// of <c>Enabled</c> itself throws inside this try, not while this method is being JIT
+    /// compiled.</remarks>
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void DisableProfilerForcefully(FrameProfilerUtil profiler)
+    {
+        try
+        {
+            SetProfilerEnabled(profiler, false);
+        }
+        catch
+        {
+            try
+            {
+                DisableProfilerUnguarded(profiler);
+            }
+            catch
+            {
+                // PrintSlowTicks and Enabled are both unreachable. Nothing more Pulse can do
+                // about the engine's own flag.
+            }
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static void DisableProfilerUnguarded(FrameProfilerUtil profiler) => profiler.Enabled = false;
 
     /// <summary>Re-reads which mod owns which tick listener, once per burst.</summary>
     /// <remarks>Once per burst rather than once at startup because mods register and drop listeners
@@ -289,7 +418,7 @@ internal sealed partial class AttributionMetrics
     {
         if (attribution != null && resolveProfiler() is { } profiler)
         {
-            profiler.Enabled = false;
+            DisableProfilerForcefully(profiler);
         }
     }
 }

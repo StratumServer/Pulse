@@ -70,4 +70,26 @@ internal static class ConfigLoad
             return new ConfigLoadResult<T>(makeDefaults(), ConfigLoadStatus.Unreadable, e.Message);
         }
     }
+
+    /// <summary>Runs an action that must not be allowed to take the caller down with it, the two
+    /// current uses being <see cref="PulseModSystem.StartServerSide"/> writing a fresh default
+    /// config file for a save that had none (a ModConfig folder mounted read-only, or one the
+    /// process otherwise lacks permission to write into, must not stop the mod from starting on
+    /// defaults for this session: the write is a nicety for the next restart, not something this
+    /// session needs to have) and <c>AttributionMetrics</c> registering <c>/pulse</c> (a name
+    /// clash with another mod's own command must cost only the command, not the rest of
+    /// attribution).</summary>
+    /// <returns>Null on success, or the failure's message.</returns>
+    internal static string? TryRun(Action action)
+    {
+        try
+        {
+            action();
+            return null;
+        }
+        catch (Exception e)
+        {
+            return e.Message;
+        }
+    }
 }

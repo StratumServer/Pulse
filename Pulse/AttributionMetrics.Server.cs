@@ -1,4 +1,5 @@
 using System.Diagnostics.Metrics;
+using System.Runtime.CompilerServices;
 using Vintagestory.API.Common;
 using Vintagestory.API.Server;
 
@@ -55,8 +56,6 @@ internal sealed partial class AttributionMetrics
             api.Logger.Warning(ListenerWalkWarning, e.Message);
         }
 
-        // Before the tick loop exists, and not one moment later. See PrimeFrameProfiler.
-        api.Event.ServerRunPhase(EnumServerRunPhase.RunGame, PrimeFrameProfiler);
         if (attribution!.Enabled)
         {
             api.Logger.Notification(
@@ -69,8 +68,25 @@ internal sealed partial class AttributionMetrics
                 "Pulse is ready to attribute the tick per mod but is not measuring: /pulse attribution on starts it.");
         }
 
-        RegisterCommands(api);
+        // A name clash (another mod already registered /pulse) must cost only the command: it is
+        // caught here rather than left to abort this constructor, which would leave ArmPriming
+        // below never called from PulseModSystem and OnTick never registered either, so nothing
+        // would ever turn a primed profiler back off for the rest of the run.
+        if (ConfigLoad.TryRun(() => RegisterCommands(api)) is { } commandFailure)
+        {
+            api.Logger.Warning(
+                "Pulse could not register /pulse ({0}). Attribution and the metrics endpoint are "
+                + "unaffected; only the chat command and /pulse reload are unavailable.",
+                commandFailure);
+        }
     }
+
+    /// <summary>Arms the profiler priming for the RunGame phase. Callers must call this only after
+    /// their own tick listener is registered, never from this constructor: see
+    /// <see cref="PrimeFrameProfiler"/> for why an exception raised between construction and that
+    /// registration must not leave RunGame armed with nothing left to turn the profiler back off.
+    /// </summary>
+    public void ArmPriming() => api!.Event.ServerRunPhase(EnumServerRunPhase.RunGame, PrimeFrameProfiler);
 
     /// <summary>Registers <c>/pulse</c>, which is how attribution gets switched on while the
     /// server is the thing you wanted to look at.</summary>
@@ -155,7 +171,24 @@ internal sealed partial class AttributionMetrics
     {
         // Guarded even though the profiler is thread-static and this runs on the thread that will
         // do the ticking: nothing wraps a run phase handler, and throwing out of one would take the
-        // server's startup with it.
+        // server's startup with it. The actual profiler read sits in a separate, non-inlinable
+        // method for the same reason as RunProfiledTick in AttributionMetrics.cs: a future engine
+        // reshaping FrameProfilerUtil must throw at that call, inside this try, not while this
+        // method itself is being JIT compiled.
+        try
+        {
+            PrimeFrameProfilerCore();
+        }
+        catch (Exception e)
+        {
+            attribution = null;
+            warn(AttributionWarning, e.Message);
+        }
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private void PrimeFrameProfilerCore()
+    {
         if (resolveProfiler() is { } profiler)
         {
             profiler.Enabled = true;

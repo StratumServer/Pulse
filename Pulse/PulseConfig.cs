@@ -19,7 +19,7 @@ public sealed class PulseConfig
     /// <summary>Seconds between two reads of the loaded-chunk count. Deliberately slow, and slower
     /// than any sane scrape interval: the engine exposes no cheap count, so the read clones the
     /// whole loaded-chunk dictionary under the chunk lock. The gauge reads 0 until the first
-    /// refresh.</summary>
+    /// refresh. Clamped to at most a day.</summary>
     public int ChunksRefreshSeconds { get; set; } = 30;
 
     /// <summary>Per-mod tick attribution. Off by default, and duty-cycled when on.</summary>

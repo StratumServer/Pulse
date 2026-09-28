@@ -80,6 +80,56 @@ public class HotToggleScenarios : AtlasScenarioBase
             after.Message);
     }
 
+    /// <summary>The release review's new defect: <c>RunProfiledTick</c> used to write the engine's
+    /// frame profiler flag only on a transition it saw within the same tick, so a duty cycle
+    /// restarted between ticks (by <c>Switch</c> or a reload, both of which call
+    /// <c>TickAttribution.Apply</c> outside <c>Tick</c>) went unnoticed and the flag never came
+    /// back down. A large burst, not the five ticks the rest of this class shares, so there is a
+    /// comfortable window to land <c>/pulse attribution off</c> before the burst would have ended
+    /// on its own regardless.</summary>
+    private static string LargeBurstConfig() =>
+        $$"""
+        {
+          "Enabled": true,
+          "Bind": "127.0.0.1",
+          "Port": {{Port}},
+          "RuntimeMetrics": false,
+          "ChunksRefreshSeconds": 30,
+          "Attribution": {
+            "Enabled": true,
+            "BurstTicks": 300,
+            "IntervalSeconds": 1
+          }
+        }
+        """;
+
+    [AtlasScenario]
+    public async Task Attribution_Off_DuringABurst_TurnsTheProfilerOff_RatherThanForTheRestOfTheRun()
+    {
+        await World.Ticks(5);
+        string path = Path.Combine(World.Api.GetOrCreateDataPath("ModConfig"), "pulse.json");
+        File.WriteAllText(path, LargeBurstConfig());
+
+        CommandResult reloaded = await World.ExecuteCommand("/pulse reload");
+        Assert.True(reloaded.Ok, reloaded.Message);
+
+        // Past the one second interval and the discarded warm-up sample, comfortably short of the
+        // 300-tick burst this fixture configures: genuinely mid-burst, not caught right at either
+        // end of it.
+        await World.Ticks(45);
+
+        CommandResult off = await World.ExecuteCommand("/pulse attribution off");
+        Assert.True(off.Ok, off.Message);
+        Assert.StartsWith("Attribution is off, and the engine's frame profiler with it.", off.Message);
+
+        await World.Ticks(5);
+
+        // The regression: a write keyed on comparing Profiling only before and after one tick
+        // never saw the restart Switch(false) makes outside Tick, so this stayed true for the
+        // rest of the run instead of coming down the moment the reply above claimed it had.
+        Assert.False(World.Api.World.FrameProfiler.Enabled);
+    }
+
     /// <summary>Ticks until a burst has completed, or gives up and fails with the body it last
     /// saw. A burst needs its interval, then a discarded sample, then five profiled ticks.</summary>
     private async Task<string> Burst()

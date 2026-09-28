@@ -88,7 +88,7 @@ the log.
 | `Bind` | `"127.0.0.1"` | Address the metrics endpoint binds. See [A word on the bind address](#a-word-on-the-bind-address). | Restart |
 | `Port` | `9464` | Port the metrics endpoint listens on. If it is already taken, Pulse logs an error and runs without the endpoint. | Restart |
 | `RuntimeMetrics` | `true` | Serves the .NET runtime's own `dotnet_*` metrics alongside Pulse's. See [Runtime metrics](#runtime-metrics). | Restart |
-| `ChunksRefreshSeconds` | `30` | How often the loaded-chunk gauge, and the entity breakdown riding the same listener, are refreshed. Floored at 1 second. | Restart |
+| `ChunksRefreshSeconds` | `30` | How often the loaded-chunk gauge, and the entity breakdown riding the same listener, are refreshed. Floored at 1 second, capped at one day (86400). | Restart |
 | `Attribution.Enabled` | `false` | Turns per-mod tick attribution on. See [Attribution](#attribution). | Live, via `/pulse reload` |
 | `Attribution.BurstTicks` | `10` | Consecutive ticks profiled per burst. Clamped to 1 through 300. | Live, via `/pulse reload` |
 | `Attribution.IntervalSeconds` | `10` | Seconds between the end of one burst and the start of the next. Floored at 1. | Live, via `/pulse reload` |

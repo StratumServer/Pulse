@@ -49,4 +49,26 @@ public class PulseModSystemTests
             Assert.Equal(0, sample.Value);
         }
     }
+
+    [Theory]
+    [InlineData(0, 1000)] // The floor: a 0 or negative config value must not clone the chunk map every tick.
+    [InlineData(-5, 1000)]
+    [InlineData(30, 30_000)] // The documented default, unaffected by either clamp.
+    public void ChunksListenerPeriodMs_Clamps_ToTheFloor(int configuredSeconds, int expectedMs)
+        => Assert.Equal(expectedMs, PulseModSystem.ChunksListenerPeriodMs(configuredSeconds));
+
+    /// <summary>The overflow the review found: multiplied by 1000 with no ceiling, a value just
+    /// above roughly 2.147 million seconds wraps a 32 bit int negative, which the engine then runs
+    /// on every single tick instead of never.</summary>
+    [Fact]
+    public void ChunksListenerPeriodMs_Clamps_BelowTheOverflowBoundary()
+    {
+        int unclamped = unchecked(2_147_484 * 1000);
+        Assert.True(unclamped < 0, "the boundary chosen for this test must actually overflow int");
+
+        int periodMs = PulseModSystem.ChunksListenerPeriodMs(2_147_484);
+
+        Assert.True(periodMs > 0, "the clamped period must never go negative");
+        Assert.Equal(86_400_000, periodMs); // Clamped to the documented one day maximum.
+    }
 }

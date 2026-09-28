@@ -31,6 +31,13 @@ public sealed class PulseModSystem : ModSystem
     /// one bucket. Ten covers the animals and the drifters on any world worth looking at.</summary>
     private const int EntityCodeLimit = 10;
 
+    /// <summary>Upper bound for <see cref="PulseConfig.ChunksRefreshSeconds"/>. It is multiplied
+    /// by 1000 to become a tick listener's period in milliseconds, and a value above roughly 2.147
+    /// million would overflow a 32 bit int and go negative, which the engine then runs every
+    /// single tick instead of never. A day is already far slower than any sane refresh cadence for
+    /// this gauge.</summary>
+    private const int MaxChunksRefreshSeconds = 86_400;
+
     private const string DegradedWarning =
         "Pulse could not reach the engine's own statistics ({0}). Tick busy time, the per-window "
         + "packet and byte counts, the connection queue and the UDP byte totals will not be "
@@ -91,7 +98,15 @@ public sealed class PulseModSystem : ModSystem
         switch (loaded.Status)
         {
             case ConfigLoadStatus.Absent:
-                api.StoreModConfig(config, ConfigFile);
+                if (ConfigLoad.TryRun(() => api.StoreModConfig(config, ConfigFile)) is { } storeFailure)
+                {
+                    api.Logger.Warning(
+                        "Pulse could not write a default {0} ({1}). Running on this session's "
+                        + "built-in defaults; nothing is saved to disk, so the same file is tried "
+                        + "again next start.",
+                        ConfigFile, storeFailure);
+                }
+
                 break;
             case ConfigLoadStatus.Loaded:
                 ConfigUpgrade.Upgrade(api, config, ConfigFile, "Pulse");
@@ -169,7 +184,25 @@ public sealed class PulseModSystem : ModSystem
 
         // Armed whether or not the operator asked for it, so /pulse attribution on has something
         // to switch. Nothing is measured until it is switched on.
-        attributionMetrics = new AttributionMetrics(api, meter, config);
+        //
+        // Guarded on its own, separately from StartEngineProbe just above: the constructor builds
+        // a Func<FrameProfilerUtil?> closing over FrameProfilerUtil itself, so a future engine
+        // reshape of that type throws a TypeLoadException here, before any field of this class is
+        // touched. Left unguarded that takes the whole mod down (no endpoint, no tick listener),
+        // for what should cost only attribution, the same as every other reshape it already
+        // degrades on once construction succeeds.
+        try
+        {
+            attributionMetrics = new AttributionMetrics(api, meter, config);
+        }
+        catch (Exception e)
+        {
+            attributionMetrics = null;
+            api.Logger.Warning(
+                "Pulse could not start per-mod tick attribution ({0}). Every other metric is "
+                + "unaffected.",
+                e.Message);
+        }
 
         // The runtime publishes System.Runtime itself, so listening to it is the whole of the
         // integration: no instrumentation, no dependency, dotted OpenTelemetry names that the
@@ -181,7 +214,7 @@ public sealed class PulseModSystem : ModSystem
         // engine's own 0.1 default this class does not override) so its MeterProvider is already
         // listening when these seeds fire. Do not give this class an ExecuteOrder at or below 0.05.
         SeedCounters(logEntries, engineWarnings, suspendSeconds, columnsGenerated, playerDeaths, suspends);
-        attributionMetrics.Seed();
+        attributionMetrics?.Seed();
         PublishSnapshot();
 
         // The errorHandler overload is not optional. Without it an exception from this listener
@@ -190,13 +223,23 @@ public sealed class PulseModSystem : ModSystem
         // threshold. Metrics must not be able to stop a server: log and swallow.
         listenerId = api.Event.RegisterGameTickListener(OnTick, OnTickError, 0);
 
+        // Only once OnTick above is actually registered: PrimeFrameProfiler runs before the tick
+        // loop and enables the engine's frame profiler on the chance a burst starts on the very
+        // first tick, and only AttributionMetrics.Tick, riding this listener, ever turns it back
+        // off. Arming this any earlier, from inside the AttributionMetrics constructor itself,
+        // means a later failure in this same method (StartEndpoint aside, nothing after this point
+        // throws) would leave RunGame armed with no listener left to undo it.
+        attributionMetrics?.ArmPriming();
+
         // AllLoadedChunks clones the whole loaded-chunk dictionary under the chunk lock on every
         // call, so it gets its own slow listener rather than riding the per-second snapshot. The
         // entity breakdown rides along with it: walking every loaded entity is nowhere near as
-        // expensive, but it is not a per-second read either. The floor is there because a 0 in the
-        // config would clone that dictionary every tick.
+        // expensive, but it is not a per-second read either. The floor and ceiling are there
+        // because a value outside them would clone that dictionary every tick: 0 or negative
+        // directly, and anything above MaxChunksRefreshSeconds by overflowing the millisecond
+        // period through a 32 bit int.
         chunksListenerId = api.Event.RegisterGameTickListener(
-            OnSlowTick, OnTickError, Math.Max(1, config.ChunksRefreshSeconds) * 1000);
+            OnSlowTick, OnTickError, ChunksListenerPeriodMs(config.ChunksRefreshSeconds));
 
         // Worldgen events reach only the handlers registered for the save's own world type, so
         // hardcoding "standard" would silently count nothing on a superflat or custom world.
@@ -275,7 +318,7 @@ public sealed class PulseModSystem : ModSystem
             PublishSnapshot();
         }
 
-        attributionMetrics!.Tick(elapsedSeconds);
+        attributionMetrics?.Tick(elapsedSeconds);
     }
 
     private void OnTickError(Exception e) => sapi?.Logger.Error(e);
@@ -372,6 +415,15 @@ public sealed class PulseModSystem : ModSystem
             entitiesByCode!.Record(entry.Value, new KeyValuePair<string, object?>("code", entry.Key));
         }
     }
+
+    /// <summary>Clamps a configured refresh interval to a sane range and converts it to the
+    /// listener period RegisterGameTickListener wants, in milliseconds.</summary>
+    /// <remarks>Static and pure so the overflow boundary is drivable from a unit test with no
+    /// server. An unclamped multiplication overflows a 32 bit int and goes negative above roughly
+    /// 2.147 million seconds, which the engine's tick listener then runs on every single tick
+    /// instead of never.</remarks>
+    internal static int ChunksListenerPeriodMs(int configuredSeconds) =>
+        Math.Clamp(configuredSeconds, 1, MaxChunksRefreshSeconds) * 1000;
 
     private void OnPlayerDeath(IServerPlayer byPlayer, DamageSource? damageSource) => playerDeaths!.Add(1);
 

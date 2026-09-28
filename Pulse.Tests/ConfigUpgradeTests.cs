@@ -64,6 +64,10 @@ public class ConfigUpgradeTests
         Assert.Empty(diff.Unknown);
     }
 
+    /// <summary>"Burstticks" is not a typo Compare should catch: Newtonsoft binds LoadModConfig's
+    /// keys case-insensitively, so this file's value reaches BurstTicks exactly as the admin wrote
+    /// it. Only "Colour", which matches no key at all regardless of casing, is genuinely
+    /// unknown.</summary>
     [Fact]
     public void Compare_Reports_AKeyTheConfigDoesNotKnow_AtEitherDepth()
     {
@@ -83,8 +87,140 @@ public class ConfigUpgradeTests
 
         ConfigDiff diff = ConfigUpgrade.Compare(file, config);
 
-        Assert.Equal(["Attribution.BurstTicks"], diff.Missing);
-        Assert.Equal(["Colour", "Attribution.Burstticks"], diff.Unknown);
+        Assert.Empty(diff.Missing);
+        Assert.Equal(["Colour"], diff.Unknown);
+        Assert.Empty(diff.Duplicated);
+    }
+
+    /// <summary>The probe from the release review: a file spelled entirely in whatever casing an
+    /// admin's editor produced still carries every one of its own values, because Newtonsoft binds
+    /// LoadModConfig's keys case-insensitively. None of that is missing, dropped or a typo.</summary>
+    [Fact]
+    public void Compare_Ignores_Casing_WhenAKeyIsSpelledDifferently()
+    {
+        const string file = """
+            {
+              "port": 9100,
+              "bind": "0.0.0.0",
+              "Attribution": { "burstticks": 5 }
+            }
+            """;
+        const string config = """
+            {
+              "Port": 9464,
+              "Bind": "127.0.0.1",
+              "Attribution": { "BurstTicks": 30 }
+            }
+            """;
+
+        ConfigDiff diff = ConfigUpgrade.Compare(file, config);
+
+        Assert.Empty(diff.Missing);
+        Assert.Empty(diff.Unknown);
+        Assert.Empty(diff.Duplicated);
+    }
+
+    /// <summary>The other half of the probe: the same key written twice, cased differently.
+    /// Newtonsoft applies whichever spelling comes last while reading the document, so that is
+    /// the value in effect, not "port" doing nothing the way a case-sensitive diff used to
+    /// report it. Never the values themselves: this file is linked into Pulse.Otlp unchanged, and
+    /// the same duplicate-key warning fires there for a config carrying header credentials.</summary>
+    [Fact]
+    public void Compare_Reports_ADuplicateKey_AndWhichSpellingWon()
+    {
+        const string file = """{"Port": 9464, "port": 9100}""";
+        const string config = """{"Port": 9100}""";
+
+        ConfigDiff diff = ConfigUpgrade.Compare(file, config);
+
+        Assert.Empty(diff.Missing);
+        Assert.Empty(diff.Unknown);
+        string duplicate = Assert.Single(diff.Duplicated);
+        Assert.Contains("\"port\"", duplicate);
+        Assert.Contains("\"Port\"", duplicate);
+        Assert.Contains("wins over", duplicate);
+        Assert.DoesNotContain("9100", duplicate);
+        Assert.DoesNotContain("9464", duplicate);
+    }
+
+    /// <summary>The same duplicate-key rule applies inside a nested block, and it must not also be
+    /// misreported as a key the config does not know.</summary>
+    [Fact]
+    public void Compare_Reports_ADuplicateKey_InsideANestedBlock()
+    {
+        const string file = """{"Attribution": {"BurstTicks": 30, "burstticks": 5}}""";
+        const string config = """{"Attribution": {"BurstTicks": 5}}""";
+
+        ConfigDiff diff = ConfigUpgrade.Compare(file, config);
+
+        Assert.Empty(diff.Missing);
+        Assert.Empty(diff.Unknown);
+        string duplicate = Assert.Single(diff.Duplicated);
+        Assert.StartsWith("Attribution.BurstTicks:", duplicate);
+        Assert.Contains("\"burstticks\"", duplicate);
+    }
+
+    /// <summary>The release review's still-false variant of the duplicate-key report: the same
+    /// block written twice under different casing, each spelling setting a different field.
+    /// Newtonsoft does not pick one spelling as a "winner" here, it merges both into the one bound
+    /// object (Enabled from "Attribution", BurstTicks from "attribution"), so neither the
+    /// duplicate-key line nor the added-keys line may claim otherwise: only IntervalSeconds, which
+    /// neither spelling set, is genuinely missing.</summary>
+    [Fact]
+    public void Compare_Merges_ABlockDuplicatedUnderTwoSpellings_InsteadOfPickingOneAsTheWinner()
+    {
+        const string file = """{"Attribution": {"Enabled": true}, "attribution": {"BurstTicks": 7}}""";
+        const string config = """
+            {
+              "Attribution": { "Enabled": true, "BurstTicks": 7, "IntervalSeconds": 10 }
+            }
+            """;
+
+        ConfigDiff diff = ConfigUpgrade.Compare(file, config);
+
+        // Not Attribution.Enabled: the admin's own "Attribution" spelling set it, and the merge
+        // must see that even though "attribution" is the spelling written last.
+        Assert.Equal(["Attribution.IntervalSeconds"], diff.Missing);
+        Assert.Empty(diff.Unknown);
+
+        string duplicate = Assert.Single(diff.Duplicated);
+        Assert.Contains("\"Attribution\"", duplicate);
+        Assert.Contains("\"attribution\"", duplicate);
+        Assert.DoesNotContain("wins over", duplicate);
+        Assert.DoesNotContain("true", duplicate);
+        Assert.DoesNotContain("7", duplicate);
+    }
+
+    /// <summary>The security half of the same defect: Pulse.Otlp links this exact file in, and a
+    /// header block duplicated under two casings must never put either header's value in the log,
+    /// nor claim one replaces the other. Newtonsoft keeps every one of a dictionary's colliding
+    /// keys (unlike a class property, where the last spelling read wins), so both survive into
+    /// config here, once under each casing; Walk must report the collision once, not once per
+    /// surviving entry.</summary>
+    [Fact]
+    public void Compare_Reports_ADictionaryKeyCollision_Once_WithNoValueAndNoWinner()
+    {
+        const string file = """
+            {
+              "Headers": { "authorization": "Basic secret-a", "Authorization": "Basic secret-b" }
+            }
+            """;
+        const string config = """
+            {
+              "Headers": { "authorization": "Basic secret-a", "Authorization": "Basic secret-b" }
+            }
+            """;
+
+        ConfigDiff diff = ConfigUpgrade.Compare(file, config);
+
+        Assert.Empty(diff.Missing);
+        Assert.Empty(diff.Unknown);
+        string duplicate = Assert.Single(diff.Duplicated);
+        Assert.StartsWith("Headers.", duplicate);
+        Assert.Contains("\"authorization\"", duplicate);
+        Assert.Contains("\"Authorization\"", duplicate);
+        Assert.DoesNotContain("wins over", duplicate);
+        Assert.DoesNotContain("secret", duplicate);
     }
 
     /// <summary>Key order and whitespace are the serializer's business, not the admin's, and a
