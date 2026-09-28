@@ -131,10 +131,6 @@ mutate Pulse/MetricsHttpServer.cs \
     "http server: the request head size limit widened, no longer rejecting a header the tests expect it to reject"
 
 mutate Pulse/MetricsHttpServer.cs \
-    's/Environment\.TickCount64 > deadline/false/' \
-    "http server: the overall request deadline never trips, so a byte-dribbling client is held forever"
-
-mutate Pulse/MetricsHttpServer.cs \
     's/stream\.ReadTimeout = ClampToDeadline\(deadline\);/stream.ReadTimeout = IoTimeoutMs;/' \
     "http server: a Read already blocked when the deadline passes waits out the full backstop timeout instead"
 

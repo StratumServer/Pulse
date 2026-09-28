@@ -344,10 +344,10 @@ internal sealed class MetricsHttpServer : IDisposable
     /// <remarks>A flat per-call timeout alone bounds one Read, not the request: a client sending
     /// one byte every four seconds never trips a five second timeout and can hold this loop for
     /// as long as it keeps doing that. <paramref name="deadline"/>, an
-    /// <see cref="Environment.TickCount64"/> value taken once at accept, is the actual ceiling:
-    /// checked before every Read that could otherwise block again, and, through
-    /// <see cref="ClampToDeadline"/>, applied to the Read itself so a call already blocked when
-    /// the deadline passes does not wait out a full five seconds of its own on top of it.</remarks>
+    /// <see cref="Environment.TickCount64"/> value taken once at accept, is the actual ceiling,
+    /// enforced by shortening the timeout of every Read to whatever is left of it through
+    /// <see cref="ClampToDeadline"/>: a call already blocked when the deadline passes still
+    /// times out at the deadline, not five seconds later.</remarks>
     private static string? ReadRequestLine(NetworkStream stream, long deadline)
     {
         byte[] buffer = new byte[MaxHeadBytes];
@@ -355,11 +355,6 @@ internal sealed class MetricsHttpServer : IDisposable
         int searchedTo = 0;
         while (length < buffer.Length)
         {
-            if (Environment.TickCount64 > deadline)
-            {
-                throw new TimeoutException("the request did not complete within the overall deadline");
-            }
-
             stream.ReadTimeout = ClampToDeadline(deadline);
             int read = stream.Read(buffer, length, buffer.Length - length);
             if (read == 0)
