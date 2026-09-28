@@ -154,6 +154,14 @@ mutate Pulse/MetricsHttpServer.cs \
     's/internal void Reset\(\) => nextMs = InitialMs;/internal void Reset() { }/' \
     "http server: the accept backoff never resets after a successful accept"
 
+mutate Pulse/MetricsHttpServer.cs \
+    's/stream\.WriteTimeout = ClampToDeadline\(deadline\);/stream.WriteTimeout = IoTimeoutMs;/' \
+    "http server: the write timeout ignores the deadline and always uses the full backstop"
+
+mutate Pulse/MetricsHttpServer.cs \
+    's/acceptBackoff\.Reset\(\);/ /' \
+    "http server: the real accept loop stops resetting the backoff after a successful accept"
+
 mutate Pulse/TickBookkeeper.cs \
     's/sinceSnapshotSeconds < snapshotIntervalSeconds/sinceSnapshotSeconds <= snapshotIntervalSeconds/' \
     "tick bookkeeper: snapshot cadence boundary made inclusive, delaying the due tick that lands exactly on it"

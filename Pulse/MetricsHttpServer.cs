@@ -37,13 +37,16 @@ internal sealed class MetricsHttpServer : IDisposable
     /// deadline itself; <see cref="ClampToDeadline"/> shortens it as the deadline closes in.</summary>
     private const int IoTimeoutMs = 5000;
 
-    // ponytail: 16 concurrent connections, each of them stalled, still clears on its own within
-    // one request deadline; raise this, or move to an async accept loop, if a real deployment
-    // ever needs more scrapers or panels hitting this at once than that.
-    private const int MaxConcurrentConnections = 16;
+    // ponytail: the real ceiling here is a client that keeps this many connections open and, as
+    // fast as the server drops each one at its own deadline, opens another to take its place:
+    // measured at 16 held connections, 3 of 10 scrapes still got through; at 32, none did. Raise
+    // the cap, add a per-address limit so one client cannot hold every slot by itself, or move to
+    // async I/O and stop needing a fixed cap at all, if that ever needs to be closed off; today
+    // it is bounded only by however long the client keeps doing it.
+    internal const int MaxConcurrentConnections = 16;
 
-    /// <summary>Accept-loop backoff, applied only to a failed AcceptTcpClient call: an empty
-    /// sleep the first time, doubling on every consecutive failure, so a transient error costs
+    /// <summary>Accept-loop backoff, applied only to a failed AcceptTcpClient call: 10 ms the
+    /// first time, doubling on every consecutive failure, so a transient error costs almost
     /// nothing while a persistent one (the process out of file descriptors, say) does not spin a
     /// full core forever behind a log line that only fires once a minute.</summary>
     internal sealed class AcceptBackoff
@@ -52,6 +55,10 @@ internal sealed class MetricsHttpServer : IDisposable
         internal const int MaxMs = 1000;
 
         private int nextMs = InitialMs;
+
+        /// <summary>The current delay, unchanged by reading it; read back by a test proving Reset
+        /// is actually called where it matters, nothing in production reads it this way.</summary>
+        internal int CurrentMs => nextMs;
 
         /// <summary>The delay to sleep for this failure; advances for the next one.</summary>
         internal int NextMs()
@@ -82,6 +89,7 @@ internal sealed class MetricsHttpServer : IDisposable
     private volatile bool stopping;
 
     private int acceptFailures;
+    private int disposed;
 
     /// <summary>How many times AcceptTcpClient has failed outright, backoff included; read back
     /// by the accept-loop-backoff test, nothing in production reads it.</summary>
@@ -151,6 +159,16 @@ internal sealed class MetricsHttpServer : IDisposable
 
     public void Dispose()
     {
+        // Idempotent, and safe under two concurrent calls: only the caller that actually flips
+        // this from 0 wins the race and runs the rest, whether the second call arrives a minute
+        // later or on another thread at the exact same instant. A plain volatile bool read here,
+        // checked then set as two separate steps, would let both callers through under the
+        // second scenario.
+        if (Interlocked.Exchange(ref disposed, 1) != 0)
+        {
+            return;
+        }
+
         stopping = true;
         stoppingSource.Cancel();
         listener.Stop();
@@ -181,8 +199,17 @@ internal sealed class MetricsHttpServer : IDisposable
             thread.Join(TimeSpan.FromSeconds(2));
         }
 
-        stoppingSource.Dispose();
-        connectionSlots.Dispose();
+        // connectionSlots and stoppingSource are deliberately never disposed. Neither one's
+        // underlying wait handle is ever allocated (nothing here reads
+        // connectionSlots.AvailableWaitHandle or stoppingSource.Token's own WaitHandle), so
+        // there is nothing real to release; disposing them here raced a handler thread that
+        // outlived the join above, which then called Release on an already-disposed
+        // SemaphoreSlim from its own finally block. That threw ObjectDisposedException on a
+        // background thread with nothing above it to catch it, which crashes the entire game
+        // server, not just this mod: a render taking longer than the join budget, or an ordinary
+        // connection accepted in the instant between listener.Stop() and the snapshot above and
+        // so missed by it, was enough to trigger it. Both objects are left for the garbage
+        // collector once this instance is no longer reachable.
     }
 
     // Each accepted connection gets its own short-lived thread, up to MaxConcurrentConnections at
@@ -194,6 +221,24 @@ internal sealed class MetricsHttpServer : IDisposable
         "Critical Bug", "S2222:Locks should be released",
         Justification = "connectionSlots.Wait acquires a slot this method itself releases on every path that does not hand the connection to a handler thread; once StartHandler succeeds, ownership of that slot passes to HandleConnection, which releases it in its own finally when that thread finishes. The analysis has no way to see a release deliberately made from a different method on a different thread.")]
     private void Serve()
+    {
+        try
+        {
+            ServeUntilStopped();
+        }
+        catch (Exception e)
+        {
+            // Nothing above is expected to throw past its own handling, but this is the dedicated
+            // thread's entry point, and an exception escaping any thread this mod starts is an
+            // unhandled exception on a background thread, which crashes the whole game server,
+            // not just the metrics endpoint. Logging and letting the thread end here, silently
+            // dropping the endpoint, is always the safer failure than that, even for a case this
+            // does not specifically anticipate.
+            LogOccasionally(e);
+        }
+    }
+
+    private void ServeUntilStopped()
     {
         while (!stopping)
         {
@@ -275,31 +320,42 @@ internal sealed class MetricsHttpServer : IDisposable
     {
         try
         {
-            using (client)
+            try
             {
-                try
+                using (client)
                 {
-                    Handle(client.GetStream(), deadline);
-                }
-                catch (Exception e)
-                {
-                    // Otherwise Dispose closed this connection's socket mid-request, normal
-                    // shutdown, nothing to log.
-                    if (!stopping)
+                    try
                     {
-                        LogOccasionally(e);
+                        Handle(client.GetStream(), deadline);
+                    }
+                    catch (Exception e)
+                    {
+                        // Otherwise Dispose closed this connection's socket mid-request, normal
+                        // shutdown, nothing to log.
+                        if (!stopping)
+                        {
+                            LogOccasionally(e);
+                        }
                     }
                 }
             }
-        }
-        finally
-        {
-            lock (activeConnectionsGate)
+            finally
             {
-                activeConnections.RemoveAll(c => c.Client == client);
-            }
+                lock (activeConnectionsGate)
+                {
+                    activeConnections.RemoveAll(c => c.Client == client);
+                }
 
-            connectionSlots.Release();
+                connectionSlots.Release();
+            }
+        }
+        catch (Exception e)
+        {
+            // This is a short-lived thread of its own, so the same reasoning as Serve's outer
+            // catch applies here just as much: nothing above should throw past its own handling,
+            // but an exception escaping this thread would still crash the whole game server, and
+            // a metrics endpoint must never be able to do that.
+            LogOccasionally(e);
         }
     }
 
@@ -366,9 +422,13 @@ internal sealed class MetricsHttpServer : IDisposable
     /// one byte every four seconds never trips a five second timeout and can hold this loop for
     /// as long as it keeps doing that. <paramref name="deadline"/>, an
     /// <see cref="Environment.TickCount64"/> value taken once at accept, is the actual ceiling,
-    /// enforced by shortening the timeout of every Read to whatever is left of it through
-    /// <see cref="ClampToDeadline"/>: a call already blocked when the deadline passes still
-    /// times out at the deadline, not five seconds later.</remarks>
+    /// enforced twice over: checked before every Read that could otherwise block again, since
+    /// <see cref="ClampToDeadline"/> floors the timeout it hands a Read at 1 ms, never 0 or
+    /// negative, so a client sending data faster than that floor (faster than roughly one byte a
+    /// millisecond) would otherwise never trip the clamped timeout at all and would only be
+    /// stopped once <see cref="MaxHeadBytes"/> filled; and, through that same clamp, applied to
+    /// the Read itself, so a call already blocked when the deadline passes does not wait out a
+    /// full five seconds of its own on top of it.</remarks>
     private static string? ReadRequestLine(NetworkStream stream, long deadline)
     {
         byte[] buffer = new byte[MaxHeadBytes];
@@ -376,6 +436,11 @@ internal sealed class MetricsHttpServer : IDisposable
         int searchedTo = 0;
         while (length < buffer.Length)
         {
+            if (Environment.TickCount64 > deadline)
+            {
+                throw new TimeoutException("the request did not complete within the overall deadline");
+            }
+
             stream.ReadTimeout = ClampToDeadline(deadline);
             int read = stream.Read(buffer, length, buffer.Length - length);
             if (read == 0)

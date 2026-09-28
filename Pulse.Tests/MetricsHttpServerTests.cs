@@ -318,6 +318,91 @@ public class MetricsHttpServerTests
         }
     }
 
+    /// <summary>Reading the request is not the only socket call the deadline has to bound: a
+    /// client that stops reading its response makes the server's own Write block once the
+    /// send buffer fills, and that Write needs the same clamp Read gets, or it falls back to the
+    /// full IoTimeoutMs backstop regardless of how little of the deadline is actually left by
+    /// then.</summary>
+    [Fact]
+    public async Task WriteTimeout_IsClampedToTheDeadline_NotTheFullBackstop()
+    {
+        int port = FreePort();
+        // Comfortably larger than the OS send and receive buffers combined, so writing it blocks
+        // once the client below stops reading.
+        string bigBody = new string('x', 4 * 1024 * 1024);
+        using MetricsHttpServer server = new("127.0.0.1", port, () => bigBody, new FakeLogger(), requestTimeoutMs: 1000);
+        server.Start();
+
+        using TcpClient client = new();
+        await client.ConnectAsync(IPAddress.Loopback, port);
+        NetworkStream stream = client.GetStream();
+        await stream.WriteAsync(Encoding.ASCII.GetBytes("GET /metrics HTTP/1.1\r\nHost: x\r\n\r\n"));
+
+        // Never reads any of the response: the server's write of several megabytes eventually
+        // blocks on a full send buffer, giving the write timeout something real to bound.
+        Stopwatch watch = Stopwatch.StartNew();
+        while (server.GetActiveHandlerThreads().Count > 0 && watch.Elapsed < TimeSpan.FromSeconds(3))
+        {
+            await Task.Delay(50);
+        }
+
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3),
+            $"the handler thread was still writing a stalled response after {watch.Elapsed}, past the 1 s deadline it should be clamped to");
+    }
+
+    /// <summary>If a failed accept ever kept the concurrency slot it had acquired instead of
+    /// releasing it, the semaphore would run permanently short by one for every failure, and
+    /// enough of them would exhaust it for good; a handful is enough to prove each one gives its
+    /// slot back.</summary>
+    [Fact]
+    public async Task AcceptFailure_ReleasesItsConcurrencySlot()
+    {
+        int port = FreePort();
+        MetricsHttpServer server = new("127.0.0.1", port, () => "x", new FakeLogger());
+        server.Start();
+
+        FieldInfo listenerField = typeof(MetricsHttpServer).GetField("listener", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        TcpListener listener = (TcpListener)listenerField.GetValue(server)!;
+        listener.Stop();
+
+        while (server.AcceptFailures < 3)
+        {
+            await Task.Delay(10);
+        }
+
+        FieldInfo slotsField = typeof(MetricsHttpServer).GetField("connectionSlots", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        SemaphoreSlim slots = (SemaphoreSlim)slotsField.GetValue(server)!;
+        Assert.Equal(MetricsHttpServer.MaxConcurrentConnections, slots.CurrentCount);
+
+        server.Dispose();
+    }
+
+    /// <summary>Sets stopping directly, bypassing Dispose entirely, so this checks exactly the
+    /// branch in Handle: a request that reaches the render-or-not decision while shutdown is
+    /// already under way must never call render, whatever else Dispose itself does or does not
+    /// close.</summary>
+    [Fact]
+    public async Task Handle_Returns503_AndNeverCallsRender_WhenStoppingIsAlreadySet()
+    {
+        int port = FreePort();
+        bool rendered = false;
+        using MetricsHttpServer server = new("127.0.0.1", port, () =>
+        {
+            rendered = true;
+            return "x";
+        }, new FakeLogger());
+        server.Start();
+
+        FieldInfo stoppingField = typeof(MetricsHttpServer).GetField("stopping", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        stoppingField.SetValue(server, true);
+
+        using HttpClient client = new();
+        using HttpResponseMessage response = await client.GetAsync($"http://127.0.0.1:{port}/metrics");
+
+        Assert.Equal((HttpStatusCode)503, response.StatusCode);
+        Assert.False(rendered, "render was called even though stopping was already set");
+    }
+
     [Fact]
     public async Task IdleClient_IsDroppedAfterTheReceiveTimeout_AndTheNextClientIsServed()
     {
@@ -439,6 +524,69 @@ public class MetricsHttpServerTests
             $"took {watch.Elapsed} to drop a connection that sent one byte and then went silent");
     }
 
+    /// <summary>ClampToDeadline floors the timeout it hands a Read at 1 ms, never 0 or negative,
+    /// so a client sending data faster than that floor keeps every single Read completing well
+    /// inside it, the same gap the per-call timeout alone always had, just at a far smaller
+    /// interval. Only the deadline checked once per loop, independently of what any Read call
+    /// does, closes it. Paced at one byte every 0.5 ms, comfortably faster than that 1 ms floor,
+    /// but slow enough that filling the 8 KB head this way would take about 4 s, well past the
+    /// 1 s deadline that has to end this instead; a write loop with no pacing at all fills that
+    /// head in well under a second regardless of the deadline, which proves nothing.</summary>
+    [Fact]
+    public async Task FastDribblingClient_IsDroppedAtTheDeadline_NotOnlyWhenTheHeadFills()
+    {
+        int port = FreePort();
+        using MetricsHttpServer server = new("127.0.0.1", port, () => "x", new FakeLogger(), requestTimeoutMs: 1000);
+        server.Start();
+
+        using TcpClient client = new();
+        await client.ConnectAsync(IPAddress.Loopback, port);
+        NetworkStream stream = client.GetStream();
+
+        Stopwatch watch = Stopwatch.StartNew();
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
+
+        Task<bool> waitForDrop = Task.Run(async () =>
+        {
+            byte[] buffer = new byte[16];
+            try
+            {
+                return await stream.ReadAsync(buffer, cts.Token) == 0;
+            }
+            catch (IOException)
+            {
+                return true;
+            }
+        });
+
+        byte[] one = Encoding.ASCII.GetBytes("G");
+        int bytesSent = 0;
+        // Task.Delay cannot reach sub-millisecond precision on most platforms, so this paces
+        // itself against a Stopwatch instead, busy-waiting for each byte's own absolute target
+        // time rather than sleeping a fixed amount per iteration, which would drift.
+        while (!waitForDrop.IsCompleted && watch.Elapsed < TimeSpan.FromSeconds(4))
+        {
+            try
+            {
+                await stream.WriteAsync(one, cts.Token);
+            }
+            catch (IOException)
+            {
+                break;
+            }
+
+            bytesSent++;
+            double targetMs = bytesSent * 0.5;
+            while (!waitForDrop.IsCompleted && watch.Elapsed.TotalMilliseconds < targetMs)
+            {
+            }
+        }
+
+        Assert.True(await waitForDrop, "the server never dropped the fast-dribbling client");
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2),
+            $"took {watch.Elapsed} to drop a fast-dribbling client, past the 1 s deadline it should be bounded by");
+    }
+
     [Fact]
     public async Task RenderThrows_TheServeThreadSurvives_AndTheFailureIsLoggedAtMostOncePerInterval()
     {
@@ -544,6 +692,71 @@ public class MetricsHttpServerTests
         Assert.False(renderedAfterDispose, "render ran after Dispose returned");
     }
 
+    /// <summary>Before connectionSlots and stoppingSource stopped being disposed, a handler
+    /// thread still running its render callback when Dispose's own join timed out would call
+    /// Release on an already-disposed SemaphoreSlim from its finally block once that render
+    /// finally returned: an unhandled exception on a background thread, which crashes the whole
+    /// process, not just this class. A 1.5 s render, well past Dispose's 1 s join budget, puts a
+    /// handler thread exactly there. Reaching the end of this test at all is most of the proof:
+    /// the old bug took the whole test host down with it, not just this one test.</summary>
+    [Fact]
+    public async Task Dispose_DuringASlowRender_TheProcessSurvives_AndTheHandlerEndsCleanly()
+    {
+        int port = FreePort();
+        using ManualResetEventSlim renderStarted = new();
+        MetricsHttpServer server = new("127.0.0.1", port, () =>
+        {
+            renderStarted.Set();
+            Thread.Sleep(1500);
+            return "x";
+        }, new FakeLogger());
+        server.Start();
+
+        using HttpClient client = new();
+        Task<HttpResponseMessage> scrape = client.GetAsync($"http://127.0.0.1:{port}/metrics");
+
+        Assert.True(renderStarted.Wait(TimeSpan.FromSeconds(2)), "the request never reached render");
+
+        server.Dispose();
+
+        // Well past the 1.5 s render, so its handler thread has certainly finished (or, on the
+        // old code, certainly crashed the process) by now.
+        await Task.Delay(1700);
+        Assert.Empty(server.GetActiveHandlerThreads());
+
+        try
+        {
+            using HttpResponseMessage response = await scrape;
+        }
+        catch
+        {
+            // The connection was torn down from under this request once Dispose closed its
+            // socket; this test only cares that nothing crashed and that the handler thread
+            // cleaned up after itself, not what this half-abandoned response looks like.
+        }
+    }
+
+    [Fact]
+    public void Dispose_CalledTwice_IsSafe()
+    {
+        MetricsHttpServer server = new("127.0.0.1", FreePort(), () => "x", new FakeLogger());
+        server.Start();
+
+        server.Dispose();
+        server.Dispose();
+    }
+
+    [Fact]
+    public async Task Dispose_CalledConcurrently_IsSafe()
+    {
+        MetricsHttpServer server = new("127.0.0.1", FreePort(), () => "x", new FakeLogger());
+        server.Start();
+
+        await Task.WhenAll(
+            Task.Run(server.Dispose),
+            Task.Run(server.Dispose));
+    }
+
     /// <summary>A persistent AcceptTcpClient failure, the process out of file descriptors being
     /// the real-world example, must not spin the serve thread at full speed forever behind a log
     /// line that only fires once a minute. Stops the listener directly, through reflection,
@@ -603,6 +816,37 @@ public class MetricsHttpServerTests
         backoff.Reset();
 
         Assert.Equal(MetricsHttpServer.AcceptBackoff.InitialMs, backoff.NextMs());
+    }
+
+    /// <summary>The two tests above prove AcceptBackoff's own arithmetic; neither proves Serve
+    /// actually calls Reset on its one instance after a successful accept. Advances the server's
+    /// real backoff by reflection before ever starting it, so the very first accept, a normal
+    /// scrape once the server is listening, is the one that has to reset it back down.</summary>
+    [Fact]
+    public async Task AcceptBackoff_ResetsAfterASuccessfulAccept_InTheRealServeLoop()
+    {
+        int port = FreePort();
+        MetricsHttpServer server = new("127.0.0.1", port, () => "x", new FakeLogger());
+
+        FieldInfo backoffField = typeof(MetricsHttpServer).GetField("acceptBackoff", BindingFlags.NonPublic | BindingFlags.Instance)!;
+        MetricsHttpServer.AcceptBackoff backoff = (MetricsHttpServer.AcceptBackoff)backoffField.GetValue(server)!;
+        backoff.NextMs();
+        backoff.NextMs();
+        Assert.True(backoff.CurrentMs > MetricsHttpServer.AcceptBackoff.InitialMs);
+
+        server.Start();
+        try
+        {
+            using HttpClient client = new();
+            using HttpResponseMessage response = await client.GetAsync($"http://127.0.0.1:{port}/metrics");
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+
+            Assert.Equal(MetricsHttpServer.AcceptBackoff.InitialMs, backoff.CurrentMs);
+        }
+        finally
+        {
+            server.Dispose();
+        }
     }
 
     [Fact]
