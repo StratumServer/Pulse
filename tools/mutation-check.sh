@@ -135,8 +135,28 @@ mutate Pulse/MetricsHttpServer.cs \
     "http server: the overall request deadline never trips, so a byte-dribbling client is held forever"
 
 mutate Pulse/MetricsHttpServer.cs \
-    's/Thread\.Sleep\(acceptBackoffMs\);/Thread.Sleep(0);/' \
+    's/stream\.ReadTimeout = ClampToDeadline\(deadline\);/stream.ReadTimeout = IoTimeoutMs;/' \
+    "http server: a Read already blocked when the deadline passes waits out the full backstop timeout instead"
+
+mutate Pulse/MetricsHttpServer.cs \
+    's/MaxConcurrentConnections = 16;/MaxConcurrentConnections = 1000;/' \
+    "http server: the concurrency cap is effectively removed, so a scrape is never actually queued behind it"
+
+mutate Pulse/MetricsHttpServer.cs \
+    's/Thread\.Sleep\(acceptBackoff\.NextMs\(\)\);/Thread.Sleep(0);/' \
     "http server: the accept-failure backoff stops sleeping, spinning the loop instead of throttling it"
+
+mutate Pulse/MetricsHttpServer.cs \
+    's/nextMs = Math\.Min\(nextMs \* 2, MaxMs\);/nextMs = Math.Min(nextMs, MaxMs);/' \
+    "http server: the accept backoff stops doubling, retrying at a constant rate forever"
+
+mutate Pulse/MetricsHttpServer.cs \
+    's/Math\.Min\(nextMs \* 2, MaxMs\)/nextMs * 2/' \
+    "http server: the accept backoff is no longer capped, growing without bound"
+
+mutate Pulse/MetricsHttpServer.cs \
+    's/internal void Reset\(\) => nextMs = InitialMs;/internal void Reset() { }/' \
+    "http server: the accept backoff never resets after a successful accept"
 
 mutate Pulse/TickBookkeeper.cs \
     's/sinceSnapshotSeconds < snapshotIntervalSeconds/sinceSnapshotSeconds <= snapshotIntervalSeconds/' \

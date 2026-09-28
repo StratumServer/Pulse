@@ -131,10 +131,10 @@ first.
   `http://host.docker.internal:9464/metrics` no longer answer 404: the old listener matched the
   Host header against the configured `Bind` address and rejected anything else, and the new
   server does not look at Host at all. `Bind` set to `0.0.0.0` no longer throws at startup on
-  Linux. An invalid `Bind` value, an empty string or `::1` without brackets among them, is now
-  caught in the same place a taken port already was, logged as a clean bind failure instead of
-  raising an exception that left the rest of the mod running with no endpoint and no explanation
-  in the log.
+  Linux, and `::1` binds whether or not it is written with brackets. An invalid `Bind` value, an
+  empty string among them, is now caught in the same place a taken port already was, logged as a
+  clean bind failure instead of raising an exception that left the rest of the mod running with
+  no endpoint and no explanation in the log.
 - A `pulse.json` or `pulse-otlp.json` that exists but will not parse (a stray comma is enough) no
   longer stops the mod from starting; before, recovering meant deleting the file by hand. Each mod
   now logs one error naming the file's full path and the parser's own message, and leaves the file

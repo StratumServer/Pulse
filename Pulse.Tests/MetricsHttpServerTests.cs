@@ -228,6 +228,94 @@ public class MetricsHttpServerTests
         Assert.Equal(HttpStatusCode.OK, second.StatusCode);
     }
 
+    /// <summary>Regression check for the single-threaded design this once had: a handful of
+    /// connections that never send anything used to occupy the one thread that also accepted and
+    /// served every scrape, so any of them sitting open starved every scrape behind it. Each
+    /// connection now gets its own thread, so idle ones below the concurrency cap have no effect
+    /// on a scrape at all.</summary>
+    [Fact]
+    public async Task IdleConnectionsBelowTheCap_DoNotBlockConcurrentScrapes()
+    {
+        int port = FreePort();
+        using MetricsHttpServer server = new("127.0.0.1", port, () => "x", new FakeLogger());
+        server.Start();
+
+        List<TcpClient> idle = [];
+        try
+        {
+            for (int i = 0; i < 5; i++)
+            {
+                TcpClient client = new();
+                await client.ConnectAsync(IPAddress.Loopback, port);
+                idle.Add(client);
+            }
+
+            // Lets the accept thread actually pick up all five idle connections before scraping.
+            await Task.Delay(200);
+
+            using HttpClient http = new();
+            Stopwatch watch = Stopwatch.StartNew();
+            for (int i = 0; i < 10; i++)
+            {
+                using HttpResponseMessage response = await http.GetAsync($"http://127.0.0.1:{port}/metrics");
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            }
+
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3),
+                $"10 scrapes behind 5 idle connections took {watch.Elapsed}");
+        }
+        finally
+        {
+            foreach (TcpClient client in idle)
+            {
+                client.Dispose();
+            }
+        }
+    }
+
+    /// <summary>Fills every concurrency slot with a connection that will not send anything, then
+    /// scrapes: that seventeenth connection has nowhere to go until one of the sixteen idle ones
+    /// is evicted by its own (short, for this test) deadline and frees a slot. The lower bound
+    /// confirms it actually waited for that, rather than the cap having no effect at all.</summary>
+    [Fact]
+    public async Task ScrapeQueuedBehindAFullCap_SucceedsOnceAShortDeadlineFreesASlot()
+    {
+        int port = FreePort();
+        using MetricsHttpServer server = new("127.0.0.1", port, () => "x", new FakeLogger(), requestTimeoutMs: 500);
+        server.Start();
+
+        List<TcpClient> idle = [];
+        try
+        {
+            for (int i = 0; i < 16; i++)
+            {
+                TcpClient client = new();
+                await client.ConnectAsync(IPAddress.Loopback, port);
+                idle.Add(client);
+            }
+
+            // Lets the accept thread actually pick up all sixteen before the seventeenth connects.
+            await Task.Delay(200);
+
+            using HttpClient http = new();
+            using CancellationTokenSource cts = new(TimeSpan.FromSeconds(5));
+            Stopwatch watch = Stopwatch.StartNew();
+            using HttpResponseMessage response = await http.GetAsync($"http://127.0.0.1:{port}/metrics", cts.Token);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            Assert.True(watch.Elapsed > TimeSpan.FromMilliseconds(300),
+                $"the scrape succeeded in {watch.Elapsed}, suspiciously fast for one actually queued behind a full cap");
+            Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2), $"queued scrape took {watch.Elapsed}");
+        }
+        finally
+        {
+            foreach (TcpClient client in idle)
+            {
+                client.Dispose();
+            }
+        }
+    }
+
     [Fact]
     public async Task IdleClient_IsDroppedAfterTheReceiveTimeout_AndTheNextClientIsServed()
     {
@@ -314,6 +402,41 @@ public class MetricsHttpServerTests
         Assert.Equal(HttpStatusCode.OK, response.StatusCode);
     }
 
+    /// <summary>The deadline is only checked between reads, so a Read already blocked when it
+    /// passes has to be bounded some other way, or it simply waits out its own full per-call
+    /// timeout regardless of how little of the deadline was left when it started. One byte, then
+    /// silence, puts the very next Read in exactly that position: already waiting when the 1 s
+    /// deadline arrives. It has to come back in about a second, not five.</summary>
+    [Fact]
+    public async Task OneByteThenSilence_IsDroppedAtTheDeadline_NotAfterAFullPerCallTimeout()
+    {
+        int port = FreePort();
+        using MetricsHttpServer server = new("127.0.0.1", port, () => "x", new FakeLogger(), requestTimeoutMs: 1000);
+        server.Start();
+
+        using TcpClient client = new();
+        await client.ConnectAsync(IPAddress.Loopback, port);
+        NetworkStream stream = client.GetStream();
+        await stream.WriteAsync(Encoding.ASCII.GetBytes("G"));
+
+        Stopwatch watch = Stopwatch.StartNew();
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(4));
+        byte[] buffer = new byte[16];
+        int read;
+        try
+        {
+            read = await stream.ReadAsync(buffer, cts.Token);
+        }
+        catch (IOException)
+        {
+            read = 0;
+        }
+
+        Assert.Equal(0, read);
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(2),
+            $"took {watch.Elapsed} to drop a connection that sent one byte and then went silent");
+    }
+
     [Fact]
     public async Task RenderThrows_TheServeThreadSurvives_AndTheFailureIsLoggedAtMostOncePerInterval()
     {
@@ -372,24 +495,51 @@ public class MetricsHttpServerTests
         Assert.False(ServeThreadAlive(server));
     }
 
+    /// <summary>Before the sockets of in-flight connections were tracked and force-closed,
+    /// Dispose's own 2 s Join was the only thing bounding it: it returned having merely run out of
+    /// patience, with the handler thread still alive and still blocked on the idle client's
+    /// socket. This pins Dispose to well under that budget, confirms the specific handler thread
+    /// for this connection is actually gone afterwards, and confirms render, which reads state a
+    /// caller may dispose immediately after Dispose returns, is never called once it has.</summary>
     [Fact]
-    public async Task Dispose_WhileAClientIsConnectedButIdle_ReturnsPromptly()
+    public async Task Dispose_WhileAClientIsConnectedButIdle_ReturnsPromptly_StopsItsHandlerThread_AndNeverRendersAfterwards()
     {
         int port = FreePort();
-        MetricsHttpServer server = new("127.0.0.1", port, () => "x", new FakeLogger());
+        bool disposed = false;
+        bool renderedAfterDispose = false;
+        MetricsHttpServer server = new("127.0.0.1", port, () =>
+        {
+            if (disposed)
+            {
+                renderedAfterDispose = true;
+            }
+
+            return "x";
+        }, new FakeLogger());
         server.Start();
 
         using TcpClient stalled = new();
         await stalled.ConnectAsync(IPAddress.Loopback, port);
 
-        // Lets the serve thread actually accept the connection and block on reading its request,
-        // so Dispose races against that read rather than against AcceptTcpClient.
+        // Lets the accept thread hand this connection to its own handler thread and block on
+        // reading its request, so Dispose races against that thread rather than against
+        // AcceptTcpClient or the semaphore wait.
         await Task.Delay(200);
+
+        Thread handlerThread = Assert.Single(server.ActiveHandlerThreads);
+        Assert.True(handlerThread.IsAlive);
 
         Stopwatch watch = Stopwatch.StartNew();
         server.Dispose();
+        disposed = true;
 
-        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(3), $"Dispose took {watch.Elapsed}");
+        Assert.True(watch.Elapsed < TimeSpan.FromSeconds(1), $"Dispose took {watch.Elapsed}");
+        Assert.False(handlerThread.IsAlive, "the handler thread was still alive once Dispose returned");
+
+        // Gives any straggling render call, if the guard above did not catch it, the time it
+        // would need to run.
+        await Task.Delay(300);
+        Assert.False(renderedAfterDispose, "render ran after Dispose returned");
     }
 
     /// <summary>A persistent AcceptTcpClient failure, the process out of file descriptors being
@@ -415,6 +565,42 @@ public class MetricsHttpServerTests
         Assert.InRange(server.AcceptFailures, 1, 50);
 
         server.Dispose();
+    }
+
+    /// <summary>The integration test above only proves the accept loop sleeps at all; it stays
+    /// green whether the delay doubles, stays flat, or grows without bound, since all three still
+    /// keep the failure count low over half a second. Exercised directly, with no timing involved,
+    /// these are the specific behaviours that test cannot tell apart.</summary>
+    [Fact]
+    public void AcceptBackoff_DoublesEachFailure_UpToACap()
+    {
+        MetricsHttpServer.AcceptBackoff backoff = new();
+
+        Assert.Equal(MetricsHttpServer.AcceptBackoff.InitialMs, backoff.NextMs());
+        Assert.Equal(MetricsHttpServer.AcceptBackoff.InitialMs * 2, backoff.NextMs());
+        Assert.Equal(MetricsHttpServer.AcceptBackoff.InitialMs * 4, backoff.NextMs());
+
+        int delay = 0;
+        for (int i = 0; i < 20; i++)
+        {
+            delay = backoff.NextMs();
+        }
+
+        Assert.Equal(MetricsHttpServer.AcceptBackoff.MaxMs, delay);
+    }
+
+    [Fact]
+    public void AcceptBackoff_Reset_ReturnsToTheInitialDelay()
+    {
+        MetricsHttpServer.AcceptBackoff backoff = new();
+        for (int i = 0; i < 5; i++)
+        {
+            backoff.NextMs();
+        }
+
+        backoff.Reset();
+
+        Assert.Equal(MetricsHttpServer.AcceptBackoff.InitialMs, backoff.NextMs());
     }
 
     [Fact]

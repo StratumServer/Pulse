@@ -1,4 +1,3 @@
-using System.Diagnostics.CodeAnalysis;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -6,7 +5,9 @@ using Vintagestory.API.Common;
 
 namespace Pulse;
 
-/// <summary>Serves the exposition text on its own thread, over a plain socket.</summary>
+/// <summary>Serves the exposition text over a plain socket: one dedicated thread accepts, and
+/// each accepted connection is handled on its own short-lived thread, up to a small concurrency
+/// cap.</summary>
 /// <remarks>A socket rather than HttpListener, whose two implementations disagree on what matters
 /// here: on Windows it goes through HTTP.sys, which refuses a non-administrator the address
 /// http://127.0.0.1:port/ until someone reserves it with netsh, and on Linux and macOS it answers
@@ -14,10 +15,13 @@ namespace Pulse;
 /// socket bound to the configured address needs no reservation on any OS and answers whatever the
 /// client called the host; what reaches it is decided by the bind alone.
 ///
-/// The thread comes from <see cref="TyronThreadPool.CreateDedicatedThread"/>, not from
+/// The accept thread comes from <see cref="TyronThreadPool.CreateDedicatedThread"/>, not from
 /// <c>api.Server.AddServerThread</c> (those are frozen for the whole of every autosave and are
 /// joined for up to 60 s at shutdown, so a blocking accept would stall both) and not from
-/// <c>Task.Run</c> (the engine caps the shared pool at 10 workers).</remarks>
+/// <c>Task.Run</c> (the engine caps the shared pool at 10 workers). Each connection's own thread
+/// is a plain background <see cref="Thread"/>: short-lived and bounded in number by
+/// <see cref="MaxConcurrentConnections"/>, it carries none of the reasons the accept thread needs
+/// that treatment.</remarks>
 internal sealed class MetricsHttpServer : IDisposable
 {
     private const string ExpositionContentType = "text/plain; version=0.0.4; charset=utf-8";
@@ -27,23 +31,50 @@ internal sealed class MetricsHttpServer : IDisposable
     /// this, the request is treated the same as a malformed one rather than read indefinitely.</summary>
     private const int MaxHeadBytes = 8192;
 
-    /// <summary>Bounds a single socket call: one Read, or the Write of the response. This alone
-    /// does not bound a whole request, since a client that keeps a call alive by sending or
-    /// accepting one byte just often enough never trips it; see <see cref="requestTimeoutMs"/>.</summary>
+    /// <summary>Bounds a single socket call: one Read, or the Write of the response, when the
+    /// overall deadline still has this much or more left on it. Never the actual wait past the
+    /// deadline itself; <see cref="ClampToDeadline"/> shortens it as the deadline closes in.</summary>
     private const int IoTimeoutMs = 5000;
+
+    // ponytail: 16 concurrent connections, each of them stalled, still clears on its own within
+    // one request deadline; raise this, or move to an async accept loop, if a real deployment
+    // ever needs more scrapers or panels hitting this at once than that.
+    private const int MaxConcurrentConnections = 16;
 
     /// <summary>Accept-loop backoff, applied only to a failed AcceptTcpClient call: an empty
     /// sleep the first time, doubling on every consecutive failure, so a transient error costs
     /// nothing while a persistent one (the process out of file descriptors, say) does not spin a
     /// full core forever behind a log line that only fires once a minute.</summary>
-    private const int InitialAcceptBackoffMs = 10;
-    private const int MaxAcceptBackoffMs = 1000;
+    internal sealed class AcceptBackoff
+    {
+        internal const int InitialMs = 10;
+        internal const int MaxMs = 1000;
+
+        private int nextMs = InitialMs;
+
+        /// <summary>The delay to sleep for this failure; advances for the next one.</summary>
+        internal int NextMs()
+        {
+            int delay = nextMs;
+            nextMs = Math.Min(nextMs * 2, MaxMs);
+            return delay;
+        }
+
+        internal void Reset() => nextMs = InitialMs;
+    }
+
+    private sealed record ActiveConnection(Thread Thread, TcpClient Client);
 
     private readonly TcpListener listener;
     private readonly Func<string> render;
     private readonly ILogger logger;
     private readonly Thread thread;
     private readonly int requestTimeoutMs;
+    private readonly SemaphoreSlim connectionSlots = new(MaxConcurrentConnections, MaxConcurrentConnections);
+    private readonly CancellationTokenSource stoppingSource = new();
+    private readonly AcceptBackoff acceptBackoff = new();
+    private readonly List<ActiveConnection> activeConnections = [];
+    private readonly Lock activeConnectionsGate = new();
 
     // Starts one interval in the past so the first failure is logged rather than swallowed.
     private long lastErrorLogMs = -ErrorLogIntervalMs;
@@ -54,6 +85,19 @@ internal sealed class MetricsHttpServer : IDisposable
     /// <summary>How many times AcceptTcpClient has failed outright, backoff included; read back
     /// by the accept-loop-backoff test, nothing in production reads it.</summary>
     internal int AcceptFailures => acceptFailures;
+
+    /// <summary>The handler thread of every connection currently being served; read back by a
+    /// test that needs to confirm one has actually stopped, nothing in production reads it.</summary>
+    internal IReadOnlyList<Thread> ActiveHandlerThreads
+    {
+        get
+        {
+            lock (activeConnectionsGate)
+            {
+                return activeConnections.Select(c => c.Thread).ToList();
+            }
+        }
+    }
 
     public MetricsHttpServer(string bind, int port, Func<string> render, ILogger logger)
         : this(bind, port, render, logger, IoTimeoutMs)
@@ -109,24 +153,57 @@ internal sealed class MetricsHttpServer : IDisposable
     public void Dispose()
     {
         stopping = true;
+        stoppingSource.Cancel();
         listener.Stop();
+
+        List<ActiveConnection> connections;
+        lock (activeConnectionsGate)
+        {
+            connections = [.. activeConnections];
+        }
+
+        // Closing each socket directly makes whatever Read or Write its handler thread is
+        // blocked in fail at once; the joins below then only have to wait for that thread to
+        // unwind, not for any I/O to time out on its own.
+        foreach (ActiveConnection connection in connections)
+        {
+            connection.Client.Close();
+        }
+
+        long joinDeadline = Environment.TickCount64 + 1000;
+        foreach (ActiveConnection connection in connections)
+        {
+            int remaining = (int)Math.Clamp(joinDeadline - Environment.TickCount64, 0, 1000);
+            connection.Thread.Join(remaining);
+        }
+
         if (thread.IsAlive)
         {
             thread.Join(TimeSpan.FromSeconds(2));
         }
+
+        stoppingSource.Dispose();
+        connectionSlots.Dispose();
     }
 
-    // ponytail: one connection at a time, an accepted client blocking the next until it finishes
-    // or a timeout evicts it. A stalled scraper only ever delays the next scrape by that long.
-    // Accept concurrently if that ever matters.
-    [SuppressMessage(
-        "Major Code Smell", "S2589:Boolean expressions should not be gratuitous",
-        Justification = "stopping is volatile and Dispose sets it from another thread; the analysis assumes it cannot change inside the loop body.")]
+    // Each accepted connection gets its own short-lived thread, up to MaxConcurrentConnections at
+    // once, so one stalled or merely idle connection no longer blocks every other scrape behind
+    // it. A connection past the cap waits in the kernel's own accept backlog instead of being
+    // accepted and then dropped, since the accept thread does not call AcceptTcpClient again
+    // until a slot frees up.
     private void Serve()
     {
-        int acceptBackoffMs = InitialAcceptBackoffMs;
         while (!stopping)
         {
+            try
+            {
+                connectionSlots.Wait(stoppingSource.Token);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
+
             TcpClient client;
             try
             {
@@ -134,11 +211,10 @@ internal sealed class MetricsHttpServer : IDisposable
             }
             catch (Exception e)
             {
+                connectionSlots.Release();
                 if (stopping)
                 {
-                    // Dispose stopped the listener out from under AcceptTcpClient. Normal
-                    // shutdown.
-                    continue;
+                    break;
                 }
 
                 // A one-off failure and a persistent one (the process out of file descriptors,
@@ -148,23 +224,45 @@ internal sealed class MetricsHttpServer : IDisposable
                 // minute.
                 LogOccasionally(e);
                 acceptFailures++;
-                Thread.Sleep(acceptBackoffMs);
-                acceptBackoffMs = Math.Min(acceptBackoffMs * 2, MaxAcceptBackoffMs);
+                Thread.Sleep(acceptBackoff.NextMs());
                 continue;
             }
 
-            acceptBackoffMs = InitialAcceptBackoffMs;
+            acceptBackoff.Reset();
+            StartHandler(client);
+        }
+    }
+
+    private void StartHandler(TcpClient client)
+    {
+        long deadline = Environment.TickCount64 + requestTimeoutMs;
+        Thread handler = new(() => HandleConnection(client, deadline))
+        {
+            IsBackground = true,
+            Name = "pulse-metrics-request",
+        };
+
+        lock (activeConnectionsGate)
+        {
+            activeConnections.Add(new ActiveConnection(handler, client));
+        }
+
+        handler.Start();
+    }
+
+    private void HandleConnection(TcpClient client, long deadline)
+    {
+        try
+        {
             using (client)
             {
                 try
                 {
-                    client.ReceiveTimeout = IoTimeoutMs;
-                    client.SendTimeout = IoTimeoutMs;
-                    Handle(client.GetStream(), Environment.TickCount64 + requestTimeoutMs);
+                    Handle(client.GetStream(), deadline);
                 }
                 catch (Exception e)
                 {
-                    // Otherwise Dispose evicted this connection's socket mid-request, normal
+                    // Otherwise Dispose closed this connection's socket mid-request, normal
                     // shutdown, nothing to log.
                     if (!stopping)
                     {
@@ -172,6 +270,15 @@ internal sealed class MetricsHttpServer : IDisposable
                     }
                 }
             }
+        }
+        finally
+        {
+            lock (activeConnectionsGate)
+            {
+                activeConnections.RemoveAll(c => c.Client == client);
+            }
+
+            connectionSlots.Release();
         }
     }
 
@@ -194,6 +301,13 @@ internal sealed class MetricsHttpServer : IDisposable
         {
             status = "405 Method Not Allowed";
         }
+        else if (stopping)
+        {
+            // Dispose may already be tearing down whatever render reads from (the aggregator and
+            // the meter belong to the caller, not this class); never call into that state once
+            // shutdown has started, even for a request that got this far before it did.
+            status = "503 Service Unavailable";
+        }
         else
         {
             body = Encoding.UTF8.GetBytes(render());
@@ -201,6 +315,10 @@ internal sealed class MetricsHttpServer : IDisposable
             headers = $"Content-Type: {ExpositionContentType}\r\n";
         }
 
+        // One deadline covers the whole connection, reading and writing both: shortens the
+        // backstop timeout to whatever is actually left of it, rather than handing a full
+        // IoTimeoutMs to a write that starts most of the way through it.
+        stream.WriteTimeout = ClampToDeadline(deadline);
         stream.Write(Encoding.ASCII.GetBytes(
             $"HTTP/1.1 {status}\r\n{headers}Content-Length: {body.Length}\r\nConnection: close\r\n\r\n"));
 
@@ -212,15 +330,24 @@ internal sealed class MetricsHttpServer : IDisposable
         }
     }
 
+    /// <summary>What is left of <paramref name="deadline"/>, floored at 1 ms so a Read or Write
+    /// this close to it still gets one real attempt rather than none, and capped at
+    /// <see cref="IoTimeoutMs"/> so the deadline can only ever shorten a socket call, never
+    /// lengthen it past the usual backstop.</summary>
+    private static int ClampToDeadline(long deadline) =>
+        (int)Math.Clamp(deadline - Environment.TickCount64, 1, IoTimeoutMs);
+
     /// <summary>Reads up to the first blank line and returns the request line; the bytes after it
     /// are discarded unread, since nothing here needs a header value or a body. Null when the
     /// connection closes before a blank line arrives, or the head is larger than
     /// <see cref="MaxHeadBytes"/>.</summary>
-    /// <remarks>IoTimeoutMs alone bounds one Read call, not the request: a client that sends one
-    /// byte every four seconds never trips a five second per-call timeout and can hold this loop
-    /// for as long as it keeps doing that. <paramref name="deadline"/>, an
-    /// <see cref="Environment.TickCount64"/> value taken once at accept, is the actual ceiling on
-    /// the whole read; it is checked before every call that could otherwise block again.</remarks>
+    /// <remarks>A flat per-call timeout alone bounds one Read, not the request: a client sending
+    /// one byte every four seconds never trips a five second timeout and can hold this loop for
+    /// as long as it keeps doing that. <paramref name="deadline"/>, an
+    /// <see cref="Environment.TickCount64"/> value taken once at accept, is the actual ceiling:
+    /// checked before every Read that could otherwise block again, and, through
+    /// <see cref="ClampToDeadline"/>, applied to the Read itself so a call already blocked when
+    /// the deadline passes does not wait out a full five seconds of its own on top of it.</remarks>
     private static string? ReadRequestLine(NetworkStream stream, long deadline)
     {
         byte[] buffer = new byte[MaxHeadBytes];
@@ -233,6 +360,7 @@ internal sealed class MetricsHttpServer : IDisposable
                 throw new TimeoutException("the request did not complete within the overall deadline");
             }
 
+            stream.ReadTimeout = ClampToDeadline(deadline);
             int read = stream.Read(buffer, length, buffer.Length - length);
             if (read == 0)
             {
