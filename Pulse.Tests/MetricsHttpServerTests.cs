@@ -176,10 +176,28 @@ public class MetricsHttpServerTests
         server.Start();
 
         // Larger than MaxHeadBytes before the terminating blank line ever appears, so the server
-        // gives up on it rather than growing the buffer to find one.
+        // gives up on it rather than growing the buffer to find one. Because of that, part of
+        // this request is still unread and sitting in the connection's receive buffer at the
+        // point the server writes its 400 and closes: the same condition
+        // ExpiredDeadline_StopsTheConnection_BeforeItReadsEvenABufferedRequest documents as
+        // resetting the connection instead of closing it gracefully, there because the deadline
+        // is already expired, here because MaxHeadBytes was reached first. On Linux this still
+        // reads back the 400 every time; on Windows CI it reset the connection before the 400
+        // ever reached this end, every run. Either outcome proves the same thing: the oversized
+        // head was rejected, not accepted as a 200.
         string oversized = "GET /metrics HTTP/1.1\r\nX-Pad: " + new string('A', 9000) + "\r\n\r\n";
-        string response = await RawRequestAsync(port, oversized);
-        Assert.StartsWith("HTTP/1.1 400", response);
+        string response;
+        try
+        {
+            response = await RawRequestAsync(port, oversized);
+        }
+        catch (IOException)
+        {
+            response = string.Empty;
+        }
+
+        Assert.True(response.Length == 0 || response.StartsWith("HTTP/1.1 400"),
+            $"expected either a reset connection or an actual 400 response, got: {response}");
 
         using HttpClient client = new();
         using HttpResponseMessage next = await client.GetAsync($"http://127.0.0.1:{port}/metrics");
