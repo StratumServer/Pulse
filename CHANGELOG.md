@@ -127,11 +127,12 @@ first.
 
 ### Fixed
 
-- A `pulse.json` or `pulse-otlp.json` that exists but will not parse (a stray comma is enough) no
-  longer stops the mod from starting; before, recovering meant deleting the file by hand. Each mod
-  now logs one error naming the file's full path and the parser's own message, and leaves the file
-  untouched rather than overwriting it with defaults. Pulse keeps running for that session on its
-  built-in defaults; Pulse OTLP keeps exporting off for that session instead of falling back to an
+- A `pulse.json` or `pulse-otlp.json` that exists but will not parse (a doubled comma or a
+  missing quote is enough; a trailing comma is not, Newtonsoft accepts those) no longer stops the
+  mod from starting; before, recovering meant deleting the file by hand. Each mod now logs one
+  error naming the file's full path and the parser's own message, and leaves the file untouched
+  rather than overwriting it with defaults. Pulse keeps running for that session on its built-in
+  defaults; Pulse OTLP keeps exporting off for that session instead of falling back to an
   endpoint nobody configured, and redacts any value Newtonsoft quoted in the parser's message (a
   `Headers` entry of the wrong shape, most often) before it reaches the log. An absent file and a
   valid one are unaffected.
@@ -143,6 +144,15 @@ first.
   `pulse_mod_tick_seconds_total`, `pulse_attribution_ticks_total` and
   `pulse_attribution_dropped_samples_total` are unaffected: they are cumulative counters and simply
   stop moving.
+- On an OTLP-fed dashboard, five panels could stay empty on an idle server no matter how long it
+  ran: `pulse_engine_warnings_total`, `pulse_player_deaths_total`, `pulse_server_suspends_total`,
+  `pulse_server_suspend_seconds_total` and `pulse_worldgen_columns_generated_total` reached
+  `/metrics` correctly but did not reach OTLP until whatever they measured happened for the first
+  time, and `pulse_log_entries_total` was missing the same way until a real log line arrived.
+  Anything counted while the server was still starting up, including early log entries and
+  spawn-area worldgen columns, never reached OTLP totals at all, even once the panels did start
+  moving. The OTLP mod now starts before the base mod, so its exporter is already listening when
+  these counters are seeded at startup.
 
 ## [0.1.0] - 2026-09-01
 
