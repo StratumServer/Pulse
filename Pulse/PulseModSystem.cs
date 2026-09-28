@@ -176,6 +176,10 @@ public sealed class PulseModSystem : ModSystem
         // writer maps on the way out.
         string[] meters = config.RuntimeMetrics ? [MeterName, RuntimeMeterName] : [MeterName];
         aggregator = new MetricsAggregator(OnUnsupportedInstrument, meters);
+
+        // Pulse.Otlp deliberately starts before this mod (ExecuteOrder 0.05 there, against the
+        // engine's own 0.1 default this class does not override) so its MeterProvider is already
+        // listening when these seeds fire. Do not give this class an ExecuteOrder at or below 0.05.
         SeedCounters(logEntries, engineWarnings, suspendSeconds, columnsGenerated, playerDeaths, suspends);
         attributionMetrics.Seed();
         PublishSnapshot();
