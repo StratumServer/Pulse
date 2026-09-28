@@ -45,7 +45,7 @@ internal sealed class ModOwners(Func<string, Type?> behaviorClass)
 
         // Not a type name the table was told about, so try it as an entity behavior code: the
         // class registry is the only thing that can turn one back into a type. Remembered either
-        // way, so a name that resolves to nothing gets looked up once and never again.
+        // way, so a name that resolves to nothing is looked up once and never again.
         Type? behavior = behaviorClass(name);
         string? resolved = behavior == null ? null : OfAssembly(behavior.Assembly);
         byName[name] = resolved;
