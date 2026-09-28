@@ -164,8 +164,7 @@ internal sealed class MetricsHttpServer : IDisposable
 
             length += read;
             string head = Encoding.ASCII.GetString(buffer, 0, length);
-            int end = head.IndexOf("\r\n\r\n", StringComparison.Ordinal);
-            if (end >= 0)
+            if (head.Contains("\r\n\r\n", StringComparison.Ordinal))
             {
                 return head[..head.IndexOf("\r\n", StringComparison.Ordinal)];
             }
