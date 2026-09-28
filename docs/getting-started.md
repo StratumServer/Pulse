@@ -244,20 +244,18 @@ Once the numbers are flowing, bring in the dashboard:
    can pull numbers from). Pick the one your Grafana Cloud stack already created for you:
    Grafana Cloud stores OTLP metrics in its own Prometheus-compatible store, so this is the same
    data source your other Grafana Cloud graphs use.
-4. Open the imported dashboard. It is the same "Pulse server overview" dashboard as path A, with
-   one difference, covered next.
+4. Open the imported dashboard. It is the same "Pulse server overview" dashboard as path A, and
+   every panel on it reads the same way over this OTLP path too.
 
-Nine panels stay empty on this dashboard when the data arrives over OTLP instead of a direct
-scrape, even though the numbers behind them exist. Grafana Cloud's own translation from OTLP
-into Prometheus-style names adds a unit suffix to some series on the way in, and the dashboard's
-queries do not know the translated names yet: "Bytes per second by channel" and "Packets per
-second by channel" in the Network row, "Tick share by mod" and "Current share by mod" in
-Attribution, and "GC pause time", "Allocation rate", "Managed heap after last collection",
-"Process memory" and "CPU time" in the Runtime row. A decision on the fix, either the dashboard's
-queries or how the OTLP mod reports units, is tracked in
-[issue #77](https://github.com/StratumServer/Pulse/issues/77); nothing in the dashboard JSON
-changes here. Everything else, including tick health, players, world and worldgen, reads
-normally.
+Every panel on this dashboard reads the same over OTLP as it does from a direct scrape. That used
+to not be true: nine panels (the two per-second network panels, the two attribution share panels,
+and five in the Runtime row) stayed empty over OTLP, because Grafana Cloud's own translation from
+OTLP into Prometheus-style names did not match what the dashboard queried, tracked in
+[issue #77](https://github.com/StratumServer/Pulse/issues/77). 0.2 fixed both sides of that
+mismatch: three instruments had the wrong declared unit, and the runtime panels now query the same
+translated names Grafana Cloud already produced, so nothing here needs a workaround any more. See
+the main README's [Runtime metrics](../README.md#runtime-metrics) section and the changelog if a
+dashboard or alert you built against the old names still needs updating.
 
 ## Troubleshooting
 
@@ -288,7 +286,7 @@ normally.
   Attribution row stays empty until you turn attribution on (see the main README's Attribution
   section), and a handful of engine-level panels (busy time, per-second network rates, the
   connection queue) go blank if Pulse is running in degraded mode, also covered in the main
-  README. On path B, see the Grafana Cloud panel list above.
+  README. Both apply the same way on path B.
 - **Path B: numbers never show up, and the server logs nothing about it.** That is expected, not
   a sign something crashed: today, an OTLP push that Grafana Cloud rejects (a wrong token gets a
   401, for example) costs nothing on the game side and logs nothing either; it just quietly does

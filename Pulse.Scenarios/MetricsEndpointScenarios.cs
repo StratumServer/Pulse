@@ -183,7 +183,7 @@ public class MetricsEndpointScenarios : AtlasScenarioBase
 
         Assert.Contains("# TYPE dotnet_gc_collections_total counter\n", body);
         Assert.Contains("dotnet_gc_collections_total{gc_heap_generation=\"gen0\"} ", body);
-        Assert.Contains("# TYPE dotnet_process_memory_working_set gauge\n", body);
+        Assert.Contains("# TYPE dotnet_process_memory_working_set_bytes gauge\n", body);
     }
 
     /// <summary>The whole point of the engine probe: these six families do not exist through the
