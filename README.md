@@ -515,7 +515,7 @@ aggregates, the entity top-ten with its series retirement rule, and the suspend 
 them needs a server. `Pulse.Otlp.Tests` covers the config translation, which is where the OTLP
 mod's only non-obvious logic lives.
 
-Mutation testing runs at two depths. `tools/mutation-check.sh` applies forty-four representative
+Mutation testing runs at two depths. `tools/mutation-check.sh` applies sixty representative
 mutations one at a time and requires the suite to fail on every one; CI runs it on every push,
 deterministic and under a minute. `.github/workflows/mutation.yml` runs dotnet-stryker on pull
 requests touching `Pulse/`, mutating the whole project except the files that only run under a
