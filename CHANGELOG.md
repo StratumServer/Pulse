@@ -8,6 +8,15 @@ first.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.2.0] - 2026-09-29
+
+The first stable release of the 0.2 line, carrying everything from v0.2.0-indev.1 through
+indev.5 plus the release-review fixes and mutation-testing hardening that followed them:
+tick attribution, the runtime metric rename below, the socket-based metrics server, and
+export-failure logging in Pulse OTLP.
+
 ### Added
 
 - Export failures no longer pass silently. Pulse OTLP now listens to the OpenTelemetry SDK's own

@@ -97,20 +97,18 @@ the server.
   need `sudo` at all, following
   [Docker's post-install steps](https://docs.docker.com/engine/install/linux-postinstall/), then
   log out and back in.
-- You need the `contrib/grafana` folder from the Pulse repository. This kit has not reached a
-  stable release yet, so get it from the `dev` branch specifically:
+- You need the `contrib/grafana` folder from the Pulse repository:
 
   ```sh
-  git clone -b dev https://github.com/StratumServer/Pulse.git
+  git clone https://github.com/StratumServer/Pulse.git
   cd Pulse/contrib/grafana
   ```
 
   No `git` on a headless server? Installing it is usually simpler than the alternative:
   `sudo apt install git` (Debian or Ubuntu) or your distribution's equivalent, then the commands
-  above. Otherwise, on the repository's GitHub page, switch the branch selector to `dev`, then
-  use Code, Download ZIP, or go straight to the
-  [dev branch zip](https://github.com/StratumServer/Pulse/archive/refs/heads/dev.zip). Extract
-  it and open a terminal in the extracted `contrib/grafana` folder.
+  above. Otherwise, on the repository's GitHub page, use Code, Download ZIP, or go straight to
+  the [repository zip](https://github.com/StratumServer/Pulse/archive/refs/heads/main.zip).
+  Extract it and open a terminal in the extracted `contrib/grafana` folder.
 - The first `docker compose up -d` downloads the Prometheus and Grafana images, a few hundred
   megabytes together, so it takes minutes, not seconds. Every run after that is fast.
 
@@ -238,7 +236,7 @@ Once the numbers are flowing, bring in the dashboard:
 
 1. In Grafana Cloud, go to **Dashboards**, then **New**, then **Import dashboard**.
 2. You never cloned the repository for this path, so download the dashboard file directly:
-   [`pulse-overview-shared.json`](https://github.com/StratumServer/Pulse/blob/dev/contrib/grafana/pulse-overview-shared.json)
+   [`pulse-overview-shared.json`](https://github.com/StratumServer/Pulse/blob/main/contrib/grafana/pulse-overview-shared.json)
    (use that page's download button), then upload it in the Import dialog.
 3. It asks for a Prometheus data source (Grafana's name for a saved connection to somewhere it
    can pull numbers from). Pick the one your Grafana Cloud stack already created for you:
