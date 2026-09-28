@@ -25,7 +25,8 @@ TEST_PROJECT="Pulse.Tests/Pulse.Tests.csproj"
 dotnet restore Pulse.slnx --nologo -v q >/dev/null 2>&1
 
 run_tests() { # [test filter]
-    dotnet test "$TEST_PROJECT" -c Release --no-restore --nologo -v q ${1:+--filter "$1"} >/dev/null 2>&1
+    local filter="${1:-}"
+    dotnet test "$TEST_PROJECT" -c Release --no-restore --nologo -v q ${filter:+--filter "$filter"} >/dev/null 2>&1
     return $?
 }
 
