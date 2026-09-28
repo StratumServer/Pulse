@@ -183,6 +183,10 @@ public class MetricsAggregatorTests
         MetricSample sample = Sample(aggregator.Collect(), "h_seconds");
         Assert.Equal(0.53, sample.Sum, 10);
         Assert.Equal(3, sample.Count);
+
+        // Value is the synchronous-counter/gauge field; a histogram must never fall through into
+        // updating it too.
+        Assert.Equal(0, sample.Value);
     }
 
     [Fact]
@@ -361,6 +365,59 @@ public class MetricsAggregatorTests
         Assert.Contains("dotnet_process_cpu_time_seconds_total{cpu_mode=\"user\"} ", text);
     }
 
+    [Fact]
+    public void Series_Defaults_MissingHelpAndUnit_ToEmptyStrings()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        // No unit, no description: both are optional on every Create* overload.
+        Counter<long> counter = meter.CreateCounter<long>("bare_total");
+
+        counter.Add(1);
+
+        MetricSample sample = Sample(aggregator.Collect(), "bare_total");
+        Assert.Equal(string.Empty, sample.Help);
+        Assert.Equal(string.Empty, sample.Unit);
+    }
+
+    /// <summary>Newtonsoft can hand a log-derived tag a null value (an exception with no message,
+    /// say); the label still has to render as something a Prometheus parser accepts, not throw or
+    /// silently print the literal word "null".</summary>
+    [Fact]
+    public void ATagValueOfNull_Renders_AsAnEmptyLabelValue_NotTheWordNull()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        Counter<long> counter = meter.CreateCounter<long>("c_total", "{x}", "C.");
+
+        counter.Add(1, new KeyValuePair<string, object?>("reason", null));
+
+        MetricSample sample = Sample(aggregator.Collect(), "c_total");
+        Assert.Equal("", sample.Labels.Single(l => l.Key == "reason").Value);
+    }
+
+    /// <summary>Find() matches a series by instrument reference and label set together; a length
+    /// mismatch alone has to be enough to rule two label sets out, or the same counter called once
+    /// untagged and once with a tag could be folded into a single, wrongly-labelled series.</summary>
+    [Fact]
+    public void Counter_KeepsSeriesSeparate_ForTheSameInstrument_AtDifferentTagCounts()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        Counter<long> counter = meter.CreateCounter<long>("c_total", "{x}", "C.");
+
+        counter.Add(1);
+        counter.Add(2, new KeyValuePair<string, object?>("k", "v"));
+
+        IReadOnlyList<MetricSample> samples = aggregator.Collect();
+        Assert.Equal(2, samples.Count);
+        Assert.Equal(1, samples.Single(s => s.Labels.Length == 0).Value);
+        Assert.Equal(2, samples.Single(s => s.Labels.Length == 1).Value);
+    }
+
     /// <summary>An instrument that is none of the seven shapes the aggregator knows.</summary>
     private sealed class UnknownShape : Instrument
     {
@@ -369,5 +426,34 @@ public class MetricsAggregatorTests
         {
             Publish();
         }
+    }
+
+    /// <summary>The same kind of unsupported shape as <see cref="UnknownShape"/>, but able to
+    /// actually emit a measurement (through the protected RecordMeasurement Instrument{T} itself
+    /// exposes), which a shape with no public Add or Record method never could. Needed to prove
+    /// InstrumentPublished's own guard is what keeps an unsupported instrument's measurements out,
+    /// not the accident of it having no way to measure anything in the first place.</summary>
+    private sealed class UnknownMeasurableShape : Instrument<double>
+    {
+        public UnknownMeasurableShape(Meter meter)
+            : base(meter, "odd_measurable_thing", null, "Odd.")
+        {
+            Publish();
+        }
+
+        public void Emit(double value) => RecordMeasurement(value);
+    }
+
+    [Fact]
+    public void Aggregator_NeverRecords_AMeasurement_FromAnInstrumentShapeItCannotRender()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        UnknownMeasurableShape instrument = new(meter);
+
+        instrument.Emit(5.0);
+
+        Assert.Empty(aggregator.Collect());
     }
 }

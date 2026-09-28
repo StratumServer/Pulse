@@ -111,6 +111,20 @@ public class EntityBreakdownTests
             second.Refresh(["bear", "wolf"]));
     }
 
+    /// <summary>The stability test above only proves ties break the same way regardless of
+    /// insertion order, not which way that is: swapping ThenBy for ThenByDescending would still
+    /// pass it, since both orders are equally stable, just different.</summary>
+    [Fact]
+    public void Refresh_Breaks_TiesOnTheCode_InAscendingOrder()
+    {
+        EntityBreakdown breakdown = new(1);
+
+        IReadOnlyList<KeyValuePair<string, long>> values = breakdown.Refresh(["wolf", "bear"]);
+
+        Assert.Equal(1, Value(values, "bear"));
+        Assert.Equal(1, Value(values, EntityBreakdown.OtherCode));
+    }
+
     [Fact]
     public void Refresh_Counts_EverythingIntoOther_WhenTheLimitIsZero()
     {

@@ -1,0 +1,5 @@
+{
+  "Enabled": true,
+  "Endpoint": "http://:s3cretpassword@collector.example.com:4318",
+  "Protocol": "http/protobuf"
+}

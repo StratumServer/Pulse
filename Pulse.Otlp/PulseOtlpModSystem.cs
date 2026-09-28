@@ -57,7 +57,18 @@ public sealed class PulseOtlpModSystem : ModSystem
         switch (loaded.Status)
         {
             case ConfigLoadStatus.Absent:
-                api.StoreModConfig(config, ConfigFile);
+                if (!TryStoreDefaults(() => api.StoreModConfig(config, ConfigFile), out string? storeFailure))
+                {
+                    // A ModConfig directory the mod cannot write to (mounted read-only, say) must
+                    // not stop it from starting: it runs on the in-memory defaults for this
+                    // session, exporting off, rather than never starting at all.
+                    api.Logger.Error(
+                        "Pulse OTLP could not write {0} ({1}). Running with defaults for this "
+                        + "session; exporting is off until the file can be written.",
+                        ConfigFile, storeFailure);
+                    return;
+                }
+
                 break;
             case ConfigLoadStatus.Loaded:
                 ConfigUpgrade.Upgrade(api, config, ConfigFile, "Pulse OTLP");
@@ -91,86 +102,145 @@ public sealed class PulseOtlpModSystem : ModSystem
                 config.Protocol);
         }
 
-        // A malformed endpoint is the one failure the exporter cannot absorb for us, because it
-        // throws while the provider is being built rather than on the export thread.
-        if (!OtlpOptions.TryResolveEndpoint(config.Endpoint, protocol, out Uri? endpoint))
+        if (!OtlpOptions.TryValidateHeaders(config.Headers, out string? offendingHeader))
         {
-            // Never the configured value itself: a backend authenticating through userinfo or a
-            // query string in the URL put both right there, and an unparsable endpoint is exactly
-            // the case where that value most needs to stay out of the log.
+            // Never the value: a name colliding after trimming, or carrying a comma, says nothing
+            // about what the value itself holds.
             api.Logger.Error(
-                "Pulse OTLP's '{0}' in {1} is not an absolute http or https URL. Nothing will be "
-                + "exported; the game server is unaffected.",
-                nameof(PulseOtlpConfig.Endpoint), ConfigFile);
+                "Pulse OTLP's header '{0}' in {1} cannot be exported: its name collides with "
+                + "another header once trimmed, or its value contains a comma, which the "
+                + "exporter's own header format cannot carry. Nothing will be exported; the game "
+                + "server is unaffected.",
+                offendingHeader, ConfigFile);
             return;
         }
 
-        int intervalMs = OtlpOptions.IntervalMilliseconds(config.IntervalSeconds);
-        string[] meters = config.IncludeRuntimeMetrics
-            ? [PulseMeterName, RuntimeMeterName]
-            : [PulseMeterName];
-
-        // OTEL_SERVICE_NAME, the ecosystem's standard override, must win over the config key when
-        // it is set. That is not automatic: ResourceBuilder.CreateDefault() (the seed
-        // ConfigureResource lazily creates) already ends with the detector that reads this
-        // variable, but ConfigureResource's own AddService call is appended after it, and
-        // ResourceBuilder.Build() merges every detector's Resource left to right with the later
-        // one winning on a collision (Resource.Merge: "In case of a collision the other Resource
-        // takes precedence"). An unconditional AddService would therefore always beat the
-        // environment variable. Checked against MeterProviderBuilderSdk.ConfigureResource,
-        // ResourceBuilder.CreateDefault/Build and Resource.Merge in OpenTelemetry .NET 1.19.1
-        // (github.com/open-telemetry/opentelemetry-dotnet, tag core-1.19.1). Skipping the call
-        // when the variable is set leaves the SDK's own default resource pipeline, which already
-        // reads it, untouched.
-        string? serviceNameFromEnvironment = Environment.GetEnvironmentVariable("OTEL_SERVICE_NAME");
-        bool serviceNameSetByEnvironment = !string.IsNullOrWhiteSpace(serviceNameFromEnvironment);
-        string serviceName = serviceNameSetByEnvironment
-            ? serviceNameFromEnvironment!
-            : OtlpOptions.ResolveServiceName(config.ServiceName);
-
-        // Nothing past this point can take the server down. Every export runs on the SDK's own
-        // background thread ("OpenTelemetry-PeriodicExportingMetricReader-..."), and
-        // MetricReader.Collect wraps the collect-and-send in a catch that only writes to the SDK's
-        // own EventSource. A refused connection, a 401 from a SaaS backend or a DNS failure is
-        // therefore invisible to a try/catch placed here, by construction: the EventListener
-        // below, not a guard around the export call, is what makes it visible instead. Checked
-        // against OpenTelemetry 1.19.1.
-        //
-        // Constructed before the provider that creates the exporter, so the listener is already
-        // attached to the exporter's EventSource by the time the first export can happen.
-        exportFailureLog = new ExportFailureLog(OtlpOptions.SecretValues(config.Headers), endpoint);
-
-        provider = Sdk.CreateMeterProviderBuilder()
-            .AddMeter(meters)
-            .ConfigureResource(r =>
+        // Everything from here down runs inside the OpenTelemetry SDK's own option validation,
+        // which throws instead of returning false for a shape none of the checks above catch: an
+        // endpoint with an empty user name and a password (http://:token@collector:4318, say)
+        // throws UriFormatException, for http/protobuf inside TryResolveEndpoint itself and for
+        // grpc inside the SDK's own Build() below; not a regression, 0.1.0 crashed on it the same
+        // way, but the guard has to cover both call sites since TryResolveEndpoint can throw
+        // before it ever returns false. One try/catch around the whole span, rather than one
+        // around Build() alone, is what keeps a shape like that from ever reaching ModLoader:
+        // ModLoader.TryRunModPhase rethrows a FormatException instead of absorbing it like every
+        // other exception, and UriFormatException is one, so left uncaught here it takes the
+        // server down at boot instead of merely failing this one mod.
+        try
+        {
+            if (!OtlpOptions.TryResolveEndpoint(config.Endpoint, protocol, out Uri? endpoint))
             {
-                if (!serviceNameSetByEnvironment)
+                // Never the configured value itself: a backend authenticating through userinfo or
+                // a query string in the URL put both right there, and an unparsable endpoint is
+                // exactly the case where that value most needs to stay out of the log.
+                api.Logger.Error(
+                    "Pulse OTLP's '{0}' in {1} is not an absolute http or https URL. Nothing will "
+                    + "be exported; the game server is unaffected.",
+                    nameof(PulseOtlpConfig.Endpoint), ConfigFile);
+                return;
+            }
+
+            int intervalMs = OtlpOptions.IntervalMilliseconds(config.IntervalSeconds);
+            string[] meters = config.IncludeRuntimeMetrics
+                ? [PulseMeterName, RuntimeMeterName]
+                : [PulseMeterName];
+
+            // OTEL_SERVICE_NAME, the ecosystem's standard override, must win over the config key
+            // when it is set. That is not automatic: ResourceBuilder.CreateDefault() (the seed
+            // ConfigureResource lazily creates) already ends with the detector that reads this
+            // variable, but ConfigureResource's own AddService call is appended after it, and
+            // ResourceBuilder.Build() merges every detector's Resource left to right with the
+            // later one winning on a collision (Resource.Merge: "In case of a collision the other
+            // Resource takes precedence"). An unconditional AddService would therefore always beat
+            // the environment variable. Checked against MeterProviderBuilderSdk.ConfigureResource,
+            // ResourceBuilder.CreateDefault/Build and Resource.Merge in OpenTelemetry .NET 1.19.1
+            // (github.com/open-telemetry/opentelemetry-dotnet, tag core-1.19.1). Skipping the call
+            // when the variable is set leaves the SDK's own default resource pipeline, which
+            // already reads it, untouched.
+            string? serviceNameFromEnvironment = Environment.GetEnvironmentVariable("OTEL_SERVICE_NAME");
+            bool serviceNameSetByEnvironment = !string.IsNullOrWhiteSpace(serviceNameFromEnvironment);
+            string serviceName = serviceNameSetByEnvironment
+                ? serviceNameFromEnvironment!
+                : OtlpOptions.ResolveServiceName(config.ServiceName);
+
+            // Nothing past the Build() below can take the server down. Every export runs on the
+            // SDK's own background thread ("OpenTelemetry-PeriodicExportingMetricReader-..."), and
+            // MetricReader.Collect wraps the collect-and-send in a catch that only writes to the
+            // SDK's own EventSource. A refused connection, a 401 from a SaaS backend or a DNS
+            // failure is therefore invisible to a try/catch placed here, by construction: the
+            // EventListener below, not a guard around the export call, is what makes it visible
+            // instead. Checked against OpenTelemetry 1.19.1.
+            //
+            // Constructed before the provider that creates the exporter, so the listener is
+            // already attached to the exporter's EventSource by the time the first export can
+            // happen.
+            exportFailureLog = new ExportFailureLog(
+                [.. OtlpOptions.SecretValues(config.Headers), .. OtlpOptions.EndpointSecrets(endpoint)],
+                endpoint);
+
+            provider = Sdk.CreateMeterProviderBuilder()
+                .AddMeter(meters)
+                .ConfigureResource(r =>
                 {
-                    r.AddService(serviceName);
-                }
-            })
-            .AddOtlpExporter((exporter, reader) =>
+                    if (!serviceNameSetByEnvironment)
+                    {
+                        r.AddService(serviceName);
+                    }
+                })
+                .AddOtlpExporter((exporter, reader) =>
+                {
+                    exporter.Endpoint = endpoint;
+                    exporter.Protocol = protocol;
+                    exporter.Headers = OtlpOptions.RenderHeaders(config.Headers);
+                    reader.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds = intervalMs;
+                })
+                .Build();
+
+            // The errorHandler overload is not optional, for the same reason as the base mod's
+            // own tick listeners: an unhandled exception here would log Fatal and count toward
+            // the engine's DieAboveErrorCount self-shutdown.
+            exportFailureLogListenerId = api.Event.RegisterGameTickListener(
+                OnDrainExportFailures, OnDrainExportFailuresError, ExportFailureDrainIntervalMs);
+
+            // Scheme, host, port and path only, the same components the exporter's own
+            // diagnostics ever carry: userinfo or a query string in the configured endpoint (a
+            // backend that authenticates through a signed URL, say) has no business in a log line
+            // at any level.
+            api.Logger.Notification(
+                "Pulse OTLP exporting {0} to {1} over {2} every {3}s as service '{4}'",
+                string.Join(", ", meters), OtlpOptions.LoggableEndpoint(endpoint),
+                protocol == OtlpExportProtocol.Grpc ? "grpc" : "http/protobuf", intervalMs / 1000,
+                serviceName);
+        }
+        catch (Exception ex)
+        {
+            // Never ex.Message: an exporter option's own validation message is not something
+            // this mod controls, and nothing guarantees it never echoes the value that failed it.
+            // The exception's type is diagnostic enough to tell a bad endpoint apart from a bad
+            // interval without repeating either.
+            api.Logger.Error(
+                "Pulse OTLP could not start exporting ({0}); its configuration in {1} is not "
+                + "something the OpenTelemetry SDK accepts. Nothing will be exported; the game "
+                + "server is unaffected.",
+                ex.GetType().Name, ConfigFile);
+
+            // Nothing built so far may outlive this attempt: a provider that did finish building
+            // would keep its reader's background timer running, a registered tick listener would
+            // keep draining a log nothing will ever queue into again, and the event listener,
+            // left registered, would keep reading the process-wide exporter EventSource for the
+            // rest of the server's life, all three for an export that will never happen.
+            provider?.Dispose();
+            provider = null;
+
+            if (exportFailureLogListenerId >= 0)
             {
-                exporter.Endpoint = endpoint;
-                exporter.Protocol = protocol;
-                exporter.Headers = OtlpOptions.RenderHeaders(config.Headers);
-                reader.PeriodicExportingMetricReaderOptions.ExportIntervalMilliseconds = intervalMs;
-            })
-            .Build();
+                api.Event.UnregisterGameTickListener(exportFailureLogListenerId);
+                exportFailureLogListenerId = -1;
+            }
 
-        // The errorHandler overload is not optional, for the same reason as the base mod's own
-        // tick listeners: an unhandled exception here would log Fatal and count toward the
-        // engine's DieAboveErrorCount self-shutdown.
-        exportFailureLogListenerId = api.Event.RegisterGameTickListener(
-            OnDrainExportFailures, OnDrainExportFailuresError, ExportFailureDrainIntervalMs);
-
-        // Scheme, host, port and path only, the same components the exporter's own diagnostics
-        // ever carry: userinfo or a query string in the configured endpoint (a backend that
-        // authenticates through a signed URL, say) has no business in a log line at any level.
-        api.Logger.Notification(
-            "Pulse OTLP exporting {0} to {1} over {2} every {3}s as service '{4}'",
-            string.Join(", ", meters), OtlpOptions.LoggableEndpoint(endpoint),
-            protocol == OtlpExportProtocol.Grpc ? "grpc" : "http/protobuf", intervalMs / 1000, serviceName);
+            exportFailureLog?.Dispose();
+            exportFailureLog = null;
+        }
     }
 
     public override void Dispose()
@@ -196,6 +266,26 @@ public sealed class PulseOtlpModSystem : ModSystem
 
         exportFailureLog?.Dispose();
         exportFailureLog = null;
+    }
+
+    /// <summary>Runs <paramref name="store"/>, tolerating whatever it throws: writing the freshly
+    /// defaulted config back to disk can fail the same way loading one can, a ModConfig directory
+    /// mounted read-only among them, and this is the only thing standing between that failure and
+    /// ModLoader. Delegate-driven, the same arrangement as <see cref="ConfigLoad.Resolve{T}"/>, so
+    /// it needs nothing from the engine and is unit-tested directly.</summary>
+    internal static bool TryStoreDefaults(Action store, out string? failureReason)
+    {
+        try
+        {
+            store();
+            failureReason = null;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            failureReason = ex.GetType().Name;
+            return false;
+        }
     }
 
     private void OnDrainExportFailures(float _) => DrainExportFailures();

@@ -742,6 +742,82 @@ public class ExportFailureLogTests
         Assert.Contains("unauthorized", line);
     }
 
+    /// <summary>LoggableEndpoint already keeps a query string out of the startup line Pulse writes
+    /// itself, but a 4xx body that echoes the request target back (a reverse proxy's own error
+    /// page, say) would put a signed-URL backend's own secret straight into the log unless the
+    /// query value is in the secrets list too, the same as a header value already is. Built with
+    /// OtlpOptions.EndpointSecrets, the way PulseOtlpModSystem now actually assembles the list.
+    /// </summary>
+    [Fact]
+    public void Failure_RedactsTheEndpointsQueryValue_WhenTheCollectorEchoesTheRequestTarget()
+    {
+        int port = FreePort();
+        const string queryToken = "endpoint-query-secret-987654";
+        string endpoint = $"http://127.0.0.1:{port}/v1/metrics?token={queryToken}";
+        using FakeCollector collector = new(
+            port, _ => (404, $"{{\"error\":\"no route for /v1/metrics?token={queryToken}\"}}"));
+        using Rig rig = BuildRig(endpoint, secrets: [.. OtlpOptions.EndpointSecrets(new Uri(endpoint))]);
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+
+        string line = Assert.Single(failures);
+        Assert.DoesNotContain(queryToken, line);
+        Assert.Contains("\"error\":\"no route for /v1/metrics?token=***\"", line);
+    }
+
+    /// <summary>A real signed URL's query value is base64 and carries '+', '/' or '=' escaped as
+    /// %2B, %2F or %3D; the raw request target on the wire, and so a reverse proxy's own echo of
+    /// it, carries exactly that escaped form, never the unescaped one. OtlpOptions.EndpointSecrets
+    /// used to yield only Uri.UnescapeDataString's output, which left this shape, the one every
+    /// real Azure SAS or AWS-style signature is actually in, unredacted.</summary>
+    [Fact]
+    public void Failure_RedactsTheEndpointsQueryValue_WhenTheEchoCarriesThePercentEscapedForm()
+    {
+        int port = FreePort();
+        const string escapedSecret = "q8Wf3kL2%2BxYzAbCdEfGh%3D";
+        const string unescapedSecret = "q8Wf3kL2+xYzAbCdEfGh=";
+        string endpoint = $"http://127.0.0.1:{port}/v1/metrics?sig={escapedSecret}";
+        using FakeCollector collector = new(
+            port, _ => (404, $"{{\"error\":\"no route for /v1/metrics?sig={escapedSecret}\"}}"));
+        using Rig rig = BuildRig(endpoint, secrets: [.. OtlpOptions.EndpointSecrets(new Uri(endpoint))]);
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+
+        string line = Assert.Single(failures);
+        Assert.DoesNotContain(escapedSecret, line);
+        Assert.DoesNotContain(unescapedSecret, line);
+        Assert.Contains("\"error\":\"no route for /v1/metrics?sig=***\"", line);
+    }
+
+    /// <summary>The userinfo half of EndpointSecrets: a backend that authenticates a signed URL
+    /// through the user:password form rather than a query parameter must be redacted the same way.
+    /// The configured endpoint carries the userinfo straight through into what the exporter dials
+    /// (HttpClient itself drops it before the request goes out, confirmed against .NET 10, but
+    /// still connects and reads the response), and into what ExportFailureLog compares a failure's
+    /// own endpoint payload against: GetComponents(SchemeAndServer) never includes UserInfo (see
+    /// LoggableEndpoint's own test), so the match is unaffected by it being there at all.</summary>
+    [Fact]
+    public void Failure_RedactsTheEndpointsUserinfo_WhenTheCollectorEchoesIt()
+    {
+        int port = FreePort();
+        const string password = "endpoint-userinfo-secret-123456";
+        string endpoint = $"http://reporter:{password}@127.0.0.1:{port}/v1/metrics";
+        using FakeCollector collector = new(port, _ => (404, $"{{\"hint\":\"tried {password}\"}}"));
+        using Rig rig = BuildRig(endpoint, secrets: [.. OtlpOptions.EndpointSecrets(new Uri(endpoint))]);
+
+        rig.Provider.ForceFlush();
+
+        (List<string> failures, _) = DrainAll(rig.Log);
+
+        string line = Assert.Single(failures);
+        Assert.DoesNotContain(password, line);
+        Assert.Contains("\"hint\":\"tried ***\"", line);
+    }
+
     [Fact]
     public void ForeignExportersOnOtherEndpoints_AreIgnored_SuccessesAndFailuresAlike()
     {
