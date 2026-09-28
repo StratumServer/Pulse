@@ -306,10 +306,10 @@ public sealed class PulseModSystem : ModSystem
             "Average time one tick spent working over the engine's last completed two second window, sleep excluded.");
         engineMeter.CreateObservableGauge(
             "pulse_network_packets_per_second", PacketMeasurements,
-            "{packet}/s", "Packet rate over the engine's last completed statistics window, nominally two seconds.");
+            "{packet/s}", "Packet rate over the engine's last completed statistics window, nominally two seconds.");
         engineMeter.CreateObservableGauge(
             "pulse_network_bytes_per_second", ByteMeasurements,
-            "By/s", "Byte rate over the engine's last completed statistics window, nominally two seconds.");
+            "{byte/s}", "Byte rate over the engine's last completed statistics window, nominally two seconds.");
         engineMeter.CreateObservableGauge(
             "pulse_connection_queue_clients", () => engine?.ConnectionQueue ?? 0, "{client}",
             "Clients waiting in the connection queue because the server is full.");

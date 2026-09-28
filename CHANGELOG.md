@@ -24,10 +24,11 @@ first.
   `docker run` commands in both `contrib/grafana` and `contrib/alerts`, bind Grafana and
   Prometheus to 127.0.0.1: with host networking an unbound, unauthenticated Grafana admin
   account and an unbound Prometheus are reachable from anywhere that can reach the machine, not
-  just from it, so the guides cover an SSH tunnel for viewing a remote server instead. The guide
-  also lists, by panel title, which nine Grafana Cloud dashboard panels do not yet render over
-  OTLP, tracked in [issue #77](https://github.com/StratumServer/Pulse/issues/77) pending a
-  decision between fixing the dashboard's queries or the OTLP mod's reported units.
+  just from it, so the guides cover an SSH tunnel for viewing a remote server instead. An earlier
+  draft of the guide listed nine Grafana Cloud dashboard panels that did not yet render over OTLP,
+  tracked in [issue #77](https://github.com/StratumServer/Pulse/issues/77); the units and runtime
+  naming fix below closed that gap before this release shipped, so the guide no longer carries the
+  caveat.
 - A dashboard row, `Attribution, only when turned on`, placed right after tick health: a stacked
   time series of `pulse_mod_tick_share` by mod, a bar gauge for the current share, attributed tick
   time per mod using the main README's own seconds-per-profiled-tick recipe, and a small panel for
@@ -79,6 +80,45 @@ first.
 
 ### Changed
 
+- **Breaking for anything scraping the runtime series directly:** nine `dotnet_*` families on
+  `/metrics` are renamed to the name Prometheus's otlptranslator derives from the same instrument,
+  the library Prometheus's own OTLP receiver, Mimir and Grafana Cloud use to turn an OTLP
+  instrument into a Prometheus name. The writer now derives a name from the instrument's unit the
+  same way that translation does, instead of only mapping dots to underscores and appending
+  `_total`, which is what left these nine out of step with every other OTLP consumer in the first
+  place.
+
+  | Old name | New name |
+  | --- | --- |
+  | `dotnet_process_memory_working_set` | `dotnet_process_memory_working_set_bytes` |
+  | `dotnet_gc_heap_total_allocated_total` | `dotnet_gc_heap_allocated_bytes_total` |
+  | `dotnet_gc_last_collection_memory_committed_size` | `dotnet_gc_last_collection_memory_committed_size_bytes` |
+  | `dotnet_gc_last_collection_heap_size` | `dotnet_gc_last_collection_heap_size_bytes` |
+  | `dotnet_gc_last_collection_heap_fragmentation_size` | `dotnet_gc_last_collection_heap_fragmentation_size_bytes` |
+  | `dotnet_gc_pause_time_total` | `dotnet_gc_pause_time_seconds_total` |
+  | `dotnet_jit_compiled_il_size_total` | `dotnet_jit_compiled_il_size_bytes_total` |
+  | `dotnet_jit_compilation_time_total` | `dotnet_jit_compilation_time_seconds_total` |
+  | `dotnet_process_cpu_time_total` | `dotnet_process_cpu_time_seconds_total` |
+
+  Five panels in `contrib/grafana`'s dashboard, across seven queries, query `new or old` for this
+  release, so a dashboard stays populated whether the Pulse it points at has been upgraded yet or
+  not; the fallback side can be dropped once every server it watches is on 0.2 or later. `pulse_*`
+  families are unaffected.
+- Corrected the declared unit of three `pulse_*` instruments
+  (`pulse_network_packets_per_second`, `pulse_network_bytes_per_second`,
+  `pulse_mod_tick_share`), which over OTLP was adding a spurious `_per_second` or `_ratio` suffix
+  on top of a name that already spelled the rate or the ratio out in words. `/metrics` is
+  unaffected: no name served locally changes. The two network families shipped with the OTLP mod
+  back in 0.1.0, so a Grafana Cloud stack that has been receiving OTLP since then stored them under
+  the doubled name; old to new on that side only:
+
+  | Old OTLP name | New OTLP name |
+  | --- | --- |
+  | `pulse_network_packets_per_second_per_second` | `pulse_network_packets_per_second` |
+  | `pulse_network_bytes_per_second_per_second` | `pulse_network_bytes_per_second` |
+
+  `pulse_mod_tick_share_ratio` never reached a stable release: attribution, and the unit behind it,
+  only existed in 0.2 prereleases, so there is no 0.1.0-era OTLP data under that name to migrate.
 - Bumped `OpenTelemetry` and `OpenTelemetry.Exporter.OpenTelemetryProtocol` from 1.18.0 to 1.19.1
   in the OTLP mod. Nothing Pulse depends on in the endpoint, header or service name handling
   changed between the two releases, but the resources the SDK builds by default now carry a schema
