@@ -136,9 +136,22 @@ shapes, and anything breaking would be called out loudly in the changelog first.
 The default binds loopback, which means only something running on the same host can scrape it.
 That default is deliberate. A Vintage Story server is usually a public host, and the metrics
 endpoint has no authentication of any kind, so widening `Bind` to `0.0.0.0` publishes your
-player count and tick health to whoever asks. If you need to scrape from elsewhere, put the
-endpoint behind a reverse proxy or a firewall rule, or tunnel to it. Changing `Bind` is a choice
-you should make on purpose, not a default you inherit.
+player count and tick health to whoever asks. Anyone who can reach the port can also occupy its
+(small, fixed) number of connection slots and blind your own scraper behind them, so a `Bind`
+beyond loopback wants a firewall rule limiting the port to the scraper. Changing `Bind` is a
+choice you should make on purpose, not a default you inherit.
+
+If you need to scrape from elsewhere, the safest options leave `Bind` on loopback: tunnel to it,
+or put a reverse proxy in front of it that only your scraper can reach. If you widen `Bind`
+instead, add the firewall rule above.
+
+`Bind` is a plain socket address, not a URL prefix. `0.0.0.0` binds every IPv4 interface, and
+`localhost` binds the IPv4 loopback directly, so both `localhost` and `127.0.0.1` reach it,
+whichever one a client's own name resolution tries first. All of this behaves the same on
+Windows, Linux and macOS, and none of it needs administrator rights or a `netsh` URL reservation
+on Windows. Binding `0.0.0.0` there can still prompt Windows Firewall to ask whether to allow
+access, or be blocked outright by a service's default inbound rules; loopback never asks, since
+nothing outside the machine is trying to reach it.
 
 If the port is already taken, Pulse logs an error and carries on without the endpoint. The game
 server keeps running; you get no metrics until you fix the config.
@@ -545,7 +558,7 @@ aggregates, the entity top-ten with its series retirement rule, and the suspend 
 them needs a server. `Pulse.Otlp.Tests` covers the config translation, which is where the OTLP
 mod's only non-obvious logic lives.
 
-Mutation testing runs at two depths. `tools/mutation-check.sh` applies sixty representative
+Mutation testing runs at two depths. `tools/mutation-check.sh` applies seventy-nine representative
 mutations one at a time and requires the suite to fail on every one; CI runs it on every push,
 deterministic and under a minute. `.github/workflows/mutation.yml` runs dotnet-stryker
 incrementally on pull requests touching `Pulse/`: it mutates only the files the pull request

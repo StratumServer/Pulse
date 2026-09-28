@@ -5,9 +5,10 @@ namespace Pulse;
 
 /// <summary>Accumulates the measurements of a set of Meters into Prometheus-shaped series.</summary>
 /// <remarks>Records arrive on the server's main thread (the tick listener), on the worldgen
-/// thread and on whatever thread logged, while scrapes read from the HTTP thread, so every path
-/// takes the same lock. At a handful of records per tick and one scrape per few seconds, a single
-/// lock is not worth refining away.</remarks>
+/// thread and on whatever thread logged, while a scrape reads from whichever of the metrics
+/// endpoint's handler threads is serving that connection, so every path takes the same lock. At a
+/// handful of records per tick and one scrape per few seconds per caller, a single lock is not
+/// worth refining away.</remarks>
 public sealed class MetricsAggregator : IDisposable
 {
     /// <summary>Instrument shape to the kind it renders as and whether one measurement carries an
@@ -72,15 +73,17 @@ public sealed class MetricsAggregator : IDisposable
     }
 
     /// <summary>Takes a scrape: observable instruments are polled, then every series is copied out.</summary>
-    /// <remarks>The observable callbacks run on THIS thread, which in the mod is the HTTP thread.
-    /// They must therefore read only data the main thread has already published.
+    /// <remarks>The observable callbacks run on THIS thread, whichever of the metrics endpoint's
+    /// own handler threads is taking this particular scrape. They must therefore read only data
+    /// the main thread has already published.
     /// <para>One lock for the whole method, generation bump through the final copy: a second
     /// concurrent Collect could otherwise bump <see cref="generation"/> again between this call's
     /// own stamps and its own <c>RemoveAll</c>, retiring series this very call just touched. The
     /// callbacks <c>RecordObservableInstruments</c> runs land back on <see cref="Record"/> on this
     /// same thread, which re-enters this same lock; .NET's <c>lock</c> is reentrant for the thread
-    /// already holding it, so that nests without deadlocking. There is only one caller today (the
-    /// HTTP scrape thread), but the type should not depend on that staying true.</para></remarks>
+    /// already holding it, so that nests without deadlocking. Up to sixteen handler threads can
+    /// call this concurrently today, one per connection the metrics endpoint is serving at once;
+    /// the lock above, not any assumption about a single caller, is what keeps that safe.</para></remarks>
     public IReadOnlyList<MetricSample> Collect()
     {
         lock (gate)

@@ -27,7 +27,11 @@ jobs:
   build-and-test:
     name: Build & tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 15, then 20, were enough until tools/mutation-check.sh and the unit suites kept growing
+    # across several branches landing around the same time: a run timed out at 15m15s, then
+    # another at 20m4s, both with nothing actually wrong, just out of budget. 30 gives real
+    # headroom instead of chasing the same timeout a third time.
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v7

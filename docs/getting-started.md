@@ -177,12 +177,9 @@ elsewhere instead of widening that bind.
 
 This file reaches Pulse through `host.docker.internal`, the address Docker Desktop provides for
 reaching the machine it runs on from inside a container, since Desktop cannot use host networking
-the way Linux does. It still asks Pulse for `127.0.0.1` once it gets there (see the comment in
-`prometheus.desktop.yml`): on Linux and macOS, Pulse's listener answers 404 to any other address
-in the request, `host.docker.internal` included; Windows does not have this problem. Use this
-file when Pulse runs directly on this same Windows or macOS machine. Docker Desktop is not
-available on Windows Server; use path B there instead. Both ports are published to `127.0.0.1`
-only here too, for the same reason as the Linux file above.
+the way Linux does. Use this file when Pulse runs directly on this same Windows or macOS machine.
+Docker Desktop is not available on Windows Server; use path B there instead. Both ports are
+published to `127.0.0.1` only here too, for the same reason as the Linux file above.
 
 ## Path B: Grafana Cloud, if you would rather host nothing
 
@@ -277,15 +274,9 @@ dashboard or alert you built against the old names still needs updating.
   mapping to edit, so there the fix is always to free up the port.
 - **Pulse's own port, 9464, will not bind.** That is unrelated to Docker: Pulse itself logs an
   error at startup and runs without the metrics endpoint until you fix it. Either free up port
-  9464, or set a different `Port` in `ModConfig/pulse.json`, restart the server, and update
-  `prometheus.yml` to match: the target address for the Linux file, or both the `proxy_url` and
-  the target address in `prometheus.desktop.yml`, since that one file names the port twice.
-  Prometheus only scrapes the address its config file names.
-- **`http://localhost:9464/metrics` answers 404, but `127.0.0.1` works.** Use `127.0.0.1`, not
-  `localhost`, whenever you address Pulse directly: on Linux and macOS, Pulse's listener
-  currently answers 404 to anything but the exact address it was told to bind, `localhost`
-  included, even though both names reach the same machine. A fix for this is being looked at
-  separately; for now, always use the literal IP from `Bind` in `ModConfig/pulse.json`.
+  9464, or set a different `Port` in `ModConfig/pulse.json`, restart the server, and update the
+  target address in `prometheus.yml` or `prometheus.desktop.yml` to match. Prometheus only
+  scrapes the address its config file names.
 - **Grafana opens, but the dashboard has no data at all.** In Prometheus, open
   `http://localhost:9090/targets` (through your SSH tunnel if this is a remote server). If the
   `vintagestory` target is not `UP`, Prometheus cannot reach Pulse: check that the server is

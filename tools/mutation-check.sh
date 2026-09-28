@@ -122,6 +122,46 @@ mutate Pulse/MetricsHttpServer.cs \
     's/now - lastErrorLogMs < ErrorLogIntervalMs/false/' \
     "http server: error log rate limit never suppresses a repeat failure"
 
+mutate Pulse/MetricsHttpServer.cs \
+    's/request\.Path != "\/metrics"/request.Path == "\/metrics"/' \
+    "http server: the metrics path match inverts, so the one real path 404s and every other path would serve it"
+
+mutate Pulse/MetricsHttpServer.cs \
+    's/MaxHeadBytes = 8192;/MaxHeadBytes = 65536;/' \
+    "http server: the request head size limit widened, no longer rejecting a header the tests expect it to reject"
+
+mutate Pulse/MetricsHttpServer.cs \
+    's/stream\.ReadTimeout = ClampToDeadline\(deadline\);/stream.ReadTimeout = IoTimeoutMs;/' \
+    "http server: a Read already blocked when the deadline passes waits out the full backstop timeout instead"
+
+mutate Pulse/MetricsHttpServer.cs \
+    's/MaxConcurrentConnections = 16;/MaxConcurrentConnections = 1000;/' \
+    "http server: the concurrency cap is effectively removed, so a scrape is never actually queued behind it"
+
+mutate Pulse/MetricsHttpServer.cs \
+    's/Thread\.Sleep\(acceptBackoff\.NextMs\(\)\);/Thread.Sleep(0);/' \
+    "http server: the accept-failure backoff stops sleeping, spinning the loop instead of throttling it"
+
+mutate Pulse/MetricsHttpServer.cs \
+    's/nextMs = Math\.Min\(nextMs \* 2, MaxMs\);/nextMs = Math.Min(nextMs, MaxMs);/' \
+    "http server: the accept backoff stops doubling, retrying at a constant rate forever"
+
+mutate Pulse/MetricsHttpServer.cs \
+    's/Math\.Min\(nextMs \* 2, MaxMs\)/nextMs * 2/' \
+    "http server: the accept backoff is no longer capped, growing without bound"
+
+mutate Pulse/MetricsHttpServer.cs \
+    's/internal void Reset\(\) => nextMs = InitialMs;/internal void Reset() { }/' \
+    "http server: the accept backoff never resets after a successful accept"
+
+mutate Pulse/MetricsHttpServer.cs \
+    's/stream\.WriteTimeout = ClampToDeadline\(deadline\);/stream.WriteTimeout = IoTimeoutMs;/' \
+    "http server: the write timeout ignores the deadline and always uses the full backstop"
+
+mutate Pulse/MetricsHttpServer.cs \
+    's/acceptBackoff\.Reset\(\);/ /' \
+    "http server: the real accept loop stops resetting the backoff after a successful accept"
+
 mutate Pulse/TickBookkeeper.cs \
     's/sinceSnapshotSeconds < snapshotIntervalSeconds/sinceSnapshotSeconds <= snapshotIntervalSeconds/' \
     "tick bookkeeper: snapshot cadence boundary made inclusive, delaying the due tick that lands exactly on it"
