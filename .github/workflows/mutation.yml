@@ -5,13 +5,13 @@ name: mutation
 # is a ratchet, not a target. Each project breaks just under the score measured when this file
 # landed, so tests cannot quietly get weaker; raising a threshold is a deliberate commit. Pull
 # requests get a fast pass scoped to what they changed; the ratchet itself is enforced by the
-# full run, on workflow_dispatch and a weekly schedule.
+# full run, on workflow_dispatch and a weekly schedule. The fast pass itself is skipped for a
+# pull request into main: see the job's own if below.
 on:
   workflow_dispatch:
   schedule:
     # GitHub only runs a scheduled workflow from the copy of this file on the repository's
-    # default branch (main), so this weekly run has no effect until this file reaches main at
-    # the next release. Until then, the full run is reachable only through workflow_dispatch.
+    # default branch (main). This file has been on main since v0.2.0, so the weekly run applies.
     - cron: "0 6 * * 1"
   pull_request:
     branches: [main, dev]
@@ -42,6 +42,11 @@ env:
 jobs:
   stryker:
     name: Mutation (${{ matrix.project }})
+    # A pull request into main is a promotion of code already mutation-tested on dev: --since
+    # would scope it to the whole release line instead of a handful of files, which is exactly
+    # what ran into this lane's 20 minute pull request timeout on #97. The full, real-threshold
+    # run stays reachable through workflow_dispatch and the weekly schedule either way.
+    if: github.event_name != 'pull_request' || github.base_ref != 'main'
     runs-on: ubuntu-latest
     # Short on a pull request, where the run is scoped to a handful of changed files; generous
     # on workflow_dispatch and the weekly schedule, where it mutates the whole project (Pulse
