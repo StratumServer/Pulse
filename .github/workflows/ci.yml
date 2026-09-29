@@ -24,8 +24,67 @@ env:
   VS_VERSION: "1.22.7"
 
 jobs:
+  # Docs-only changes (docs/**, any *.md, LICENSE) cannot affect the build or the tests, so there
+  # is nothing for the heavy jobs below to catch. This job decides that once, from a plain git
+  # diff, and the heavy jobs skip themselves through a job-level if reading its output. "Build &
+  # tests" is the branch protection required check by that exact job name, and GitHub reports a
+  # job skipped by a job-level if as success, so a docs-only pull request is not blocked by it
+  # (see the pull request that introduced this job for the documentation citation). Whenever the
+  # diff cannot be computed (new branch, force-pushed or missing base commit, workflow_dispatch,
+  # schedule) this treats the change as code, so anything uncertain still runs everything.
+  changes:
+    name: Detect docs-only changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Classify the changed files
+        id: classify
+        run: |
+          set -e
+          BASE=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            BASE="${{ github.event.before }}"
+          fi
+
+          docs_only=false
+          if [ -n "$BASE" ] \
+            && [ "$BASE" != "0000000000000000000000000000000000000000" ] \
+            && git cat-file -e "$BASE" 2>/dev/null; then
+            files="$(git diff --name-only "$BASE" "${{ github.sha }}")"
+            docs_only=true
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              case "$f" in
+                docs/*|*.md|LICENSE) ;;
+                *) docs_only=false ;;
+              esac
+            done <<< "$files"
+          else
+            files="<diff not computable, treated as code>"
+          fi
+
+          echo "Changed files:"
+          echo "$files"
+          echo "docs_only=$docs_only"
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+
   build-and-test:
     name: Build & tests
+    needs: changes
+    # always(): without it, a failed changes job would leave this job skipped rather than run,
+    # and a job a required check skips through a failed needs job still reports success, the
+    # opposite of what a failed classification should mean. always() falls back to actually
+    # running the build and tests instead.
+    if: always() && needs.changes.outputs.docs_only != 'true'
     runs-on: ubuntu-latest
     # 15, then 20, were enough until tools/mutation-check.sh and the unit suites kept growing
     # across several branches landing around the same time: a run timed out at 15m15s, then
@@ -112,6 +171,9 @@ jobs:
 
   windows-unit-tests:
     name: Unit tests (Windows)
+    needs: changes
+    # See build-and-test's always() above: the same fallback applies here.
+    if: always() && needs.changes.outputs.docs_only != 'true'
     runs-on: windows-latest
     # GitHub's Windows runners execute every step as an administrator. That is exactly the
     # privilege MetricsHttpServer's release notes say a server no longer needs on Windows, so a
