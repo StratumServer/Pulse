@@ -8,6 +8,15 @@ first.
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.2.0] - 2026-09-29
+
+The first stable release of the 0.2 line, carrying everything from v0.2.0-indev.1 through
+indev.5 plus the release-review fixes and mutation-testing hardening that followed them:
+tick attribution, the runtime metric rename below, the socket-based metrics server, and
+export-failure logging in Pulse OTLP.
+
 ### Added
 
 - Export failures no longer pass silently. Pulse OTLP now listens to the OpenTelemetry SDK's own
@@ -19,8 +28,8 @@ first.
   every ten minutes: `Pulse OTLP export to <endpoint> failed: <why>. The backend answered: <clipped
   to 200 characters>. Metrics are not reaching the backend; check Endpoint and Headers in
   pulse-otlp.json. This is logged again at most every 10 minutes.` A matching line reports the
-  first successful export after a failure, or the first export overall on a server that has never
-  failed, at Notification rather than Warning. Every failure line is logged at Warning, never
+  first successful export after a failure, or the first export after each server start, at
+  Notification rather than Warning. Every failure line is logged at Warning, never
   Error, so a struggling backend cannot push a server toward `DieAboveErrorCount`. Neither line is
   meant to carry a header value: each configured value of at least 6 characters (shorter than that
   reads as an ordinary id, not a credential), the credential half of it when the value has a
@@ -30,8 +39,9 @@ first.
   shaped like a bearer or basic credential of at least 8 characters is redacted too, whether or not
   it matches a configured value; that length floor spares short words after either scheme word,
   though a longer one ("Basic authentication required") can still come out masked. None of this
-  is exhaustive, so the log itself is still worth treating as sensitive. The listener is read off the export thread only to classify and queue; a five second
-  tick listener drains it into the game logger on the main thread. Up to 32 distinct failure kinds
+  is exhaustive, so the log itself is still worth treating as sensitive. The listener is read off
+  the export thread only to classify and queue; a five second tick listener drains it into the
+  game logger on the main thread. Up to 32 distinct failure kinds
   are tracked at once; once the cap is reached, every kind whose own ten-minute window has already
   passed is evicted first, so a server old enough to have once seen that many, all since resolved,
   never loses a genuinely new one to it.
@@ -54,11 +64,12 @@ first.
 - A dashboard row, `Attribution, only when turned on`, placed right after tick health: a stacked
   time series of `pulse_mod_tick_share` by mod, a bar gauge for the current share, attributed tick
   time per mod using the main README's own seconds-per-profiled-tick recipe, and a small panel for
-  the profiled ticks rate and dropped samples. `contrib/alerts/pulse-alerts.yml` gains
-  `PulseModHoggingTick`, which only fires when a single mod other than `engine` or `unattributed`
-  holds more than 50% of the profiled tick for 10 minutes while `pulse_server_tick_busy_seconds` is
-  also over 80% of budget, the same load threshold `PulseTickSaturationHigh` already uses, so a mod
-  that is merely heavy on an idle server does not page anyone.
+  the profiled ticks rate and dropped samples. The new `contrib/alerts/pulse-alerts.yml` (below)
+  includes a matching `PulseModHoggingTick` alert, which only fires when a single mod other than
+  `engine` or `unattributed` holds more than 50% of the profiled tick for 10 minutes while
+  `pulse_server_tick_busy_seconds` is also over 80% of budget, the same load threshold
+  `PulseTickSaturationHigh` already uses, so a mod that is merely heavy on an idle server does not
+  page anyone.
 - `/pulse`, a server command behind the `controlserver` privilege, so per-mod tick attribution no
   longer needs a restart to switch. `/pulse attribution on` and `off` drive the duty cycle on the
   running server without writing `pulse.json`, `/pulse attribution status` reports the cycle in use
@@ -94,14 +105,23 @@ first.
   and scenario suites against the newest stable Vintage Story server version and fails if either
   doesn't hold up, catching an engine-side break before a user's server update does.
 - `ServiceName` config key in `pulse-otlp.json` (default `vintagestory`), setting the
-  `service.name` resource attribute so a backend receiving metrics from several servers can tell
-  them apart. `OTEL_SERVICE_NAME`, the ecosystem's standard override, takes precedence when set.
+  `service.name` resource attribute. Set it per server so a backend receiving metrics from several
+  of them can tell them apart, since the default is the same everywhere. `OTEL_SERVICE_NAME`, the
+  ecosystem's standard override, takes precedence when set.
 - A wire-level test for the grpc protocol: a scenario boots the server against a fake gRPC
   collector and reads the export off the socket, so both protocols `pulse-otlp.json` accepts are
   now proven end to end, not just http/protobuf.
 
 ### Changed
 
+- Every 0.2.0 start now logs the engine's own warning, `Over 400ms tick. Skipping N physics
+  ticks.`, once at startup, attribution on or off: Pulse primes the engine's frame profiler for the first
+  tick after every start, and the engine only prints that line while its profiler is on. 0.1.0
+  never touched the profiler, so it never logged this. It adds 1 to
+  `pulse_log_entries_total{level="warning"}` and is harmless: it is not one of the four kinds
+  `pulse_engine_warnings_total` counts, so none of the bundled alerts fire over it. With
+  attribution on, the same line also appears during a profiled burst whenever physics falls
+  behind.
 - **Breaking for anything scraping the runtime series directly:** nine `dotnet_*` families on
   `/metrics` are renamed to the name Prometheus's otlptranslator derives from the same instrument,
   the library Prometheus's own OTLP receiver, Mimir and Grafana Cloud use to turn an OTLP
@@ -146,6 +166,30 @@ first.
   changed between the two releases, but the resources the SDK builds by default now carry a schema
   URL, `https://opentelemetry.io/schemas/1.44.0`, where 1.18.0 sent none; OTLP exports gain that
   field on the wire. The collision precedence the `ServiceName` guard depends on is unaffected.
+- **Breaking for an OTLP-fed dashboard or alert filtering on `job`:** Pulse OTLP now sets
+  `service.name`, which it never did before. 0.1.0 called `Sdk.CreateMeterProviderBuilder()` with
+  no `ConfigureResource` at all, so the OpenTelemetry SDK's own default resource stood: `job`
+  arrived at Prometheus's OTLP receiver, Mimir or Grafana Cloud as `unknown_service:dotnet` (the
+  server launched as `dotnet VintagestoryServer.dll`, `server.sh` included) or
+  `unknown_service:VintagestoryServer` (launched through the native apphost binary directly),
+  unless `OTEL_SERVICE_NAME` or `OTEL_RESOURCE_ATTRIBUTES=service.name=...` was already set, both
+  of which that default resource already read, and with no `instance` label at all. Unless
+  `OTEL_SERVICE_NAME` is set, 0.2.0 calls `AddService` with the new `ServiceName` config key
+  instead, defaulting to `vintagestory`, and two things follow. Left at its default, `ServiceName`
+  changes every existing series' `job` to `vintagestory`, breaking anything that filters on the
+  old value. Whatever `ServiceName` holds, every series also gains an `instance` label, from a
+  `service.instance.id` that `AddService` regenerates at random on every restart, which 0.1.0
+  never exported. Setting `ServiceName` to the old value brings the old `job` back but not the
+  old identity: the new `instance` label still appears. To keep 0.1.0's `job` and `instance`
+  labels exactly, set `OTEL_SERVICE_NAME` to the old value instead: `ConfigureResource` then skips `AddService`
+  entirely, so neither `job` nor `instance` changes, and a `service.instance.id` already set
+  through `OTEL_RESOURCE_ATTRIBUTES` survives untouched (`OTEL_SERVICE_NAME` itself takes
+  precedence over a `service.name` there). Without `OTEL_SERVICE_NAME` set,
+  `OTEL_RESOURCE_ATTRIBUTES`'s `service.name` and `service.instance.id` are both silently
+  overridden by `AddService`. Setting `OTEL_SERVICE_NAME` together with
+  `OTEL_RESOURCE_ATTRIBUTES=service.instance.id=<id>` is therefore the way to get a stable
+  `instance` label across restarts: that variable alone is not enough, since `AddService`'s own
+  randomly generated id silently overrides it on every start.
 
 ### Fixed
 
@@ -199,9 +243,11 @@ first.
   is seeded with at startup, plus the handful of log lines the two mods can log between the base
   mod starting and the OTLP mod finishing its own startup. The OTLP mod now starts before the base
   mod, so its exporter is already listening when these counters are seeded.
-- Pulse no longer turns the engine's own frame profiler off on every tick. It used to write
-  `FrameProfilerUtil.Enabled` unconditionally each tick, even with `Attribution.Enabled` false (the
-  default), which broke `/debug logticks` on every 0.2 server: the report lost its per-system and
+- Pulse no longer turns the engine's own frame profiler off on every tick. `v0.2.0-indev.1` never
+  touched the profiler; `indev.2` and `indev.3` wrote `FrameProfilerUtil.Enabled` every tick while
+  `Attribution.Enabled` was true; `indev.4` and `indev.5` wrote it unconditionally every tick
+  regardless of `Attribution.Enabled`, which broke `/debug logticks` on a server running either of
+  those two prereleases even with attribution off: the report lost its per-system and
   per-listener lines, off-thread reports stopped printing altogether, and any other mod that turns
   the profiler on had its own setting clobbered a tick later. Pulse now tracks whether it is the
   one that last turned the flag on, and writes it only on its own transitions (turning off what it
