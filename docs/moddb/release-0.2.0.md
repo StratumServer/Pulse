@@ -3,17 +3,15 @@
 Text for the "what's new in this version" box on each zip's ModDB file entry.
 Plain text, no HTML: ModDB's file changelog field does not run the page
 sanitizer, but it does not render markup either. Kept under 1500 characters
-each. This is the canonical copy; .survey/release-notes/moddb-0.2.0-changelog.md
-is kept byte-for-byte identical to the two boxes below, so nobody has to guess
-which one to paste onto ModDB or diff them before a release.
+each. This is the canonical text: paste each box below onto ModDB as is.
 
 ## pulse_0.2.0.zip
 
 What's new in 0.2.0:
 
 - Security note: an earlier contrib/grafana or contrib/alerts README's
-  docker run commands exposed Grafana with anonymous admin access from any
-  reachable address; see the release notes before upgrading.
+  docker run commands exposed Grafana (anonymous admin) and Prometheus on
+  every interface on Linux; see the release notes before upgrading.
 - Per-mod tick attribution. See which mod is actually spending the tick,
   on a live graph, not a one-off report. Off by default.
 - New server command, /pulse attribution on|off|status, plus /pulse
@@ -48,12 +46,11 @@ What's new in 0.2.0:
   real event (engine warnings, player deaths, suspends, suspend seconds,
   worldgen columns, log entries) now reach OTLP from the first export,
   seeded at zero.
-- New ServiceName config key (default "vintagestory") replaces the OTel
-  SDK's own unknown_service: fallback that 0.1.0 exported. Prometheus,
-  Mimir and Grafana Cloud derive the job label from service.name, so
-  every OTLP series' job changes on upgrade; an old job filter breaks
-  quietly. To keep it, set OTEL_SERVICE_NAME instead of this key: only
-  the env var also avoids a new, restart-churning instance label.
+- New ServiceName config key (default "vintagestory") replaces 0.1.0's
+  unknown_service: fallback. Prometheus, Mimir and Grafana Cloud derive
+  job from service.name, so every series' job changes on upgrade; an old
+  job filter breaks quietly. Keep it with OTEL_SERVICE_NAME instead: only
+  the env var also skips a new, restart-churning instance label.
 - The bundled dashboard reads the same over OTLP as over /metrics now: the
   two pulse_network_*_per_second series lose a doubled suffix, and the
   renamed dotnet_* series match your OTLP backend's own names.
