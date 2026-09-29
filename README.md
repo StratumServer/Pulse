@@ -450,7 +450,9 @@ other way round.
 `ServiceName` sets the `service.name` resource attribute, which is how a backend receiving
 metrics from more than one server tells them apart: grouping, filtering and dashboard variables
 are usually keyed off it. The `OTEL_SERVICE_NAME` environment variable, the ecosystem's standard
-override, takes precedence over this key when it is set.
+override, takes precedence over this key when it is set. Pair it with
+`OTEL_RESOURCE_ATTRIBUTES=service.instance.id=<id>` for a stable `instance` label too: that
+variable alone is not enough, since a freshly generated id silently overrides it on every restart.
 
 `IntervalSeconds` is floored at 5 and capped at 86400 (24 hours), the cap there so a config typo
 several digits too long cannot overflow the millisecond count it is converted to. Sixty is the

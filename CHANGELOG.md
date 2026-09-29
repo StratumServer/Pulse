@@ -114,6 +114,12 @@ export-failure logging in Pulse OTLP.
 
 ### Changed
 
+- Every 0.2.0 start now logs the engine's own warning, `Over 400ms tick. Skipping N physics
+  ticks.`, once, attribution on or off: Pulse primes the engine's frame profiler for the first
+  tick after every start, and the engine only prints that line while its profiler is on. 0.1.0
+  never touched the profiler, so it never logged this. It adds 1 to
+  `pulse_log_entries_total{level="warning"}` and is harmless: it is not one of the four kinds
+  `pulse_engine_warnings_total` counts, so none of the bundled alerts fire over it.
 - **Breaking for anything scraping the runtime series directly:** nine `dotnet_*` families on
   `/metrics` are renamed to the name Prometheus's otlptranslator derives from the same instrument,
   the library Prometheus's own OTLP receiver, Mimir and Grafana Cloud use to turn an OTLP
@@ -174,10 +180,14 @@ export-failure logging in Pulse OTLP.
   never exported. Setting `ServiceName` to the old value brings the old `job` back but not the
   old identity: the new `instance` label still appears. To reproduce 0.1.0 exactly, set
   `OTEL_SERVICE_NAME` to the old value instead: `ConfigureResource` then skips `AddService`
-  entirely, so neither `job` nor `instance` changes, and a `service.name` or `service.instance.id`
-  already set through `OTEL_RESOURCE_ATTRIBUTES` survives untouched. Without `OTEL_SERVICE_NAME`
-  set, `OTEL_RESOURCE_ATTRIBUTES`'s `service.name` and `service.instance.id` are both silently
-  overridden by `AddService`.
+  entirely, so neither `job` nor `instance` changes, and a `service.instance.id` already set
+  through `OTEL_RESOURCE_ATTRIBUTES` survives untouched (`OTEL_SERVICE_NAME` itself takes
+  precedence over a `service.name` there). Without `OTEL_SERVICE_NAME` set,
+  `OTEL_RESOURCE_ATTRIBUTES`'s `service.name` and `service.instance.id` are both silently
+  overridden by `AddService`. Setting `OTEL_SERVICE_NAME` together with
+  `OTEL_RESOURCE_ATTRIBUTES=service.instance.id=<id>` is therefore the way to get a stable
+  `instance` label across restarts: that variable alone is not enough, since `AddService`'s own
+  randomly generated id silently overrides it on every start.
 
 ### Fixed
 
