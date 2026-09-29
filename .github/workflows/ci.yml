@@ -30,8 +30,8 @@ jobs:
   # tests" is the branch protection required check by that exact job name, and GitHub reports a
   # job skipped by a job-level if as success, so a docs-only pull request is not blocked by it
   # (see the pull request that introduced this job for the documentation citation). Whenever the
-  # diff cannot be computed (new branch, force-pushed or missing base commit, workflow_dispatch,
-  # schedule) this treats the change as code, so anything uncertain still runs everything.
+  # diff cannot be computed (new branch, force-pushed or missing base commit) this treats the
+  # change as code, so anything uncertain still runs everything.
   changes:
     name: Detect docs-only changes
     runs-on: ubuntu-latest
@@ -59,7 +59,12 @@ jobs:
           if [ -n "$BASE" ] \
             && [ "$BASE" != "0000000000000000000000000000000000000000" ] \
             && git cat-file -e "$BASE" 2>/dev/null; then
-            files="$(git diff --name-only "$BASE" "${{ github.sha }}")"
+            # --no-renames: without it, git's default rename detection folds a rename into a
+            # single entry named only for the destination path, so renaming a code file into
+            # docs/ (or to a .md name) would list only the new, docs-looking path and hide the
+            # old, code-looking one. With it, both the old and the new path are listed, so a
+            # rename out of or into code is judged on both names.
+            files="$(git diff --no-renames --name-only "$BASE" "${{ github.sha }}")"
             docs_only=true
             while IFS= read -r f; do
               [ -z "$f" ] && continue
@@ -80,11 +85,14 @@ jobs:
   build-and-test:
     name: Build & tests
     needs: changes
-    # always(): without it, a failed changes job would leave this job skipped rather than run,
-    # and a job a required check skips through a failed needs job still reports success, the
-    # opposite of what a failed classification should mean. always() falls back to actually
-    # running the build and tests instead.
-    if: always() && needs.changes.outputs.docs_only != 'true'
+    # !cancelled(): without it, a failed changes job would leave this job skipped rather than
+    # run, and a job a required check skips through a failed needs job still reports success,
+    # the opposite of what a failed classification should mean. !cancelled() falls back to
+    # actually running the build and tests, the same as always() would, but without also
+    # forcing the job to run after the workflow run itself was cancelled: GitHub's expressions
+    # documentation notes that always() returns true even when the run was canceled, and
+    # recommends !cancelled() for exactly this case.
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
     # 15, then 20, were enough until tools/mutation-check.sh and the unit suites kept growing
     # across several branches landing around the same time: a run timed out at 15m15s, then
@@ -172,8 +180,8 @@ jobs:
   windows-unit-tests:
     name: Unit tests (Windows)
     needs: changes
-    # See build-and-test's always() above: the same fallback applies here.
-    if: always() && needs.changes.outputs.docs_only != 'true'
+    # See build-and-test's !cancelled() above: the same fallback applies here.
+    if: ${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}
     runs-on: windows-latest
     # GitHub's Windows runners execute every step as an administrator. That is exactly the
     # privilege MetricsHttpServer's release notes say a server no longer needs on Windows, so a

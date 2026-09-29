@@ -11,8 +11,7 @@ on:
   workflow_dispatch:
   schedule:
     # GitHub only runs a scheduled workflow from the copy of this file on the repository's
-    # default branch (main), so this weekly run has no effect until this file reaches main at
-    # the next release. Until then, the full run is reachable only through workflow_dispatch.
+    # default branch (main). This file has been on main since v0.2.0, so the weekly run applies.
     - cron: "0 6 * * 1"
   pull_request:
     branches: [main, dev]

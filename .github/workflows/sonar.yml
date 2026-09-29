@@ -18,8 +18,8 @@ name: sonar
 # Automatic Analysis is disabled on the SonarCloud side: C# has to be analysed while it compiles,
 # which is what the begin/build/end sequence below does.
 #
-# SonarCloud's free plan only accepts analysis for the project's configured long-lived branch,
-# which on SonarCloud is set to dev, not this repository's release branch main. A push straight
+# SonarCloud's free plan only accepts analysis for the SonarCloud project's main branch, which
+# is set to dev, not this repository's release branch main. A push straight
 # to main (the push that landed #97 on 74005f6) fails outright, and every pull request targeting
 # main fails at the quality gate with "Not authorized or project not found" (the API's own
 # message is "Organization is not allowed to access data from PR targeting non main branches").
@@ -81,7 +81,8 @@ jobs:
           if [ -n "$BASE" ] \
             && [ "$BASE" != "0000000000000000000000000000000000000000" ] \
             && git cat-file -e "$BASE" 2>/dev/null; then
-            files="$(git diff --name-only "$BASE" "${{ github.sha }}")"
+            # --no-renames: see ci.yml's identical classify step for why this matters.
+            files="$(git diff --no-renames --name-only "$BASE" "${{ github.sha }}")"
             docs_only=true
             while IFS= read -r f; do
               [ -z "$f" ] && continue
@@ -108,11 +109,13 @@ jobs:
     # this repository. Both tests apply to pull_request only; a push is always from this
     # repository with the repository's own secrets. github.base_ref is only set for pull_request
     # events, and rules out a pull request targeting main for the reason at the top of this file;
-    # the push trigger above already leaves main out for the same reason. always(): this job is
-    # not a required check, but the same reasoning as ci.yml's build-and-test still applies, a
-    # failed changes job should fall back to running analysis rather than silently skip it.
+    # the push trigger above already leaves main out for the same reason. !cancelled(): this job
+    # is not a required check, but the same reasoning as ci.yml's build-and-test still applies, a
+    # failed changes job should fall back to running analysis rather than silently skip it, while
+    # still letting a cancelled run stop this job. GitHub's expressions documentation notes that
+    # always() returns true even when the run was canceled, and recommends !cancelled() instead.
     if: >-
-      always()
+      !cancelled()
       && needs.changes.outputs.docs_only != 'true'
       && (github.event_name != 'pull_request'
       || (github.base_ref != 'main'
