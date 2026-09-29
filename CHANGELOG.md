@@ -155,6 +155,20 @@ export-failure logging in Pulse OTLP.
   changed between the two releases, but the resources the SDK builds by default now carry a schema
   URL, `https://opentelemetry.io/schemas/1.44.0`, where 1.18.0 sent none; OTLP exports gain that
   field on the wire. The collision precedence the `ServiceName` guard depends on is unaffected.
+- **Breaking for an OTLP-fed dashboard or alert filtering on `job`:** Pulse OTLP now sets
+  `service.name`, which it never did before. 0.1.0 called `Sdk.CreateMeterProviderBuilder()` with
+  no `ConfigureResource` at all, so the OpenTelemetry SDK's own default resource stood: `job`
+  arrived at Prometheus's OTLP receiver, Mimir or Grafana Cloud as `unknown_service:dotnet` (the
+  server launched as `dotnet VintagestoryServer.dll`, `server.sh` included) or
+  `unknown_service:VintagestoryServer` (launched through the native apphost binary directly), with
+  no `instance` label at all. 0.2.0 exports the new `ServiceName` config key instead, defaulting to
+  `vintagestory`, so every existing series' `job` changes on upgrade. To keep the old `job` label,
+  set the `OTEL_SERVICE_NAME` environment variable to the old value rather than the `ServiceName`
+  config key: `ConfigureResource` skips its own `AddService` call whenever that variable is set,
+  which is the only path that reproduces 0.1.0 exactly. `ServiceName` also restores the old `job`,
+  but through `AddService`, which adds a `service.instance.id` (a random value regenerated on every
+  restart) that 0.1.0 never exported, so `job`+`instance` identity is still not continuous across
+  the upgrade that way.
 
 ### Fixed
 
@@ -208,11 +222,14 @@ export-failure logging in Pulse OTLP.
   is seeded with at startup, plus the handful of log lines the two mods can log between the base
   mod starting and the OTLP mod finishing its own startup. The OTLP mod now starts before the base
   mod, so its exporter is already listening when these counters are seeded.
-- Pulse no longer turns the engine's own frame profiler off on every tick. It used to write
-  `FrameProfilerUtil.Enabled` unconditionally each tick, even with `Attribution.Enabled` false (the
-  default), which broke `/debug logticks` on every 0.2 server: the report lost its per-system and
-  per-listener lines, off-thread reports stopped printing altogether, and any other mod that turns
-  the profiler on had its own setting clobbered a tick later. Pulse now tracks whether it is the
+- Pulse no longer turns the engine's own frame profiler off on every tick. `v0.2.0-indev.1` never
+  touched the profiler; `indev.2` and `indev.3` wrote `FrameProfilerUtil.Enabled` unconditionally
+  each tick, but only while `Attribution.Enabled` was true; `indev.4` and `indev.5` wrote it
+  unconditionally every tick regardless of `Attribution.Enabled`, which broke `/debug logticks` on
+  a server running either of those two prereleases even with attribution off: the report lost its
+  per-system and per-listener lines, off-thread reports stopped printing altogether, and any other
+  mod that turns the profiler on had its own setting clobbered a tick later. Pulse now tracks
+  whether it is the
   one that last turned the flag on, and writes it only on its own transitions (turning off what it
   primed at startup, every tick a burst is running so another mod cannot fold a stale tick tree
   into it, giving up, and shutting down), never clearing it while `/debug logticks` has asked for

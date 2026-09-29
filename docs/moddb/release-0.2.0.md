@@ -3,38 +3,38 @@
 Text for the "what's new in this version" box on each zip's ModDB file entry.
 Plain text, no HTML: ModDB's file changelog field does not run the page
 sanitizer, but it does not render markup either. Kept under 1500 characters
-each. No prior 0.1.0-era entries exist in the repo history to match the shape
-of (this file itself is new), so both are written as a plain what's-new list
-for a server owner deciding whether to upgrade.
+each. This is the canonical copy; .survey/release-notes/moddb-0.2.0-changelog.md
+is kept byte-for-byte identical to the two boxes below, so nobody has to guess
+which one to paste onto ModDB or diff them before a release.
 
 ## pulse_0.2.0.zip
 
 What's new in 0.2.0:
 
-- Per-mod tick attribution. Turn it on and see which mod is actually
-  spending the tick, on a live graph, not a one-off report. Off by default:
-  about 26% of the tick budget while a burst runs, about 0.9% amortised at
-  the shipped default (10 ticks every 10 seconds).
-- New server command, /pulse attribution on|off|status, plus /pulse reload,
-  so attribution switches on the running server with no restart.
-- The metrics endpoint is now a plain socket server: no administrator rights
-  or netsh reservation on Windows, no more 404s on Linux when a request's
-  Host header does not match Bind, and several scrapes at once instead of
-  queued.
-- Config files upgrade themselves at startup: a new key is added with its
-  default, existing values are left alone. A config file that fails to
-  parse now logs an error and keeps the mod running on defaults instead of
-  stopping it.
+- Security note: an earlier contrib/grafana or contrib/alerts README's
+  docker run commands exposed Grafana with anonymous admin access from any
+  reachable address; see the release notes before upgrading.
+- Per-mod tick attribution. See which mod is actually spending the tick,
+  on a live graph, not a one-off report. Off by default.
+- New server command, /pulse attribution on|off|status, plus /pulse
+  reload, so attribution switches on the running server with no restart.
+- The metrics endpoint is now a plain socket server: no administrator
+  rights needed on Windows, no more 404s on Linux, several scrapes served
+  at once instead of queued.
+- Config files upgrade themselves at startup, keeping existing values. A
+  config file that fails to parse now logs an error and keeps the mod
+  running on defaults instead of stopping it.
 - Breaking: nine dotnet_* runtime series on /metrics are renamed to the
-  names an OTLP backend derives (dotnet_gc_pause_time_total is now
-  dotnet_gc_pause_time_seconds_total, for example). pulse_* families are
-  unchanged; full list in the changelog.
-- The bundled Grafana dashboard gains an attribution row, and the alert
-  rules gain one for a single mod hogging the tick under load.
+  names an OTLP backend derives. pulse_* families are unchanged; full
+  list in the changelog.
+- New: contrib/alerts, an eleven-rule Prometheus alerting pack (tick
+  health, engine warnings, log errors, endpoint availability), including
+  PulseModHoggingTick. The Grafana dashboard gains a matching attribution
+  row.
 
-Upgrading from 0.1.0: replace the old zip with the new one and restart
-once. No config edits needed, but a dashboard or alert of your own that
-queries an old dotnet_* name needs updating.
+Upgrading from 0.1.0: replace the old zip and restart once, no config
+edits needed. Rolling back leaves the config alone (nothing lost), but
+attribution tuning goes inert until you upgrade again.
 
 ## pulseotlp_0.2.0.zip
 
@@ -48,18 +48,19 @@ What's new in 0.2.0:
   real event (engine warnings, player deaths, suspends, suspend seconds,
   worldgen columns, log entries) now reach OTLP from the first export,
   seeded at zero.
-- New ServiceName config key (default "vintagestory") sets the service.name
-  resource attribute, so a backend collecting from more than one server can
-  tell them apart. OTEL_SERVICE_NAME still overrides it.
-- The bundled dashboard now reads the same over OTLP as over /metrics: the
-  two pulse_network_*_per_second series lose a doubled _per_second suffix
-  over OTLP, and the base mod's renamed dotnet_* series now match the names
-  your OTLP backend already produced. Nothing else changes over OTLP.
-- Odd config values no longer crash startup: an Endpoint with an empty user
-  name and a password (which took the whole server down), a comma in a
-  header value, or an unparseable file now log one error and leave export
-  off.
+- New ServiceName config key (default "vintagestory") replaces the OTel
+  SDK's own unknown_service: fallback that 0.1.0 exported. Prometheus,
+  Mimir and Grafana Cloud derive the job label from service.name, so
+  every OTLP series' job changes on upgrade; an old job filter breaks
+  quietly. To keep it, set OTEL_SERVICE_NAME instead of this key: only
+  the env var also avoids a new, restart-churning instance label.
+- The bundled dashboard reads the same over OTLP as over /metrics now: the
+  two pulse_network_*_per_second series lose a doubled suffix, and the
+  renamed dotnet_* series match your OTLP backend's own names.
+- Odd config values no longer crash startup: a bad Endpoint, a comma in a
+  header value, or an unparseable file now log one error and leave
+  export off.
 - Requires the base pulse mod; upgrade both zips together.
 
-New to Grafana Cloud? The getting-started guide in the repo covers the free
-tier over OTLP end to end, alongside the local Prometheus and Grafana path.
+New to Grafana Cloud? The getting-started guide covers the free tier
+over OTLP end to end, alongside the local Prometheus path.
