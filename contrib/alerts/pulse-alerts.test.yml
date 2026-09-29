@@ -97,6 +97,10 @@ tests:
         values: '0+100x7 780+80x11'
       - series: 'pulse_server_tick_seconds_bucket{le="0.0334"}'
         values: '0+100x7 780+80x11'
+      - series: 'pulse_server_tick_seconds_bucket{le="0.035"}'
+        values: '0+100x7 780+80x11'
+      - series: 'pulse_server_tick_seconds_bucket{le="0.04"}'
+        values: '0+100x7 780+80x11'
       - series: 'pulse_server_tick_seconds_bucket{le="0.05"}'
         values: '0+100x7 785+85x11'
       - series: 'pulse_server_tick_seconds_bucket{le="0.075"}'
@@ -125,6 +129,44 @@ tests:
             exp_annotations:
               summary: "p99 tick time over 3x budget for 5m."
               description: "The slowest 1% of ticks have been running past three times the tick budget for 5 minutes; look for worldgen, an autosave, or a mod spiking before this turns into a sustained TPS drop."
+
+  # --- Regression check: a healthy but slipped server must not read a false p99 -----------------
+  # Not an alert, a direct histogram_quantile check. Reproduces the measured three-player case
+  # (tick rate 29.8, mean interval about 33.5ms): 995 of every 1000 ticks land at 0.0335s, just
+  # over the 0.0334 boundary, and 5 land at 0.045s. With the fix's 0.035 and 0.04 boundaries, those
+  # 995 ticks stay inside the narrow (0.0334, 0.035] bucket and p99 interpolates to about 35ms.
+  # Before this fix, both groups shared the single wide (0.0334, 0.05] bucket and interpolated p99
+  # to about 49.8ms, the false reading this change exists to remove: drop the le="0.035" and
+  # le="0.04" series below (folding their counts into le="0.05") to see the old number reappear.
+  - interval: 1m
+    input_series:
+      - series: 'pulse_server_tick_seconds_bucket{le="0.025"}'
+        values: '0'
+      - series: 'pulse_server_tick_seconds_bucket{le="0.0334"}'
+        values: '0'
+      - series: 'pulse_server_tick_seconds_bucket{le="0.035"}'
+        values: '995'
+      - series: 'pulse_server_tick_seconds_bucket{le="0.04"}'
+        values: '995'
+      - series: 'pulse_server_tick_seconds_bucket{le="0.05"}'
+        values: '1000'
+      - series: 'pulse_server_tick_seconds_bucket{le="0.075"}'
+        values: '1000'
+      - series: 'pulse_server_tick_seconds_bucket{le="0.1"}'
+        values: '1000'
+      - series: 'pulse_server_tick_seconds_bucket{le="0.25"}'
+        values: '1000'
+      - series: 'pulse_server_tick_seconds_bucket{le="0.5"}'
+        values: '1000'
+      - series: 'pulse_server_tick_seconds_bucket{le="1.0"}'
+        values: '1000'
+      - series: 'pulse_server_tick_seconds_bucket{le="+Inf"}'
+        values: '1000'
+    promql_expr_test:
+      - expr: histogram_quantile(0.99, sum by (le) (pulse_server_tick_seconds_bucket))
+        eval_time: 0
+        exp_samples:
+          - value: 0.03499195979899498
 
   # --- PulseEngineWarning (kind!=memory -> warning, kind=memory -> critical, no for:) --------
   # overload jumps once at minute 10 and holds; memory jumps once at minute 20 and holds. At
