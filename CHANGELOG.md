@@ -28,8 +28,8 @@ export-failure logging in Pulse OTLP.
   every ten minutes: `Pulse OTLP export to <endpoint> failed: <why>. The backend answered: <clipped
   to 200 characters>. Metrics are not reaching the backend; check Endpoint and Headers in
   pulse-otlp.json. This is logged again at most every 10 minutes.` A matching line reports the
-  first successful export after a failure, or the first export overall on a server that has never
-  failed, at Notification rather than Warning. Every failure line is logged at Warning, never
+  first successful export after a failure, or the first export after each server start, at
+  Notification rather than Warning. Every failure line is logged at Warning, never
   Error, so a struggling backend cannot push a server toward `DieAboveErrorCount`. Neither line is
   meant to carry a header value: each configured value of at least 6 characters (shorter than that
   reads as an ordinary id, not a credential), the credential half of it when the value has a
@@ -39,8 +39,9 @@ export-failure logging in Pulse OTLP.
   shaped like a bearer or basic credential of at least 8 characters is redacted too, whether or not
   it matches a configured value; that length floor spares short words after either scheme word,
   though a longer one ("Basic authentication required") can still come out masked. None of this
-  is exhaustive, so the log itself is still worth treating as sensitive. The listener is read off the export thread only to classify and queue; a five second
-  tick listener drains it into the game logger on the main thread. Up to 32 distinct failure kinds
+  is exhaustive, so the log itself is still worth treating as sensitive. The listener is read off
+  the export thread only to classify and queue; a five second tick listener drains it into the
+  game logger on the main thread. Up to 32 distinct failure kinds
   are tracked at once; once the cap is reached, every kind whose own ten-minute window has already
   passed is evicted first, so a server old enough to have once seen that many, all since resolved,
   never loses a genuinely new one to it.
@@ -164,18 +165,19 @@ export-failure logging in Pulse OTLP.
   server launched as `dotnet VintagestoryServer.dll`, `server.sh` included) or
   `unknown_service:VintagestoryServer` (launched through the native apphost binary directly),
   unless `OTEL_SERVICE_NAME` or `OTEL_RESOURCE_ATTRIBUTES=service.name=...` was already set, both
-  of which that default resource already read, and with no `instance` label at all. 0.2.0 exports
-  the new `ServiceName` config key instead, through `AddService`, defaulting to `vintagestory`.
-  This changes two things at once, whether `ServiceName` is left at its default or set to the old
-  value: every existing series' `job` changes on upgrade (unless `OTEL_SERVICE_NAME` was already
-  set, which 0.2.0 still honours ahead of `ServiceName`), and every series gains a
-  `service.instance.id` label that `AddService` regenerates at random on every restart, which
-  0.1.0 never exported. A `service.name` or `service.instance.id` set through
-  `OTEL_RESOURCE_ATTRIBUTES` is silently overridden by `AddService` the same way. To keep the old
-  `job` label and avoid the new `instance` churn, set the `OTEL_SERVICE_NAME` environment variable
-  to the old value rather than the `ServiceName` config key: `ConfigureResource` skips its own
-  `AddService` call whenever that variable is set, which is the only path that reproduces 0.1.0
-  exactly.
+  of which that default resource already read, and with no `instance` label at all. Unless
+  `OTEL_SERVICE_NAME` is set, 0.2.0 calls `AddService` with the new `ServiceName` config key
+  instead, defaulting to `vintagestory`, and two things follow. Left at its default, `ServiceName`
+  changes every existing series' `job` to `vintagestory`, breaking anything that filters on the
+  old value. Whatever `ServiceName` holds, every series also gains an `instance` label, from a
+  `service.instance.id` that `AddService` regenerates at random on every restart, which 0.1.0
+  never exported. Setting `ServiceName` to the old value brings the old `job` back but not the
+  old identity: the new `instance` label still appears. To reproduce 0.1.0 exactly, set
+  `OTEL_SERVICE_NAME` to the old value instead: `ConfigureResource` then skips `AddService`
+  entirely, so neither `job` nor `instance` changes, and a `service.name` or `service.instance.id`
+  already set through `OTEL_RESOURCE_ATTRIBUTES` survives untouched. Without `OTEL_SERVICE_NAME`
+  set, `OTEL_RESOURCE_ATTRIBUTES`'s `service.name` and `service.instance.id` are both silently
+  overridden by `AddService`.
 
 ### Fixed
 
