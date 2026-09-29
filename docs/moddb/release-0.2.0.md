@@ -14,7 +14,7 @@ What's new in 0.2.0:
 - Breaking: nine dotnet_* runtime series on /metrics are renamed to the names an OTLP backend derives. pulse_* families are unchanged; full list in the changelog.
 - New: contrib/alerts, an eleven-rule Prometheus alerting pack (tick health, engine warnings, log errors, endpoint availability), including PulseModHoggingTick. The Grafana dashboard gains a matching attribution row.
 
-Upgrading from 0.1.0: replace the old zip and restart once, no config edits needed. Rolling back leaves the config alone (nothing lost), but attribution tuning goes inert until you upgrade again.
+Upgrading from 0.1.0: replace the old zip and restart once, no config edits needed, but check Bind first: 0.0.0.0 now takes effect. Rolling back leaves the config alone (nothing lost), but attribution tuning goes inert until you upgrade again.
 
 ## pulseotlp_0.2.0.zip
 
@@ -22,7 +22,7 @@ What's new in 0.2.0:
 
 - Export failures no longer pass silently. A rejected push, a refused or unreachable collector, or a timeout now logs one line, repeated at most every 10 minutes, naming what failed and the backend's own (redacted) response. Recovery logs one line too.
 - Counters that could stay invisible on a quiet server until their first real event (engine warnings, player deaths, suspends, suspend seconds, worldgen columns, log entries) now reach OTLP from the first export, seeded at zero.
-- New ServiceName config key (default "vintagestory") replaces 0.1.0's unknown_service: fallback. Prometheus, Mimir and Grafana Cloud derive job from service.name, so every series' job changes on upgrade; an old job filter breaks quietly. Keep it with OTEL_SERVICE_NAME instead: only the env var also skips a new, restart-churning instance label. Pair with OTEL_RESOURCE_ATTRIBUTES=service.instance.id=<id> for a stable instance too.
+- New ServiceName config key (default "vintagestory") replaces 0.1.0's unknown_service: fallback. Prometheus, Mimir and Grafana Cloud derive job from service.name, so every series' job changes on upgrade; an old job filter breaks quietly. Keep it with OTEL_SERVICE_NAME instead: only the env var also skips a new, restart-churning instance label. Pair with OTEL_RESOURCE_ATTRIBUTES=service.instance.id=YOUR_ID for a stable instance too.
 - The bundled dashboard reads the same over OTLP as over /metrics now: the two pulse_network_*_per_second series lose a doubled suffix, and the renamed dotnet_* series match your OTLP backend's own names.
 - Odd config values no longer crash startup: a bad Endpoint, a comma in a header value, or an unparseable file now log one error and leave export off.
 - Requires the base pulse mod; upgrade both zips together.

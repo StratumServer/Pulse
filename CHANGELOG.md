@@ -115,11 +115,13 @@ export-failure logging in Pulse OTLP.
 ### Changed
 
 - Every 0.2.0 start now logs the engine's own warning, `Over 400ms tick. Skipping N physics
-  ticks.`, once, attribution on or off: Pulse primes the engine's frame profiler for the first
+  ticks.`, once at startup, attribution on or off: Pulse primes the engine's frame profiler for the first
   tick after every start, and the engine only prints that line while its profiler is on. 0.1.0
   never touched the profiler, so it never logged this. It adds 1 to
   `pulse_log_entries_total{level="warning"}` and is harmless: it is not one of the four kinds
-  `pulse_engine_warnings_total` counts, so none of the bundled alerts fire over it.
+  `pulse_engine_warnings_total` counts, so none of the bundled alerts fire over it. With
+  attribution on, the same line also appears during a profiled burst whenever physics falls
+  behind.
 - **Breaking for anything scraping the runtime series directly:** nine `dotnet_*` families on
   `/metrics` are renamed to the name Prometheus's otlptranslator derives from the same instrument,
   the library Prometheus's own OTLP receiver, Mimir and Grafana Cloud use to turn an OTLP
@@ -178,8 +180,8 @@ export-failure logging in Pulse OTLP.
   old value. Whatever `ServiceName` holds, every series also gains an `instance` label, from a
   `service.instance.id` that `AddService` regenerates at random on every restart, which 0.1.0
   never exported. Setting `ServiceName` to the old value brings the old `job` back but not the
-  old identity: the new `instance` label still appears. To reproduce 0.1.0 exactly, set
-  `OTEL_SERVICE_NAME` to the old value instead: `ConfigureResource` then skips `AddService`
+  old identity: the new `instance` label still appears. To keep 0.1.0's `job` and `instance`
+  labels exactly, set `OTEL_SERVICE_NAME` to the old value instead: `ConfigureResource` then skips `AddService`
   entirely, so neither `job` nor `instance` changes, and a `service.instance.id` already set
   through `OTEL_RESOURCE_ATTRIBUTES` survives untouched (`OTEL_SERVICE_NAME` itself takes
   precedence over a `service.name` there). Without `OTEL_SERVICE_NAME` set,
