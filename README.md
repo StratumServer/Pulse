@@ -5,6 +5,157 @@ Prometheus scrape endpoint. It runs on the dedicated server only, ships as a sin
 bundled dependencies, and does not talk to anything on its own: something has to come and read
 `/metrics`. A separate optional mod pushes the same metrics over OTLP, described further down.
 
+New to Prometheus and Grafana? [`docs/getting-started.md`](docs/getting-started.md) walks
+through installing Pulse and getting your first dashboard, step by step.
+
+Grab both from the [ModDB page](https://mods.vintagestory.at/pulse) or from
+[GitHub releases](https://github.com/StratumServer/Pulse/releases).
+
+## Table of contents
+
+- [Install](#install)
+- [Configuration](#configuration)
+- [Scraping it](#scraping-it)
+- [Degraded mode](#degraded-mode)
+- [Runtime metrics](#runtime-metrics)
+- [Attribution](#attribution)
+- [OTLP export](#otlp-export)
+- [Building and testing](#building-and-testing)
+- [Where this is going](#where-this-is-going)
+- [License](#license)
+
+## Install
+
+First time with Prometheus and Grafana? [`docs/getting-started.md`](docs/getting-started.md)
+covers install through your first dashboard, step by step.
+
+Drop `pulse_x.x.x.zip` into your server's `Mods/` folder and start the server. Add
+`pulseotlp_x.x.x.zip` beside it if you want OTLP push as well; the base mod works on its own and
+the OTLP one does not. On first boot Pulse writes `ModConfig/pulse.json` with its defaults:
+
+```json
+{
+  "Enabled": true,
+  "Bind": "127.0.0.1",
+  "Port": 9464,
+  "RuntimeMetrics": true,
+  "ChunksRefreshSeconds": 30,
+  "Attribution": {
+    "Enabled": false,
+    "BurstTicks": 10,
+    "IntervalSeconds": 10
+  }
+}
+```
+
+Set `Enabled` to false and the mod loads but registers nothing at all: no tick listener, no
+socket, no meter. `RuntimeMetrics` false drops the `dotnet_*` families and keeps the rest, which
+is what you want if something else already collects them on that host. `ChunksRefreshSeconds`
+is how often the loaded-chunk gauge is refreshed, and 30 is already fast for what that read
+costs; lower it only if you know why. `Attribution` is the per-mod breakdown described further
+down, off because it costs tick time.
+
+Everything outside the `Attribution` block takes a server restart. The block itself does not:
+`/pulse reload` applies it live, and `/pulse attribution on` and `off` switch it without touching
+the file at all.
+
+Upgrading does not mean editing the file by hand. Each mod checks its config file at startup and
+writes back any key it knows about that the file is missing, with that key's default; the values
+you already set are kept exactly as they are, and the log lists what was added. A key neither mod
+recognises does not survive that rewrite, so it is reported as a warning instead of disappearing
+quietly: usually it is a typo, and the setting you meant has been running on its default. A file
+that already holds every key is not written at all, which matters if you mount `ModConfig`
+read-only or keep it under version control.
+
+## Configuration
+
+Pulse and the OTLP mod each keep their settings in their own file under `ModConfig/`, written
+with their defaults on first boot. Both files pick up new keys the same way an upgrade adds
+them to a file that predates those keys; see the paragraph on that in [Install](#install).
+
+A file that exists but will not parse is left exactly as it is: the mod logs the full path and
+the parser's own message, and Pulse runs that session on its built-in defaults rather than
+failing to start. Pulse OTLP does the same for `pulse-otlp.json`, except exporting stays off for
+that session instead of falling back to its own default endpoint, and any value Newtonsoft
+quoted in its message, a misconfigured `Headers` entry most often, is redacted before it reaches
+the log.
+
+**`ModConfig/pulse.json`**
+
+| Key | Default | What it does | Live or restart |
+| --- | --- | --- | --- |
+| `Enabled` | `true` | Turns the mod on. `false` loads it but registers nothing: no tick listener, no socket, no meter. | Restart |
+| `Bind` | `"127.0.0.1"` | Address the metrics endpoint binds. See [A word on the bind address](#a-word-on-the-bind-address). | Restart |
+| `Port` | `9464` | Port the metrics endpoint listens on. If it is already taken, Pulse logs an error and runs without the endpoint. | Restart |
+| `RuntimeMetrics` | `true` | Serves the .NET runtime's own `dotnet_*` metrics alongside Pulse's. See [Runtime metrics](#runtime-metrics). | Restart |
+| `ChunksRefreshSeconds` | `30` | How often the loaded-chunk gauge, and the entity breakdown riding the same listener, are refreshed. Floored at 1 second, capped at one day (86400). | Restart |
+| `Attribution.Enabled` | `false` | Turns per-mod tick attribution on. See [Attribution](#attribution). | Live, via `/pulse reload` |
+| `Attribution.BurstTicks` | `10` | Consecutive ticks profiled per burst. Clamped to 1 through 300. | Live, via `/pulse reload` |
+| `Attribution.IntervalSeconds` | `10` | Seconds between the end of one burst and the start of the next. Floored at 1. | Live, via `/pulse reload` |
+
+**`ModConfig/pulse-otlp.json`**
+
+The OTLP mod has no reload command: every key below needs a restart to take effect.
+
+| Key | Default | What it does | Live or restart |
+| --- | --- | --- | --- |
+| `Enabled` | `true` | Turns OTLP export on. `false` keeps the mod loaded but exports nothing. | Restart |
+| `Endpoint` | `"http://localhost:4318"` | Base address of the collector, without a signal path. Pulse appends `/v1/metrics` for `http/protobuf`; the exporter appends its own service path for `grpc`. | Restart |
+| `Protocol` | `"http/protobuf"` | `http/protobuf` or `grpc`. Anything else logs a warning and falls back to `http/protobuf`. | Restart |
+| `Headers` | `{}` | Headers sent with every export, for backend authentication. See [OTLP export](#otlp-export). | Restart |
+| `IntervalSeconds` | `60` | Seconds between two exports. Floored at 5, capped at 86400 (24 hours). | Restart |
+| `IncludeRuntimeMetrics` | `true` | Adds the `System.Runtime` meter to what gets pushed. Independent of the base mod's `RuntimeMetrics`. | Restart |
+| `ServiceName` | `"vintagestory"` | Sets the `service.name` resource attribute. A blank value falls back to `vintagestory`; `OTEL_SERVICE_NAME`, if set, overrides this key. | Restart |
+
+## Scraping it
+
+```yaml
+scrape_configs:
+  - job_name: vintagestory
+    static_configs:
+      - targets: ["127.0.0.1:9464"]
+```
+
+`GET /metrics` returns the exposition text; every other path returns 404.
+
+A ready-to-run Prometheus and Grafana pair lives in `contrib/grafana`; Prometheus alerting rules
+calibrated to these thresholds live in `contrib/alerts`.
+
+### For panel authors
+
+The exposition text is the contract: game panels can read `/metrics` directly instead of going
+through Prometheus, which is how the first panel integration was built. Three things to know.
+Each server instance runs its own Pulse on its own port, so a shared machine has one endpoint
+per instance. The loopback bind covers a panel running on the same host; scraping from another
+machine goes through a reverse proxy or a deliberate `Bind` change, as above. Any polling
+cadence works, the endpoint is cheap to hit; existing metric families keep their names and
+shapes, and anything breaking would be called out loudly in the changelog first.
+
+### A word on the bind address
+
+The default binds loopback, which means only something running on the same host can scrape it.
+That default is deliberate. A Vintage Story server is usually a public host, and the metrics
+endpoint has no authentication of any kind, so widening `Bind` to `0.0.0.0` publishes your
+player count and tick health to whoever asks. Anyone who can reach the port can also occupy its
+(small, fixed) number of connection slots and blind your own scraper behind them, so a `Bind`
+beyond loopback wants a firewall rule limiting the port to the scraper. Changing `Bind` is a
+choice you should make on purpose, not a default you inherit.
+
+If you need to scrape from elsewhere, the safest options leave `Bind` on loopback: tunnel to it,
+or put a reverse proxy in front of it that only your scraper can reach. If you widen `Bind`
+instead, add the firewall rule above.
+
+`Bind` is a plain socket address, not a URL prefix. `0.0.0.0` binds every IPv4 interface, and
+`localhost` binds the IPv4 loopback directly, so both `localhost` and `127.0.0.1` reach it,
+whichever one a client's own name resolution tries first. All of this behaves the same on
+Windows, Linux and macOS, and none of it needs administrator rights or a `netsh` URL reservation
+on Windows. Binding `0.0.0.0` there can still prompt Windows Firewall to ask whether to allow
+access, or be blocked outright by a service's default inbound rules; loopback never asks, since
+nothing outside the machine is trying to reach it.
+
+If the port is already taken, Pulse logs an error and carries on without the endpoint. The game
+server keeps running; you get no metrics until you fix the config.
+
 The metric families it serves:
 
 - `pulse_server_ticks_total` (counter): server ticks processed since startup. Prometheus
@@ -51,6 +202,9 @@ degraded mode below for what happens when they are unavailable.
 - `pulse_network_udp_sent_bytes_total` and `pulse_network_udp_received_bytes_total` (counters):
   the UDP totals missing from the two public byte counters above.
 
+Four more answer "which mod is eating the tick", and only when you turn them on. They have a
+section of their own further down.
+
 The tick period is measured rather than taken from the value the engine hands tick listeners,
 because that one is rounded to whole milliseconds. Overruns still land exactly: once a tick's
 work exceeds the budget the engine's throttle sleep is zero, and the period is the busy time.
@@ -58,12 +212,15 @@ Most gauges come from a snapshot the tick listener refreshes about once a second
 server's main thread, so a scrape never touches live world state.
 
 Loaded chunks are the exception. The engine offers no cheap count, and the one accessor that
-exists clones the entire loaded-chunk dictionary under the chunk lock, so that gauge gets its
-own listener at `ChunksRefreshSeconds` and reads 0 until the first refresh. The entity breakdown
-rides that same slow listener. The event-driven counters do not ride the tick listener either:
-columns generated is incremented from `MapChunkGeneration`, which fires on the worldgen thread,
-and the log counters from `Logger.EntryAdded`, which fires on whichever thread wrote the line.
-Both handlers classify and increment, and nothing else.
+exists clones the entire loaded-chunk dictionary under the chunk lock, so that gauge gets its own
+listener at `ChunksRefreshSeconds` and reads 0 until the first refresh. The entity breakdown
+rides that same slow listener, but it is not the same kind of gauge: `pulse_entities_by_code` is
+recorded only from the listener callback, with no observable default behind it, so it is absent
+from the exposition entirely until that first refresh, not present at 0. The event-driven
+counters do not ride the tick listener either: columns generated is incremented from
+`MapChunkGeneration`, which fires on the worldgen thread, and the log counters from
+`Logger.EntryAdded`, which fires on whichever thread wrote the line. Both handlers classify and
+increment, and nothing else.
 
 ## Degraded mode
 
@@ -90,70 +247,164 @@ out, instead of shipping a mod that quietly serves six families fewer.
 With `RuntimeMetrics` left on, the .NET runtime's own `System.Runtime` meter is served
 alongside Pulse's, as `dotnet_*` families: GC collections and pause time, heap size and
 fragmentation by generation, working set, CPU time by mode, JIT, thread pool, lock contention,
-loaded assemblies. None of it is instrumented here. The runtime publishes the meter, Pulse
-subscribes to it, and the writer renames the instruments for the exposition format: dots become
-underscores, and a monotonic counter gains the `_total` suffix if it lacks one, so
-`dotnet.gc.collections` is served as `dotnet_gc_collections_total`.
+loaded assemblies. None of it is instrumented here. The runtime publishes the meter, and the
+writer renames each instrument the way Prometheus's otlptranslator does, the library Prometheus's
+own OTLP receiver, Mimir and Grafana Cloud use to turn an OTLP instrument into a Prometheus name:
+dots become underscores, the instrument's unit becomes a trailing word unless the name already
+contains it as a word, and a monotonic counter's name ends in `_total`, moved there rather than
+duplicated if the name already spells "total" somewhere. `dotnet.gc.collections` is served as
+`dotnet_gc_collections_total`; `dotnet.process.memory.working_set`, a gauge in bytes, is served as
+`dotnet_process_memory_working_set_bytes`; `dotnet.gc.heap.total_allocated`, a counter also in
+bytes, is served as `dotnet_gc_heap_allocated_bytes_total` rather than the doubled
+`..._total_allocated_bytes_total`. This is the same name Grafana derives when it translates the
+OTLP export, so a dashboard or alert built against a server scraped over OTLP through Grafana
+Cloud reads Pulse's own `/metrics` without translation too.
+
+Nine of these families moved to this spelling in 0.2, to line up with that translation; see the
+changelog for the full old to new list if you have a dashboard or alert built against the earlier
+names. `pulse_*` families are unaffected.
 
 Pulse renders the shape each instrument declares, including where that is arguable.
 `dotnet_thread_pool_thread_count_total` is typed as a counter because the runtime publishes it
 as an ObservableCounter, even though the number goes down as often as up. Second-guessing the
 framework here would only make the series harder to correlate with any other .NET exporter.
 
-## Install
+## Attribution
 
-Drop `pulse_0.1.0.zip` into your server's `Mods/` folder and start the server. Add
-`pulseotlp_0.1.0.zip` beside it if you want OTLP push as well; the base mod works on its own and
-the OTLP one does not. On first boot Pulse writes `ModConfig/pulse.json` with its defaults:
+Tick busy time tells you the server is working hard. Attribution tells you what it is working on.
+Turned on, it reports a per-mod share of the main thread, on a continuous series you can graph and
+alert on, rather than in a one-off profiling report.
+
+It is off by default, because it is not free. Add an `Attribution` block to `ModConfig/pulse.json`:
 
 ```json
 {
-  "Enabled": true,
-  "Bind": "127.0.0.1",
-  "Port": 9464,
-  "RuntimeMetrics": true,
-  "ChunksRefreshSeconds": 30
+  "Attribution": {
+    "Enabled": true,
+    "BurstTicks": 10,
+    "IntervalSeconds": 10
+  }
 }
 ```
 
-Set `Enabled` to false and the mod loads but registers nothing at all: no tick listener, no
-socket, no meter. `RuntimeMetrics` false drops the `dotnet_*` families and keeps the rest, which
-is what you want if something else already collects them on that host. `ChunksRefreshSeconds`
-is how often the loaded-chunk gauge is refreshed, and 30 is already fast for what that read
-costs; lower it only if you know why. Every one of these takes a server restart.
+`BurstTicks` is how many consecutive ticks each measurement covers, `IntervalSeconds` how long the
+server runs unmeasured between two of them. The defaults measure about one tick in thirty. Both are
+clamped on read: at least a second between bursts, at most 300 ticks in one.
 
-## Scraping it
+### Turning it on without a restart
 
-```yaml
-scrape_configs:
-  - job_name: vintagestory
-    static_configs:
-      - targets: ["127.0.0.1:9464"]
-```
+The moment you want attribution is usually while the server is struggling, and restarting it throws
+away the thing you wanted to look at. So the config file is not the only way in. Four commands, all
+behind the `controlserver` privilege, so admins and a panel console can run them:
 
-`GET /metrics` returns the exposition text; every other path returns 404.
+- `/pulse attribution on` starts the duty cycle straight away, on whatever `BurstTicks` and
+  `IntervalSeconds` are in force. The first burst lands one interval later.
+- `/pulse attribution off` stops it and puts the engine's frame profiler back down, unless the
+  engine's own `/debug logticks` still wants it running. A burst in progress is dropped rather
+  than published half-measured.
+- `/pulse attribution status` reports whether it is running, the cycle it is using, how many ticks
+  it has profiled and whether it is inside a burst right now.
+- `/pulse reload` re-reads `pulse.json` and applies the `Attribution` block live. The reply names
+  any other key whose value in the file has drifted from what the server is running, since those
+  still need a restart, and a file that does not parse changes nothing at all.
 
-### For panel authors
+`on` and `off` act on the running server and never write `pulse.json`, which is deliberate: a ten
+minute look should not become permanent because somebody forgot to turn it off. Restart the server
+and the file decides again. To make a change stick, edit the file and either restart or run
+`/pulse reload`.
 
-The exposition text is the contract: game panels can read `/metrics` directly instead of going
-through Prometheus, which is how the first panel integration was built. Three things to know.
-Each server instance runs its own Pulse on its own port, so a shared machine has one endpoint
-per instance. The loopback bind covers a panel running on the same host; scraping from another
-machine goes through a reverse proxy or a deliberate `Bind` change, as above. Any polling
-cadence works, the endpoint is cheap to hit; existing metric families keep their names and
-shapes, and anything breaking would be called out loudly in the changelog first.
+This works even on a server that booted with `Attribution.Enabled` false. Pulse registers the four
+families and primes the engine's profiler at startup either way, because a profiler switched on
+part-way through a tick that has never completed one takes the server down with it (there is more
+on that below). Priming costs two profiled ticks at boot and nothing after; an instrument nothing
+has recorded into is not a series, so an idle server serves exactly the exposition it did before.
 
-### A word on the bind address
+Four families appear once it is on:
 
-The default binds loopback, which means only something running on the same host can scrape it.
-That default is deliberate. A Vintage Story server is usually a public host, and the metrics
-endpoint has no authentication of any kind, so widening `Bind` to `0.0.0.0` publishes your
-player count and tick health to whoever asks. If you need to scrape from elsewhere, put the
-endpoint behind a reverse proxy or a firewall rule, or tunnel to it. Changing `Bind` is a choice
-you should make on purpose, not a default you inherit.
+- `pulse_mod_tick_share{modid}` (gauge): the fraction of profiled main-thread busy time that went
+  to one mod over the last completed burst. The shares add up to 1 across every `modid`, including
+  the two Pulse adds: `engine` for the server's own systems and for the time no marker named, and
+  `unattributed` for work that was marked but that no loaded mod claims.
+- `pulse_mod_tick_seconds_total{modid}` (counter): main-thread seconds attributed to one mod.
+  Sampled, not total: this is time measured inside the bursts, not time since startup. Divide by
+  the tick counter below to compare two servers, or take `rate()` of it against
+  `rate(pulse_attribution_ticks_total)` for seconds per profiled tick.
+- `pulse_attribution_ticks_total` (counter): ticks actually profiled, which is what makes the
+  sampled seconds mean anything.
+- `pulse_attribution_dropped_samples_total` (counter): profiler readings thrown away because they
+  overflowed. The engine accumulates each marker's time into a 32 bit counter of stopwatch ticks,
+  which wraps negative somewhere past two seconds inside a single tick. A wrapped reading is not a
+  large number, it is garbage, so it is dropped and counted here instead of being published as
+  data. Anything but a flat zero means the server had a tick so bad that a single marker ran for
+  over two seconds.
 
-If the port is already taken, Pulse logs an error and carries on without the endpoint. The game
-server keeps running; you get no metrics until you fix the config.
+### How it works, and what it costs
+
+The engine already contains a per-mod tick attributor and simply never switches it on. With its
+frame profiler enabled, the server stamps a marker after every game tick listener, every delayed
+callback and every main-thread entity behaviour, keyed by the type that declared the handler or by
+the behaviour's registered code. Pulse turns the profiler on for a burst, reads the tree the tick
+left behind, maps each key back to a mod through the mod loader, and turns it off again. No
+Harmony, no engine patch, no bundled dependency.
+
+The cost is measured, not estimated from a mark count. `Pulse.Scenarios/AttributionCostScenarios.cs`
+joins a test player, spawns four thousand chickens (dense cluster and, separately, spread across
+the loaded area, to tell density from entity count apart), and reads tick busy time with
+`World.MeasureTicks` across off, on, off, on, off, on, off: four off windows bracketing three on
+windows, each on compared against the mean of the two off windows next to it rather than just the
+one before it, so a baseline that drifts across the run cannot bias every delta the same direction.
+On a quiet run, both load shapes agreed: the off baseline wobbled by a couple of milliseconds with
+no clear drift, and a profiled tick's own share came out to about 8.75 ms, roughly 26% of the 33 ms
+budget. A second scenario splits that further, forcing the engine's frame profiler on without
+letting Pulse fold what it records: about 9 ms (27% of budget) is the engine's own cost of writing
+the marks. Pulse's own share, read from its own attribution at the stopwatch resolution that
+measures at rather than from a millisecond-rounded difference too small for that resolution to see,
+comes to about 0.02 ms, under a tenth of a percent of the budget: there is nothing here for Pulse
+itself to usefully optimise. At the shipped default (10 ticks every 10 seconds) the measured share
+blends down to about 0.9% of the budget, a slow window of roughly a third of a second every 10
+seconds. The previous default was 30 ticks; the same measurement puts that at about 2.5%
+amortised, and the shorter burst is what shipped once the real cost of the longer one was known.
+All of these replace the mark-count estimate this section used to carry (2.8% burst, 0.3%
+amortised at the old default), measured too low, likely because a dictionary write and a clock
+read cost more in practice than its per-operation guess. Markers scale with loaded entities times
+their behaviours, not with how many mods you run, so raising `BurstTicks` or lowering
+`IntervalSeconds` moves the amortised share in the obvious direction, and on an idle server it is
+nothing at all. Run it yourself, with `VINTAGE_STORY` set: `PULSE_MEASURE_ATTRIBUTION_COST=1
+dotnet test Pulse.Scenarios --filter "Category=Cost"`; CI filters the `Cost` trait out, and locally
+it is a no-op unless that variable is set, because spawning four thousand entities, three times
+over, is slow.
+
+One visible side effect: the engine logs "Over 400ms tick. Skipping N physics ticks" only while its
+frame profiler is on, and Pulse is what turns it on. It does so for the first tick after every
+start, attribution enabled or not, to prime the profiler so attribution can be switched on later
+without a restart. That first tick loads the spawn area and usually runs long, so one such line
+at startup is normal and harmless; it also counts once in `pulse_log_entries_total{level="warning"}`.
+During attribution bursts the same line appears whenever physics falls behind: that is the engine
+reporting a real condition it otherwise keeps to itself.
+
+### What it cannot see
+
+Say this out loud before reading a dashboard built on it.
+
+Broadcast events carry no markers. Roughly forty of them, `PlayerJoin`, `DidBreakBlock`,
+`OnEntityDeath` and the rest, are plain C# events the engine invokes without timing. A mod that
+does all its work in an event handler shows up as a rounding error here, and the time it spends
+lands in the `engine` bucket. The listener-and-behaviour half is what this measures.
+
+It is a main-thread share, not a total. Entity behaviours that declare themselves thread-safe run
+across several threads, and only the main thread's slice is marked. A mod whose behaviour is
+thread-safe therefore reads low, by roughly the thread count.
+
+Mapping is by assembly. A mod that ships several dlls only has the one its `ModSystem` lives in
+claimed, so a listener registered from a side library reads as `unattributed`. So does a handler
+on a static method, which the engine marks with no identity at all.
+
+And it is a sample. Ten ticks every ten seconds describe a steady server well and a spiky one
+badly. The share is an average over the burst, so a mod that stalls for 200 ms once a minute may
+well be profiled during a quiet stretch and read as harmless.
+
+If the numbers matter enough to act on, this is a first pass that says which mod to look at, not
+a call tree. Lithos Probe's sampling profiler is the tool for the second pass.
 
 ## OTLP export
 
@@ -162,7 +413,7 @@ and read `/metrics`, the server sends its metrics to a collector on a timer, in 
 every major observability backend accepts. Grafana Cloud, Honeycomb, Datadog, New Relic and an
 `otel-collector` you run yourself all take the same payload.
 
-It ships as a second mod, `pulseotlp_0.1.0.zip`, and both zips go in `Mods/`. The base mod stays
+It ships as a second mod, `pulseotlp_x.x.x.zip`, and both zips go in `Mods/`. The base mod stays
 a single dll with no dependencies; the OTLP one carries the OpenTelemetry SDK and its
 `Microsoft.Extensions.*` fan-out, eighteen dlls in all. That split is not tidiness. The game's
 mod loader puts every root-level dll of every mod into one shared assembly context with no
@@ -182,7 +433,8 @@ On first boot it writes `ModConfig/pulse-otlp.json`:
   "Protocol": "http/protobuf",
   "Headers": {},
   "IntervalSeconds": 60,
-  "IncludeRuntimeMetrics": true
+  "IncludeRuntimeMetrics": true,
+  "ServiceName": "vintagestory"
 }
 ```
 
@@ -195,9 +447,18 @@ specification defines, `http/protobuf` and `grpc`; anything else logs a warning 
 `RuntimeMetrics` flag, so you can serve the `dotnet_*` families locally and not ship them, or the
 other way round.
 
-`IntervalSeconds` is floored at 5. Sixty is the OTLP default and the right answer for almost
-everyone: the interval also decides how often every observable gauge is polled, and the
-loaded-chunk read behind one of them is not free.
+`ServiceName` sets the `service.name` resource attribute, which is how a backend receiving
+metrics from more than one server tells them apart: grouping, filtering and dashboard variables
+are usually keyed off it. The `OTEL_SERVICE_NAME` environment variable, the ecosystem's standard
+override, takes precedence over this key when it is set. For a stable `instance` label, pair
+`OTEL_SERVICE_NAME` (not this key) with `OTEL_RESOURCE_ATTRIBUTES=service.instance.id=<id>`:
+without `OTEL_SERVICE_NAME`, a freshly generated id silently overrides that variable on every
+restart.
+
+`IntervalSeconds` is floored at 5 and capped at 86400 (24 hours), the cap there so a config typo
+several digits too long cannot overflow the millisecond count it is converted to. Sixty is the
+OTLP default and the right answer for almost everyone: the interval also decides how often every
+observable gauge is polled, and the loaded-chunk read behind one of them is not free.
 
 For a local collector, the whole config is the endpoint:
 
@@ -226,21 +487,62 @@ the instance ID as the user and an access policy token as the password:
 `x-honeycomb-team` for Honeycomb, `api-key` for New Relic, `x-scope-orgid` for a multi-tenant
 Mimir. Values are percent-encoded on the way into the exporter, which the OTLP header format
 expects, so a base64 token with `+`, `/` and `=` in it needs no special handling. A literal comma
-in a header value is the one thing that cannot survive the trip, because the exporter unescapes
-the whole header string before splitting it on commas. No auth scheme in the wild puts a comma in
-a token.
+in a header value does not survive the trip: the exporter unescapes the whole header string before
+splitting it on commas, so encoding it going in does not stop it from being read as a separator
+coming out. Pulse checks every header for this, and for two names that collide once leading and
+trailing whitespace is trimmed off, before ever handing them to the exporter, and refuses to start
+exporting rather than let either reach it: the server log names the offending header, never its
+value.
 
 **`pulse-otlp.json` holds a credential.** It sits in `ModConfig/` in plain text, with whatever
 permissions your server's umask gave it. On a shared or rented host, `chmod 600` it and make sure
 it is owned by the account the server runs as. It is also worth keeping out of any config backup
 you push somewhere public.
 
-A collector that is down, refusing, or answering 401 costs you nothing on the game side. The
-OpenTelemetry SDK exports from its own background thread and swallows the failure into its
-internal event source, so the tick loop never sees it. You get no metrics until the collector
-comes back, and the server does not notice either way. A malformed `Endpoint` is the one case
-Pulse checks itself, because that one would throw while the exporter is being built: it logs an
-error and registers nothing.
+A collector that is down, refusing, or answering 401 still costs you nothing on the game side: the
+OpenTelemetry SDK exports from its own background thread and the tick loop never sees the
+failure. It no longer stays invisible, though. Pulse OTLP listens to the SDK's own diagnostic
+event source and turns the first failure of each kind into one line in the server log, repeated at
+most every ten minutes and logged at Warning rather than Error so a struggling backend can never
+count toward `DieAboveErrorCount`:
+
+```
+Pulse OTLP export to https://otlp-gateway-prod-eu-west-2.grafana.net/otlp/v1/metrics failed:
+Response status code does not indicate success: 401 (Unauthorized). The backend answered:
+{"status":"error","error":"authentication error: invalid token"} Metrics are not reaching the
+backend; check Endpoint and Headers in pulse-otlp.json. This is logged again at most every 10
+minutes.
+```
+
+A matching line reports the first successful export after a failure, so recovery shows up too, and
+a healthy server that has never failed still logs exactly one such line, at Notification rather
+than Warning, right after its first delivery.
+
+Neither line is meant to carry a header value, or the query string or userinfo half of `Endpoint`
+either, for a backend that authenticates a signed URL that way instead of through a header. Before
+a line is queued, each of those values, at least 6 characters long (shorter than that reads as an
+ordinary id, not a credential), the credential half of it when the value has a "scheme credential"
+shape (a Bearer token echoed without its "Bearer ", say), and the JSON-escaped form of both, are
+matched case-insensitively and redacted out of the backend's answer and out of a gRPC failure's
+status detail, longest value first so a short one can never land inside a longer one's own match.
+Anything else shaped like a bearer or basic credential of at least 8 characters is redacted too,
+whether or not it matches a configured value. This is not exhaustive: a backend that transforms a
+secret some other way, hashing it or splitting it across two fields, could still get it into the
+log, so treat the log itself as sensitive before sharing it regardless. The backend's answer, once
+redacted, is clipped to 200 characters.
+
+A malformed `Endpoint`, and a `Headers` entry with a comma in its value or a name that collides
+with another once trimmed, are cases Pulse checks itself before the exporter is ever built: it
+logs one error, naming the problem and never the value, and registers nothing. An `IntervalSeconds`
+so large it would once have overflowed the millisecond conversion is not one of those cases any
+more: it is silently clamped to 86,400 seconds (24 hours) and exported at that rate instead, with
+no error at all. A `Headers` shape neither check above names, such as a comma inside a header
+*name* rather than its value, or a header called `User-Agent` (which collides with one the
+exporter sets on its own), still reaches the OpenTelemetry SDK's own option validation, which
+throws; Pulse catches that too, so nothing crashes and nothing is exported, but the log line only
+names the exception type, not the header. For anything these lines do not explain, the SDK's own,
+far more verbose self-diagnostics turn on by dropping an `OTEL_DIAGNOSTICS.json` file next to the
+server.
 
 ## Building and testing
 
@@ -253,8 +555,8 @@ references only; neither is copied into the mod, which still ships as one file.
 export VINTAGE_STORY=/path/to/vintagestory
 dotnet build Pulse.slnx -c Release
 dotnet test                      # unit tests, then the Atlas scenarios
-dotnet build Pulse/Pulse.csproj -c Release -t:PackageMod            # artifacts/pulse_0.1.0.zip
-dotnet build Pulse.Otlp/Pulse.Otlp.csproj -c Release -t:PackageMod  # artifacts/pulseotlp_0.1.0.zip
+dotnet build Pulse/Pulse.csproj -c Release -t:PackageMod            # artifacts/pulse_x.x.x.zip
+dotnet build Pulse.Otlp/Pulse.Otlp.csproj -c Release -t:PackageMod  # artifacts/pulseotlp_x.x.x.zip
 ```
 
 The scenarios in `Pulse.Scenarios` boot a real headless server in-process through
@@ -267,19 +569,27 @@ atlas run Pulse.Otlp.Scenarios/bin/Release/net10.0/Pulse.Otlp.Scenarios.dll
 ```
 
 `Pulse.Otlp.Scenarios` is a separate project because it stages both mods, laid out exactly as
-their zips are, and the base suite's staging should stay as it is. It stands up an `HttpListener`
-as a fake collector, points the mod at it, runs the world, and asserts on the protobuf that
-arrives.
+their zips are, and the base suite's staging should stay as it is. It stands up a fake collector,
+points the mod at it, runs the world, and asserts on the protobuf that arrives. There is one
+collector per protocol the config accepts: an `HttpListener` for http/protobuf, and for grpc a
+small HTTP/2 server, since a gRPC client wants its own service path, a length-prefixed message
+and a status trailer before it calls an export delivered.
 
 Unit tests in `Pulse.Tests` cover the aggregator, the exposition writer, the log classifier and
 the small classes behind the wave of engine and world metrics: the busy-time average, the ping
 aggregates, the entity top-ten with its series retirement rule, and the suspend window. None of
 them needs a server. `Pulse.Otlp.Tests` covers the config translation, which is where the OTLP
-mod's only non-obvious logic lives. Mutation verification over those files runs through
-`tools/mutation-check.sh`, which applies representative mutations one at a time and requires the
-suite to fail on every one; CI runs it on each push. A `stryker-config.json` sits ready for
-`dotnet stryker`, which currently finds the tests but runs mutants against the unmutated
-assembly on the .NET 10 SDK.
+mod's only non-obvious logic lives.
+
+Mutation testing runs at two depths. `tools/mutation-check.sh` applies eighty-six representative
+mutations one at a time and requires the suite to fail on every one; CI runs it on every push,
+deterministic and under a minute. `.github/workflows/mutation.yml` runs dotnet-stryker
+incrementally on pull requests touching `Pulse/`: it mutates only the files the pull request
+changed and reports without gating. The full run mutates the whole project except the files that
+only run under a live server, scores 86 to 88 percent in recent runs, fails below 83, and runs
+weekly and on `workflow_dispatch`. Pulse.Otlp's own Stryker lane is `workflow_dispatch` only,
+because Stryker launches the wrong project's test host for it and the score swings too much
+between runs to gate a pull request on.
 
 ## Where this is going
 

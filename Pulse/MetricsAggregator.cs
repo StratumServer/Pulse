@@ -5,9 +5,10 @@ namespace Pulse;
 
 /// <summary>Accumulates the measurements of a set of Meters into Prometheus-shaped series.</summary>
 /// <remarks>Records arrive on the server's main thread (the tick listener), on the worldgen
-/// thread and on whatever thread logged, while scrapes read from the HTTP thread, so every path
-/// takes the same lock. At a handful of records per tick and one scrape per few seconds, a single
-/// lock is not worth refining away.</remarks>
+/// thread and on whatever thread logged, while a scrape reads from whichever of the metrics
+/// endpoint's handler threads is serving that connection, so every path takes the same lock. At a
+/// handful of records per tick and one scrape per few seconds per caller, a single lock is not
+/// worth refining away.</remarks>
 public sealed class MetricsAggregator : IDisposable
 {
     /// <summary>Instrument shape to the kind it renders as and whether one measurement carries an
@@ -29,6 +30,13 @@ public sealed class MetricsAggregator : IDisposable
     private readonly object gate = new();
     private readonly List<Series> series = [];
     private readonly MeterListener listener = new();
+
+    /// <summary>Bumped once per <see cref="Collect"/>, stamped onto every series a measurement
+    /// touches. What lets an observable instrument's absent tag set retire a series instead of
+    /// freezing it at its last value: synchronous instruments are exempt, since a Counter or a
+    /// Gauge is only ever touched when the application explicitly records one, not every scrape,
+    /// and must keep reading its last value between those.</summary>
+    private long generation;
 
     public MetricsAggregator(params string[] meterNames)
         : this(null, meterNames)
@@ -65,19 +73,36 @@ public sealed class MetricsAggregator : IDisposable
     }
 
     /// <summary>Takes a scrape: observable instruments are polled, then every series is copied out.</summary>
-    /// <remarks>The observable callbacks run on THIS thread, which in the mod is the HTTP thread.
-    /// They must therefore read only data the main thread has already published.</remarks>
+    /// <remarks>The observable callbacks run on THIS thread, whichever of the metrics endpoint's
+    /// own handler threads is taking this particular scrape. They must therefore read only data
+    /// the main thread has already published.
+    /// <para>One lock for the whole method, generation bump through the final copy: a second
+    /// concurrent Collect could otherwise bump <see cref="generation"/> again between this call's
+    /// own stamps and its own <c>RemoveAll</c>, retiring series this very call just touched. The
+    /// callbacks <c>RecordObservableInstruments</c> runs land back on <see cref="Record"/> on this
+    /// same thread, which re-enters this same lock; .NET's <c>lock</c> is reentrant for the thread
+    /// already holding it, so that nests without deadlocking. Up to sixteen handler threads can
+    /// call this concurrently today, one per connection the metrics endpoint is serving at once;
+    /// the lock above, not any assumption about a single caller, is what keeps that safe.</para></remarks>
     public IReadOnlyList<MetricSample> Collect()
     {
-        listener.RecordObservableInstruments();
-
         lock (gate)
         {
+            generation++;
+            listener.RecordObservableInstruments();
+
+            // An observable series this pass never touched did not report that tag set this time,
+            // which for an observable instrument means it is gone, not merely unchanged: this is
+            // what lets a family like a per-mod share retire a modid instead of serving it forever
+            // at whatever it last measured.
+            series.RemoveAll(s => s.Instrument.IsObservable && s.Generation != generation);
+
             List<MetricSample> samples = new(series.Count);
             foreach (Series s in series)
             {
                 samples.Add(new MetricSample(s.Name, s.Kind, s.Help, s.Value)
                 {
+                    Unit = s.Unit,
                     Labels = s.Labels,
                     Bounds = s.Bounds,
                     Buckets = (long[])s.Buckets.Clone(),
@@ -172,6 +197,8 @@ public sealed class MetricsAggregator : IDisposable
                 return;
             }
 
+            s.Generation = generation;
+
             if (s.Kind == MetricKind.Histogram)
             {
                 s.Count++;
@@ -226,6 +253,7 @@ public sealed class MetricsAggregator : IDisposable
             Kind = shape.Kind,
             Absolute = shape.Absolute,
             Help = instrument.Description ?? string.Empty,
+            Unit = instrument.Unit ?? string.Empty,
             Labels = labels,
             Bounds = bounds,
             Buckets = new long[bounds.Length],
@@ -249,6 +277,8 @@ public sealed class MetricsAggregator : IDisposable
 
         public required string Help { get; init; }
 
+        public required string Unit { get; init; }
+
         public KeyValuePair<string, string>[] Labels { get; init; } = [];
 
         public double[] Bounds { get; init; } = [];
@@ -260,5 +290,9 @@ public sealed class MetricsAggregator : IDisposable
         public double Sum { get; set; }
 
         public long Count { get; set; }
+
+        /// <summary>The generation this series was last touched in. Meaningless for a synchronous
+        /// instrument's series, which <see cref="Collect"/> never checks it against.</summary>
+        public long Generation { get; set; }
     }
 }

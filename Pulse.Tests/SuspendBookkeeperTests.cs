@@ -66,4 +66,16 @@ public class SuspendBookkeeperTests
 
         Assert.Equal(0.0, bookkeeper.Close(10.0));
     }
+
+    /// <summary>The idle field starts at -1 specifically so 0 reads as open, not closed: a window
+    /// opened at the exact instant the clock this counts from was zeroed is still a window.</summary>
+    [Fact]
+    public void Open_AtExactlyZero_StillCountsAsOpen_AndIsNotReopenedByALaterPoll()
+    {
+        SuspendBookkeeper bookkeeper = new();
+        bookkeeper.Open(0.0);
+        bookkeeper.Open(5.0);
+
+        Assert.Equal(5.0, bookkeeper.Close(5.0));
+    }
 }

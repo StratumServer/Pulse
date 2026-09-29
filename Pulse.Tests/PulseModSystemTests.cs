@@ -49,4 +49,85 @@ public class PulseModSystemTests
             Assert.Equal(0, sample.Value);
         }
     }
+
+    [Theory]
+    [InlineData(0, 1000)] // The floor: a 0 or negative config value must not clone the chunk map every tick.
+    [InlineData(-5, 1000)]
+    [InlineData(30, 30_000)] // The documented default, unaffected by either clamp.
+    public void ChunksListenerPeriodMs_Clamps_ToTheFloor(int configuredSeconds, int expectedMs)
+        => Assert.Equal(expectedMs, PulseModSystem.ChunksListenerPeriodMs(configuredSeconds));
+
+    /// <summary>The overflow the review found: multiplied by 1000 with no ceiling, a value just
+    /// above roughly 2.147 million seconds wraps a 32 bit int negative, which the engine then runs
+    /// on every single tick instead of never.</summary>
+    [Fact]
+    public void ChunksListenerPeriodMs_Clamps_BelowTheOverflowBoundary()
+    {
+        int unclamped = unchecked(2_147_484 * 1000);
+        Assert.True(unclamped < 0, "the boundary chosen for this test must actually overflow int");
+
+        int periodMs = PulseModSystem.ChunksListenerPeriodMs(2_147_484);
+
+        Assert.True(periodMs > 0, "the clamped period must never go negative");
+        Assert.Equal(86_400_000, periodMs); // Clamped to the documented one day maximum.
+    }
+
+    /// <summary>Reproduces the measured regression: a server with three players slips to about
+    /// 33.5ms per tick (29.8 TPS) against the 33.33ms budget, a perfectly healthy reading. Before
+    /// the 0.035 and 0.04 boundaries existed, those slipped ticks and the rare slower one shared a
+    /// single wide (0.0334, 0.05] bucket, and Prometheus's own histogram_quantile linearly
+    /// interpolating across that whole span read p99 around 49.8ms. Records through the same
+    /// InstrumentAdvice-boundaries path <see cref="PulseModSystem"/> itself uses, so reverting
+    /// <see cref="PulseModSystem.TickBuckets"/> to its old layout fails this test.
+    /// contrib/alerts/pulse-alerts.test.yml has the matching promtool case for the PromQL side.</summary>
+    [Fact]
+    public void TickBuckets_KeepP99Honest_ForAHealthySlippedServer()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        Histogram<double> tickSeconds = meter.CreateHistogram(
+            "tick_seconds", "s", "T.", tags: null,
+            new InstrumentAdvice<double> { HistogramBucketBoundaries = PulseModSystem.TickBuckets });
+
+        for (int i = 0; i < 995; i++)
+        {
+            tickSeconds.Record(0.0335);
+        }
+
+        for (int i = 0; i < 5; i++)
+        {
+            tickSeconds.Record(0.045);
+        }
+
+        MetricSample sample = aggregator.Collect().Single(s => s.Name == "tick_seconds");
+        double p99 = HistogramQuantile(0.99, sample.Bounds, sample.Buckets, sample.Count);
+
+        Assert.True(p99 < 0.036, $"p99 read {p99}s: a wide-bucket interpolation artefact, not a real overrun.");
+    }
+
+    /// <summary>Prometheus's own histogram_quantile, linear interpolation over classic buckets,
+    /// just enough of it to check boundaries against the same math a Grafana dashboard runs.
+    /// <paramref name="buckets"/> is per-bucket, not cumulative, matching
+    /// <see cref="MetricSample.Buckets"/>.</summary>
+    private static double HistogramQuantile(double q, double[] bounds, long[] buckets, double count)
+    {
+        double goal = q * count;
+        double lowerBound = 0;
+        long lowerCumulative = 0;
+        long cumulative = 0;
+        for (int i = 0; i < bounds.Length; i++)
+        {
+            cumulative += buckets[i];
+            if (cumulative >= goal)
+            {
+                return lowerBound + (bounds[i] - lowerBound) * (goal - lowerCumulative) / (cumulative - lowerCumulative);
+            }
+
+            lowerBound = bounds[i];
+            lowerCumulative = cumulative;
+        }
+
+        return bounds[^1];
+    }
 }

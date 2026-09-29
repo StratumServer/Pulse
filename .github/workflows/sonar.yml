@@ -3,12 +3,17 @@ name: sonar
 # Static analysis published to SonarCloud (project StratumServer_Pulse).
 #
 # Kept out of ci.yml on purpose: this job pulls a JDK and a scanner tool on top of the normal
-# build, and its verdict is informational, so it has no business slowing down or failing the
-# checks that gate a merge.
+# build, and it is not in the repository's required checks, so a red run here never blocks a
+# merge.
 #
-# The quality gate is deliberately non-blocking: no /d:sonar.qualitygate.wait, and this workflow
-# is not in the repository's required checks. It decorates pull requests and publishes measures,
-# nothing more.
+# The quality gate is awaited: /d:sonar.qualitygate.wait=true on the begin step makes the end
+# step poll SonarCloud and fail the job when the gate fails. That matters because SonarCloud no
+# longer decorates pull requests with a comment or check annotation (nothing has appeared on a
+# pull request itself since #49), so without this the job stayed green on a failing gate, which is
+# exactly what happened on a pull request this week. The scanner's default sonar.qualitygate.timeout
+# (300 seconds) is left alone: this project's SonarCloud background tasks process in a few seconds,
+# nowhere near that budget. Read the full measures on SonarCloud's own project page; this job only
+# surfaces pass or fail.
 #
 # Automatic Analysis is disabled on the SonarCloud side: C# has to be analysed while it compiles,
 # which is what the begin/build/end sequence below does.
@@ -18,12 +23,34 @@ on:
     branches: [main, dev]
   pull_request:
 
+# Least privilege: nothing here writes to the repository. The job only reads the checkout and
+# publishes analysis to SonarCloud over the API, authenticated with SONAR_TOKEN rather than any
+# repository permission.
+permissions:
+  contents: read
+
+# One analysis per branch and workflow, unlike ci.yml's per-run grouping: here the newest push
+# or pull request commit is the only result worth keeping, so letting it supersede whatever was
+# still queued ahead of it is correct, not a gap.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   VS_VERSION: "1.22.7"
 
 jobs:
   sonar:
     name: SonarCloud analysis
+    # Two cases where SONAR_TOKEN is not there to be had, and the scanner cannot authenticate
+    # without it: a fork pull request runs without repository secrets, and a Dependabot pull
+    # request gets the separate Dependabot secret store instead, even though the branch lives in
+    # this repository. Both tests apply to pull_request only; a push is always from this
+    # repository with the repository's own secrets.
+    if: >-
+      github.event_name != 'pull_request'
+      || (github.actor != 'dependabot[bot]'
+      && github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
@@ -36,7 +63,7 @@ jobs:
 
       # The scanner is a Java program; the dotnet tool is a wrapper around it.
       - name: Setup Java 21
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "21"
@@ -82,32 +109,41 @@ jobs:
           # straight into a run block ends up in the generated script.
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
-          # The two ModSystems and the engine probe are excluded from coverage the way Nimbus excludes
-          # its ServerMod: the Atlas scenarios exercise them against a live embedded server, but the game's loader
-          # loads the staged dll outside coverlet's instrumentation, so that execution can never
-          # reach a coverage report. Everything with coverable logic lives in the classes the
-          # unit suite drives directly, and those stay under the 80% gate.
+          # The two ModSystems, the engine probe, and the live-server half of AttributionMetrics are
+          # excluded from coverage the way Nimbus excludes its ServerMod: the Atlas scenarios exercise
+          # them against a live embedded server, but the game's loader loads the staged dll outside
+          # coverlet's instrumentation, so that execution can never reach a coverage report.
+          # AttributionMetrics.Server.cs is only the construction, the /pulse command and the reload
+          # path; AttributionMetrics.cs itself is not excluded, since a unit test drives it directly.
+          # Everything else with coverable logic lives in the classes the unit suite drives directly,
+          # and those stay under the 80% gate.
           dotnet sonarscanner begin \
             /k:"StratumServer_Pulse" \
             /o:"stratumserver" \
             /d:sonar.token="$SONAR_TOKEN" \
             /d:sonar.host.url="https://sonarcloud.io" \
-            /d:sonar.exclusions="**/bin/**,**/obj/**" \
-            /d:sonar.coverage.exclusions="Pulse/PulseModSystem.cs,Pulse.Otlp/PulseOtlpModSystem.cs,Pulse/EngineProbe.cs" \
-            /d:sonar.cs.opencover.reportsPaths="**/TestResults/**/coverage.opencover.xml"
+            /d:sonar.exclusions="**/bin/**,**/obj/**,docs/**" \
+            /d:sonar.coverage.exclusions="Pulse/PulseModSystem.cs,Pulse.Otlp/PulseOtlpModSystem.cs,Pulse/EngineProbe.cs,Pulse/AttributionProbe.cs,Pulse/AttributionMetrics.Server.cs,contrib/**,tools/**" \
+            /d:sonar.cs.opencover.reportsPaths="**/TestResults/**/coverage.opencover.xml" \
+            /d:sonar.qualitygate.wait=true
 
       - name: Build
         run: dotnet build Pulse.slnx -c Release
 
       # Has to run after the build and before the end step, so the reports exist by the time the
       # scanner uploads them. The opencover format comes from coverlet.collector, referenced by
-      # both test projects; the scenarios boot a real server, which is where the ModSystem and
-      # the HTTP path get their coverage.
+      # every test project; the scenarios boot a real server, which is where the HTTP path gets
+      # its coverage (the ModSystems stay excluded above regardless: the loader loads them outside
+      # coverlet's instrumentation, whatever a scenario exercises). Pulse.Otlp.Tests joined this
+      # loop with the OTLP export failure log: before it, nothing ever ran Pulse.Otlp's own unit
+      # tests under coverage, so Sonar saw every line in Pulse.Otlp as uncovered new code
+      # regardless of what the suite actually exercised.
       - name: Tests with coverage
         run: |
           set -e
-          for p in Pulse.Tests Pulse.Scenarios; do
+          for p in Pulse.Tests Pulse.Scenarios Pulse.Otlp.Tests; do
             dotnet test "$p/$p.csproj" -c Release --no-build \
+              --filter "Category!=Cost" \
               --collect:"XPlat Code Coverage;Format=opencover" \
               --results-directory TestResults
           done

@@ -1,7 +1,0 @@
-<!-- Mutation testing only. Stryker runs every test project in the solution it is handed, and the
-     Atlas scenarios boot a real server per mutant, so this pair keeps the mutation run to the
-     mod plus its unit tests. Pulse.slnx is the real solution. -->
-<Solution>
-  <Project Path="Pulse/Pulse.csproj" />
-  <Project Path="Pulse.Tests/Pulse.Tests.csproj" />
-</Solution>

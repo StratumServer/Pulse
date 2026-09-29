@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Text;
 using Atlas.Api;
 using Atlas.XUnit;
@@ -54,6 +53,11 @@ public class OtlpExportScenarios : AtlasScenarioBase, IDisposable
         Assert.Contains("pulse_server_ticks_total", body, StringComparison.Ordinal);
         Assert.Contains("Pulse.Server", body, StringComparison.Ordinal);
 
+        // service.name is a resource attribute, not a metric or scope name, but it travels in the
+        // same length-prefixed UTF-8 encoding inside the same protobuf message, so it is just as
+        // findable in the raw bytes.
+        Assert.Contains("pulse-atlas-test", body, StringComparison.Ordinal);
+
         // The configured header arrived with it: this is how a hosted backend authenticates.
         Assert.Equal("atlas", export.OrgId);
     }
@@ -70,22 +74,6 @@ public class OtlpExportScenarios : AtlasScenarioBase, IDisposable
         Assert.Equal("game:chest-east", World.BlockAt(pos).Code.ToString());
     }
 
-    /// <summary>Pumps the world until the collector has an export in hand.</summary>
-    /// <remarks>The bound is wall clock rather than a tick count, which is why this is not
-    /// <c>World.Until</c>: the exporter waits on a real 5 s timer on its own thread, and it owes
-    /// the game loop nothing. Ticking is how the scenario passes that time without sleeping the
-    /// thread the world runs on.</remarks>
-    private async Task<FakeCollector.Export> WaitForExport()
-    {
-        TimeSpan deadline = ExportInterval * 6;
-        Stopwatch clock = Stopwatch.StartNew();
-        while (collector.First == null && clock.Elapsed < deadline)
-        {
-            await World.Ticks(10);
-        }
-
-        return collector.First
-            ?? throw new InvalidOperationException(
-                $"no export reached the collector on port {CollectorPort} within {deadline.TotalSeconds:0}s");
-    }
+    private Task<FakeCollector.Export> WaitForExport()
+        => Exports.WaitFor(() => collector.First, () => World.Ticks(10), ExportInterval * 6, CollectorPort);
 }

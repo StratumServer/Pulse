@@ -1,0 +1,5 @@
+{
+  "Enabled": true,,
+  "Endpoint": "http://localhost:4318",
+  "Protocol": "http/protobuf"
+}

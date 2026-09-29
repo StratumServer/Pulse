@@ -1,0 +1,43 @@
+# Prometheus and Grafana for Docker Desktop (Windows, macOS, or Docker Desktop for Linux), where
+# host networking either does not reach the host machine at all, or, from Docker Desktop 4.34,
+# is an opt-in this file does not rely on. Run with:
+#   docker compose -f docker-compose.desktop.yml up -d
+#
+# Prometheus reaches the host through host.docker.internal, the address Docker Desktop provides
+# from inside a container, and scrapes Pulse there directly: Pulse's socket server answers
+# whatever Host header a request carries. Use this file when the Pulse-equipped server runs
+# directly on this same Windows or macOS machine, not inside another container of its own (see
+# docs/getting-started.md, "Which path is yours").
+#
+# Both ports are published to 127.0.0.1 only, same reasoning as docker-compose.yml: an
+# unauthenticated Grafana and Prometheus should not be reachable from outside this machine.
+# Grafana runs inside Prometheus's own network namespace (network_mode below), so Grafana's
+# provisioned datasource, which points at http://127.0.0.1:9090, keeps working unchanged.
+#
+# Both services restart automatically, including after this machine reboots, until you run
+# `docker compose -f docker-compose.desktop.yml down` yourself.
+services:
+  prometheus:
+    image: prom/prometheus
+    container_name: pulse-prom
+    ports:
+      - "127.0.0.1:9090:9090"
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - ./:/etc/pulse
+    command: ["--config.file=/etc/pulse/prometheus.desktop.yml"]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana
+    container_name: pulse-graf
+    network_mode: "service:prometheus"
+    depends_on:
+      - prometheus
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Admin"
+      GF_AUTH_DISABLE_LOGIN_FORM: "true"
+    volumes:
+      - ./provisioning:/etc/grafana/provisioning
+    restart: unless-stopped

@@ -4,16 +4,24 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <!-- The opposite of the base mod: this one exists to carry its dependencies. -->
     <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
     <!-- The OTLP exporter and nothing else. It pulls the Microsoft.Extensions.* fan-out with it,
          which is the whole reason this is a separate zip: those dlls load into the same shared
          context as every other mod, so they stay confined to the server that asked for OTLP. -->
-    <PackageReference Include="OpenTelemetry" Version="1.18.0" />
-    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.18.0" />
+    <PackageReference Include="OpenTelemetry" Version="1.19.1" />
+    <PackageReference Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.19.1" />
     <Reference Include="VintagestoryAPI" HintPath="$(VINTAGE_STORY)/VintagestoryAPI.dll" Private="false" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Shared as source, not as a reference: the two mods meet at a meter name and nothing else
+         (see the remarks on PulseOtlpModSystem), so each assembly compiles its own internal copy
+         of the config upgrade rather than one of them depending on the other's dll. -->
+    <Compile Include="../Pulse/ConfigUpgrade.cs" Link="ConfigUpgrade.cs" />
+    <Compile Include="../Pulse/ConfigLoad.cs" Link="ConfigLoad.cs" />
   </ItemGroup>
 
   <ItemGroup>

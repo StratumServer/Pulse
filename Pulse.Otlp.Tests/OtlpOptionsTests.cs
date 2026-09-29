@@ -37,10 +37,24 @@ public class OtlpOptionsTests
     [InlineData("https://otlp.example.com/otlp", "https://otlp.example.com/otlp/v1/metrics")]
     [InlineData("http://localhost:4318/v1/metrics", "http://localhost:4318/v1/metrics")]
     [InlineData("http://localhost:4318/v1/metrics/", "http://localhost:4318/v1/metrics")]
+    // Starts with, but does not end with, the metrics path: distinct from the "already has it"
+    // case above, and the one shape that tells an EndsWith check apart from a StartsWith one.
+    [InlineData("http://localhost:4318/v1/metrics/extra", "http://localhost:4318/v1/metrics/extra/v1/metrics")]
     public void TryResolveEndpoint_Appends_TheMetricsPath_ForHttpProtobuf(string endpoint, string expected)
     {
         Assert.True(OtlpOptions.TryResolveEndpoint(endpoint, OtlpExportProtocol.HttpProtobuf, out Uri? uri));
         Assert.Equal(expected, uri.AbsoluteUri);
+    }
+
+    /// <summary>A backend that authenticates through a signed URL puts its own secret in the query
+    /// string. Appending the signal path to the endpoint as a whole, rather than to its path alone,
+    /// would land "/v1/metrics" after that query instead of before it.</summary>
+    [Fact]
+    public void TryResolveEndpoint_AppendsTheMetricsPath_BeforeAnExistingQueryString()
+    {
+        Assert.True(OtlpOptions.TryResolveEndpoint(
+            "https://host/otlp?key=abc", OtlpExportProtocol.HttpProtobuf, out Uri? uri));
+        Assert.Equal("https://host/otlp/v1/metrics?key=abc", uri.AbsoluteUri);
     }
 
     [Fact]
@@ -65,11 +79,67 @@ public class OtlpOptionsTests
         Assert.Null(uri);
     }
 
+    [Theory]
+    [InlineData("pulse-atlas-test", "pulse-atlas-test")]
+    [InlineData("  my-server  ", "my-server")]
+    public void ResolveServiceName_Keeps_AConfiguredName(string configured, string expected)
+        => Assert.Equal(expected, OtlpOptions.ResolveServiceName(configured));
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ResolveServiceName_Falls_BackToTheDefault_OnBlank(string? configured)
+        => Assert.Equal(OtlpOptions.DefaultServiceName, OtlpOptions.ResolveServiceName(configured));
+
     [Fact]
     public void RenderHeaders_Writes_Nothing_ForNoHeaders()
     {
         Assert.Equal(string.Empty, OtlpOptions.RenderHeaders(null));
         Assert.Equal(string.Empty, OtlpOptions.RenderHeaders(new Dictionary<string, string>()));
+    }
+
+    [Fact]
+    public void LoggableEndpoint_NeverIncludes_UserinfoOrAQueryString()
+    {
+        Uri endpoint = new("https://user:s3cret@host:8443/otlp/path?api_key=alsosecret");
+
+        string loggable = OtlpOptions.LoggableEndpoint(endpoint);
+
+        Assert.DoesNotContain("user", loggable);
+        Assert.DoesNotContain("s3cret", loggable);
+        Assert.DoesNotContain("alsosecret", loggable);
+        Assert.DoesNotContain("api_key", loggable);
+        Assert.StartsWith("https://host:8443/otlp/path", loggable, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void LoggableEndpoint_SaysAQueryStringExists_WithoutIncludingIt()
+    {
+        Assert.Equal(
+            "https://host/otlp",
+            OtlpOptions.LoggableEndpoint(new Uri("https://host/otlp")));
+        Assert.Equal(
+            "https://host/otlp (query string kept, not logged)",
+            OtlpOptions.LoggableEndpoint(new Uri("https://host/otlp?key=abc")));
+    }
+
+    /// <summary>Newtonsoft accepts "Headers": null, and a null value for any one key inside it,
+    /// despite PulseOtlpConfig.Headers's own non-nullable C# type; a null value used to make
+    /// ExportFailureLog.Redact throw at secret.Length, silently losing every failure line for the
+    /// rest of the session.</summary>
+    [Fact]
+    public void SecretValues_IsNullSafe_ForANullHeadersDictionaryOrANullOrEmptyValueWithinIt()
+    {
+        Assert.Empty(OtlpOptions.SecretValues(null));
+
+        Dictionary<string, string> headers = new()
+        {
+            ["x-api-key"] = null!,
+            ["x-empty"] = string.Empty,
+            ["Authorization"] = "Bearer abc",
+        };
+        Assert.Equal(["Bearer abc"], OtlpOptions.SecretValues(headers));
     }
 
     [Fact]
@@ -94,6 +164,18 @@ public class OtlpOptionsTests
         });
 
         Assert.Equal("Authorization=Bearer%20t", rendered);
+    }
+
+    /// <summary>Newtonsoft accepts a null value for any one key inside Headers despite
+    /// PulseOtlpConfig.Headers's own non-nullable C# type (see SecretValues's own null-safety
+    /// test); RenderHeaders defaults that same null to an empty string rather than passing it into
+    /// Uri.EscapeDataString, which throws on a null argument.</summary>
+    [Fact]
+    public void RenderHeaders_Defaults_ANullValue_ToAnEmptyString()
+    {
+        string rendered = OtlpOptions.RenderHeaders(new Dictionary<string, string> { ["x-api-key"] = null! });
+
+        Assert.Equal("x-api-key=", rendered);
     }
 
     /// <summary>The characters that need care, each with the reason it needs it.</summary>
@@ -127,6 +209,134 @@ public class OtlpOptionsTests
         Dictionary<string, string> parsed = ParseTheWayTheExporterDoes(OtlpOptions.RenderHeaders(headers));
 
         Assert.Equal(headers, parsed);
+    }
+
+    /// <summary>The exact shape Newtonsoft produces for a Headers value typed as
+    /// OTEL_EXPORTER_OTLP_HEADERS's "k=v,k2=v2" string instead of the config's own JSON object: the
+    /// offending value, a real bearer token here, travels inside the message in double quotes.</summary>
+    [Fact]
+    public void RedactQuotedValues_Blanks_ADoubleQuotedValue_ButKeepsThePathLineAndPosition()
+    {
+        const string message =
+            "Error converting value \"Authorization=Bearer abc123\" to type "
+            + "'System.Collections.Generic.Dictionary`2[System.String,System.String]'. "
+            + "Path 'Headers', line 4, position 42.";
+
+        string redacted = OtlpOptions.RedactQuotedValues(message);
+
+        Assert.DoesNotContain("abc123", redacted);
+        Assert.Contains("<redacted>", redacted);
+        Assert.Contains("Path 'Headers', line 4, position 42.", redacted);
+    }
+
+    [Fact]
+    public void RedactQuotedValues_Leaves_AMessageWithNoDoubleQuotedValue_Unchanged()
+    {
+        const string message = "Invalid property identifier character: ,. Path 'Enabled', line 2, position 18.";
+
+        Assert.Equal(message, OtlpOptions.RedactQuotedValues(message));
+    }
+
+    [Fact]
+    public void TryValidateHeaders_Accepts_NullOrOrdinaryHeaders()
+    {
+        Assert.True(OtlpOptions.TryValidateHeaders(null, out string? offending));
+        Assert.Null(offending);
+
+        Assert.True(OtlpOptions.TryValidateHeaders(
+            new Dictionary<string, string> { ["Authorization"] = "Bearer abc", ["x-scope-orgid"] = "t1" },
+            out offending));
+        Assert.Null(offending);
+    }
+
+    /// <summary>The shape RenderHeaders's own remarks describe: a comma cannot survive the
+    /// exporter's unescape-then-split round trip, whatever this mod does to encode it going in, so
+    /// it has to be refused before it ever reaches the exporter rather than silently corrupting
+    /// whatever header follows it.</summary>
+    [Fact]
+    public void TryValidateHeaders_Rejects_ACommaInAValue_AndNamesTheHeaderNotTheValue()
+    {
+        Dictionary<string, string> headers = new() { ["Authorization"] = "Bearer a,b" };
+
+        Assert.False(OtlpOptions.TryValidateHeaders(headers, out string? offending));
+
+        Assert.Equal("Authorization", offending);
+    }
+
+    /// <summary>Two config keys that differ only by whitespace both render to the same trimmed
+    /// name; the exporter's own header parser then rejects the second as a duplicate key with no
+    /// mention of which config entry caused it. This catches it first, by name.</summary>
+    [Fact]
+    public void TryValidateHeaders_Rejects_TwoNamesEqualAfterTrimming()
+    {
+        Dictionary<string, string> headers = new() { ["Authorization"] = "Bearer abc" };
+        headers[" Authorization "] = "Bearer def";
+
+        Assert.False(OtlpOptions.TryValidateHeaders(headers, out string? offending));
+
+        Assert.Equal("Authorization", offending);
+    }
+
+    [Fact]
+    public void TryValidateHeaders_Skips_AnEntryWithNoName()
+    {
+        Dictionary<string, string> headers = new() { ["  "] = "orphan", ["Authorization"] = "Bearer abc" };
+
+        Assert.True(OtlpOptions.TryValidateHeaders(headers, out string? offending));
+        Assert.Null(offending);
+    }
+
+    [Fact]
+    public void EndpointSecrets_Returns_TheUserinfoAndEveryQueryValue()
+    {
+        Uri endpoint = new("https://user1234:p4ssw0rd12@host/otlp?token=verysecrettoken&other=xyz");
+
+        Assert.Equal(
+            ["user1234", "p4ssw0rd12", "verysecrettoken", "xyz"],
+            OtlpOptions.EndpointSecrets(endpoint).ToArray());
+    }
+
+    [Fact]
+    public void EndpointSecrets_HandlesAUserOnlyUserinfo_WithNoPassword()
+        => Assert.Equal(["justauser"], OtlpOptions.EndpointSecrets(new Uri("https://justauser@host/otlp")));
+
+    [Fact]
+    public void EndpointSecrets_IsEmpty_ForAPlainEndpointWithNoUserinfoOrQuery()
+        => Assert.Empty(OtlpOptions.EndpointSecrets(new Uri("http://localhost:4318/v1/metrics")));
+
+    /// <summary>The escaped form is what a raw request target on the wire, and so any echo of it,
+    /// actually carries: a real signed URL is base64 and always has '+', '/' or '=' escaped as
+    /// %2B, %2F or %3D. Yielding only Uri.UnescapeDataString's output, as this used to, leaves the
+    /// form that actually appears on the wire unmatched.</summary>
+    [Fact]
+    public void EndpointSecrets_Returns_BothTheEscapedAndUnescapedFormOfAQueryValue()
+    {
+        Uri endpoint = new("https://host/otlp?sig=q8Wf3kL2%2BxYzAbCdEfGh%3D");
+
+        Assert.Equal(
+            ["q8Wf3kL2%2BxYzAbCdEfGh%3D", "q8Wf3kL2+xYzAbCdEfGh="],
+            OtlpOptions.EndpointSecrets(endpoint).ToArray());
+    }
+
+    [Fact]
+    public void EndpointSecrets_Returns_BothFormsOfAnEscapedUserinfoPassword()
+    {
+        Uri endpoint = new("https://reporter:p%40ssw0rd12@host/otlp");
+
+        Assert.Equal(
+            ["reporter", "p%40ssw0rd12", "p@ssw0rd12"],
+            OtlpOptions.EndpointSecrets(endpoint).ToArray());
+    }
+
+    /// <summary>A value-less query parameter ("?BareKeySecret777", no '=') carries the secret in
+    /// its own name: there is no value to hold it, but the key is still exactly what a
+    /// signed-URL-style backend might echo back.</summary>
+    [Fact]
+    public void EndpointSecrets_Returns_AValueLessQueryParametersOwnName()
+    {
+        Uri endpoint = new("https://host/otlp?BareKeySecret777");
+
+        Assert.Equal(["BareKeySecret777"], OtlpOptions.EndpointSecrets(endpoint).ToArray());
     }
 
     /// <summary>OpenTelemetry.Exporter.OtlpExporterOptionsExtensions.GetHeaders, 1.18.0, reproduced

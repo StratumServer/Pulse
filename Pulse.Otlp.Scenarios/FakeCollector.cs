@@ -1,4 +1,5 @@
 using System.Net;
+using System.Text;
 
 namespace Pulse.Otlp.Scenarios;
 
@@ -7,13 +8,17 @@ namespace Pulse.Otlp.Scenarios;
 internal sealed class FakeCollector : IDisposable
 {
     private readonly HttpListener listener = new();
+    private readonly HttpStatusCode statusCode;
+    private readonly string? responseBody;
 
     /// <summary>The first export received, or null while none has arrived. Written by the listener
     /// thread and read by the scenario, hence the volatile: the record itself is immutable.</summary>
     private volatile Export? first;
 
-    public FakeCollector(int port)
+    public FakeCollector(int port, HttpStatusCode statusCode = HttpStatusCode.OK, string? responseBody = null)
     {
+        this.statusCode = statusCode;
+        this.responseBody = responseBody;
         listener.Prefixes.Add($"http://127.0.0.1:{port}/");
         listener.Start();
         Task.Run(Accept);
@@ -53,9 +58,22 @@ internal sealed class FakeCollector : IDisposable
                 body.ToArray());
 
             // A real collector answers 200 with an empty ExportMetricsServiceResponse, which on the
-            // wire is a protobuf message with no fields set, which is zero bytes.
-            context.Response.StatusCode = 200;
-            context.Response.ContentType = "application/x-protobuf";
+            // wire is a protobuf message with no fields set, which is zero bytes. A rejecting
+            // collector without an explicit body gets none either: most scenarios configuring one
+            // only need the status code itself to reach the exporter.
+            context.Response.StatusCode = (int)statusCode;
+            if (responseBody is { Length: > 0 } text)
+            {
+                byte[] bytes = Encoding.UTF8.GetBytes(text);
+                context.Response.ContentType = "application/json";
+                context.Response.ContentLength64 = bytes.Length;
+                context.Response.OutputStream.Write(bytes, 0, bytes.Length);
+            }
+            else
+            {
+                context.Response.ContentType = "application/x-protobuf";
+            }
+
             context.Response.Close();
         }
     }

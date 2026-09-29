@@ -66,6 +66,54 @@ public class MetricsAggregatorTests
         Assert.Equal(7, sample.Value);
     }
 
+    /// <summary>What lets a family like a per-mod share retire a tag set once its owner stops
+    /// reporting it, instead of serving that tag set forever at whatever it last measured.</summary>
+    [Fact]
+    public void ObservableGauge_Retires_ATagSet_ItsCallbackStopsReporting()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        bool includeMod = true;
+        meter.CreateObservableGauge("g_share", () =>
+        {
+            List<Measurement<double>> shares = [new(1.0, new KeyValuePair<string, object?>("modid", "engine"))];
+            if (includeMod)
+            {
+                shares.Add(new(0.5, new KeyValuePair<string, object?>("modid", "mymod")));
+            }
+
+            return shares;
+        });
+
+        IReadOnlyList<MetricSample> withMod = aggregator.Collect();
+        Assert.Contains(withMod, s => s.Name == "g_share" && s.Labels.Any(l => l.Value == "mymod"));
+
+        includeMod = false;
+        IReadOnlyList<MetricSample> withoutMod = aggregator.Collect();
+        Assert.DoesNotContain(withoutMod, s => s.Name == "g_share" && s.Labels.Any(l => l.Value == "mymod"));
+        Assert.Contains(withoutMod, s => s.Name == "g_share" && s.Labels.Any(l => l.Value == "engine"));
+    }
+
+    /// <summary>The exemption the retiring behaviour above needs: a synchronous instrument is only
+    /// ever touched when the application explicitly records one, not every scrape, so a series it
+    /// is not scraping-blind to must keep reading its last value rather than vanish between calls.</summary>
+    [Fact]
+    public void Counter_Keeps_ItsSeries_BetweenScrapesEvenWithoutBeingRecordedAgain()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        Counter<long> counter = meter.CreateCounter<long>("c_total", "{tick}", "C.");
+
+        counter.Add(3);
+        aggregator.Collect();
+        aggregator.Collect();
+        aggregator.Collect();
+
+        Assert.Equal(3, Sample(aggregator.Collect(), "c_total").Value);
+    }
+
     [Fact]
     public void Histogram_Places_ValuesInTheFirstBucketThatCoversThem()
     {
@@ -135,6 +183,10 @@ public class MetricsAggregatorTests
         MetricSample sample = Sample(aggregator.Collect(), "h_seconds");
         Assert.Equal(0.53, sample.Sum, 10);
         Assert.Equal(3, sample.Count);
+
+        // Value is the synchronous-counter/gauge field; a histogram must never fall through into
+        // updating it too.
+        Assert.Equal(0, sample.Value);
     }
 
     [Fact]
@@ -178,8 +230,10 @@ public class MetricsAggregatorTests
         Histogram<double> histogram = CreateHistogram(meter);
         const int records = 20_000;
 
+        using ManualResetEventSlim recording = new();
         Thread recorder = new(() =>
         {
+            recording.Set();
             for (int i = 0; i < records; i++)
             {
                 counter.Add(1);
@@ -187,9 +241,14 @@ public class MetricsAggregatorTests
             }
         });
 
+        // The start signal lines the scraper up with the recorder's first measurements, but how
+        // many scrapes land inside the recording window is still the scheduler's call, so there is
+        // no assertion on the count: the recorder can finish inside the very first Collect. What
+        // every scrape must guarantee, concurrent or not, is a histogram whose count matches its
+        // buckets.
         recorder.Start();
-        int scrapes = 0;
-        while (recorder.IsAlive)
+        recording.Wait();
+        do
         {
             // A series exists from its first measurement, so the opening scrapes can beat the
             // recorder to it. Every scrape that does see the histogram must see it consistent.
@@ -200,11 +259,10 @@ public class MetricsAggregatorTests
             }
 
             Assert.Equal(h.Count, h.Buckets.Sum());
-            scrapes++;
         }
+        while (recorder.IsAlive);
 
         recorder.Join();
-        Assert.True(scrapes > 0, "the scraping loop never ran");
         Assert.Equal(records, Sample(aggregator.Collect(), "c_total").Value);
         Assert.Equal(records, Sample(aggregator.Collect(), "h_seconds").Count);
     }
@@ -299,11 +357,65 @@ public class MetricsAggregatorTests
         string text = PrometheusText.Render(aggregator.Collect());
 
         // The built-in net10 meter, mapped: dotted names, an ObservableCounter that is a counter
-        // with a _total suffix, an ObservableUpDownCounter that is a gauge, and real tags.
+        // with a _total suffix, an ObservableUpDownCounter that is a gauge, real tags, and the
+        // unit-driven translation for the two families the OTLP path spells differently.
         Assert.Contains("# TYPE dotnet_gc_collections_total counter\n", text);
         Assert.Contains("dotnet_gc_collections_total{gc_heap_generation=\"gen0\"} ", text);
-        Assert.Contains("# TYPE dotnet_process_memory_working_set gauge\n", text);
-        Assert.Contains("dotnet_process_cpu_time_total{cpu_mode=\"user\"} ", text);
+        Assert.Contains("# TYPE dotnet_process_memory_working_set_bytes gauge\n", text);
+        Assert.Contains("dotnet_process_cpu_time_seconds_total{cpu_mode=\"user\"} ", text);
+    }
+
+    [Fact]
+    public void Series_Defaults_MissingHelpAndUnit_ToEmptyStrings()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        // No unit, no description: both are optional on every Create* overload.
+        Counter<long> counter = meter.CreateCounter<long>("bare_total");
+
+        counter.Add(1);
+
+        MetricSample sample = Sample(aggregator.Collect(), "bare_total");
+        Assert.Equal(string.Empty, sample.Help);
+        Assert.Equal(string.Empty, sample.Unit);
+    }
+
+    /// <summary>Newtonsoft can hand a log-derived tag a null value (an exception with no message,
+    /// say); the label still has to render as something a Prometheus parser accepts, not throw or
+    /// silently print the literal word "null".</summary>
+    [Fact]
+    public void ATagValueOfNull_Renders_AsAnEmptyLabelValue_NotTheWordNull()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        Counter<long> counter = meter.CreateCounter<long>("c_total", "{x}", "C.");
+
+        counter.Add(1, new KeyValuePair<string, object?>("reason", null));
+
+        MetricSample sample = Sample(aggregator.Collect(), "c_total");
+        Assert.Equal("", sample.Labels.Single(l => l.Key == "reason").Value);
+    }
+
+    /// <summary>Find() matches a series by instrument reference and label set together; a length
+    /// mismatch alone has to be enough to rule two label sets out, or the same counter called once
+    /// untagged and once with a tag could be folded into a single, wrongly-labelled series.</summary>
+    [Fact]
+    public void Counter_KeepsSeriesSeparate_ForTheSameInstrument_AtDifferentTagCounts()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        Counter<long> counter = meter.CreateCounter<long>("c_total", "{x}", "C.");
+
+        counter.Add(1);
+        counter.Add(2, new KeyValuePair<string, object?>("k", "v"));
+
+        IReadOnlyList<MetricSample> samples = aggregator.Collect();
+        Assert.Equal(2, samples.Count);
+        Assert.Equal(1, samples.Single(s => s.Labels.Length == 0).Value);
+        Assert.Equal(2, samples.Single(s => s.Labels.Length == 1).Value);
     }
 
     /// <summary>An instrument that is none of the seven shapes the aggregator knows.</summary>
@@ -314,5 +426,34 @@ public class MetricsAggregatorTests
         {
             Publish();
         }
+    }
+
+    /// <summary>The same kind of unsupported shape as <see cref="UnknownShape"/>, but able to
+    /// actually emit a measurement (through the protected RecordMeasurement Instrument{T} itself
+    /// exposes), which a shape with no public Add or Record method never could. Needed to prove
+    /// InstrumentPublished's own guard is what keeps an unsupported instrument's measurements out,
+    /// not the accident of it having no way to measure anything in the first place.</summary>
+    private sealed class UnknownMeasurableShape : Instrument<double>
+    {
+        public UnknownMeasurableShape(Meter meter)
+            : base(meter, "odd_measurable_thing", null, "Odd.")
+        {
+            Publish();
+        }
+
+        public void Emit(double value) => RecordMeasurement(value);
+    }
+
+    [Fact]
+    public void Aggregator_NeverRecords_AMeasurement_FromAnInstrumentShapeItCannotRender()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        UnknownMeasurableShape instrument = new(meter);
+
+        instrument.Emit(5.0);
+
+        Assert.Empty(aggregator.Collect());
     }
 }

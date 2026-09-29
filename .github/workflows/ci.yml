@@ -6,6 +6,20 @@ on:
   pull_request:
     branches: [main, dev]
 
+# Least privilege: nothing here writes to the repository. The job reads the checkout, restores
+# the cached server and uploads the mod zips, none of which needs more than this.
+permissions:
+  contents: read
+
+# A pull request's own commits share a group and cancel each other's stale run, which is the
+# point: only the newest commit's result matters there. A push does not share its group with
+# anything, keyed on the run id rather than the ref, because GitHub keeps only one queued run
+# per group regardless of cancel-in-progress; sharing the ref the way the pull request side does
+# would still let a third rapid push evict the second one's result before it ever runs.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   VS_VERSION: "1.22.7"
 
@@ -13,7 +27,11 @@ jobs:
   build-and-test:
     name: Build & tests
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 15, then 20, were enough until tools/mutation-check.sh and the unit suites kept growing
+    # across several branches landing around the same time: a run timed out at 15m15s, then
+    # another at 20m4s, both with nothing actually wrong, just out of budget. 30 gives real
+    # headroom instead of chasing the same timeout a third time.
+    timeout-minutes: 30
 
     steps:
       - uses: actions/checkout@v7
@@ -72,6 +90,7 @@ jobs:
       - name: Atlas scenarios
         run: |
           dotnet test Pulse.Scenarios/Pulse.Scenarios.csproj -c Release --no-build \
+            --filter "Category!=Cost" \
             --logger "trx;LogFileName=scenarios.trx" \
             --results-directory TestResults
           dotnet test Pulse.Otlp.Scenarios/Pulse.Otlp.Scenarios.csproj -c Release --no-build \
@@ -85,8 +104,92 @@ jobs:
           unzip -l artifacts/pulse_*.zip
           unzip -l artifacts/pulseotlp_*.zip
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: pulse-mod-zips
           path: artifacts/*.zip
           if-no-files-found: error
+
+  windows-unit-tests:
+    name: Unit tests (Windows)
+    runs-on: windows-latest
+    # GitHub's Windows runners execute every step as an administrator. That is exactly the
+    # privilege MetricsHttpServer's release notes say a server no longer needs on Windows, so a
+    # green run here proves the socket server works on Windows, not that it works without admin
+    # rights: nothing here drops privileges to check that second, stronger claim, which needs a
+    # non-administrator account this runner cannot provide.
+    #
+    # Only the two unit suites run here (Pulse.Tests, Pulse.Otlp.Tests): they drive
+    # MetricsHttpServer and the OTLP config translation directly, in process, with no server
+    # boot. Pulse.Scenarios and Pulse.Otlp.Scenarios boot a real headless Vintage Story server
+    # built for Linux and stay out of scope for a Windows job.
+    #
+    # Every run step below asks for bash explicitly. It ships with the runner's Git tools, so the
+    # download and extraction steps can reuse the Linux job's script almost verbatim, and it
+    # keeps the same fail-fast behaviour that script already relies on: pwsh, the Windows
+    # default, does not stop a multi-line script when a non-final command fails, so a build
+    # step's second command overwriting the first one's failure with its own success would
+    # otherwise leave a red suite reported as a green step.
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Cache Vintage Story server
+        id: cache-vs
+        uses: actions/cache@v6
+        with:
+          path: ~/vs
+          key: vs-server-windows-${{ env.VS_VERSION }}
+
+      # Reuses the same linux-x64 archive as the Linux job instead of the CDN's separate
+      # vs_server_win-x64 zip (confirmed to exist alongside it): VintagestoryAPI.dll and
+      # VintagestoryLib.dll are plain managed assemblies, identical whichever OS archive they
+      # ship in, and this job never runs the server itself, only resolves $VINTAGE_STORY so the
+      # two test projects can reference the dll. One archive to track instead of two, and both CI
+      # jobs then build against the exact same bits rather than two copies that could drift.
+      - name: Download Vintage Story server
+        if: steps.cache-vs.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          set -e
+          curl -sSL --proto '=https' --proto-redir '=https' -o vs_server.tar.gz "https://cdn.vintagestory.at/gamefiles/stable/vs_server_linux-x64_${VS_VERSION}.tar.gz"
+          mkdir -p "$HOME/vs"
+          tar -xzf vs_server.tar.gz -C "$HOME/vs"
+
+      # Same resolution as the Linux job, plus one step Linux does not need: cygpath -w turns Git
+      # Bash's own POSIX-style path (what find and dirname hand back here) into the native
+      # Windows path form, since that is the literal string MSBuild substitutes into
+      # $(VINTAGE_STORY) for the HintPath in a later, non-bash step.
+      - name: Export VINTAGE_STORY
+        shell: bash
+        run: |
+          set -e
+          DLL_DIR="$(dirname "$(find "$HOME/vs" -name VintagestoryAPI.dll | head -1)")"
+          WIN_DLL_DIR="$(cygpath -w "$DLL_DIR")"
+          echo "VINTAGE_STORY=$WIN_DLL_DIR" >> "$GITHUB_ENV"
+          echo "Resolved VINTAGE_STORY=$WIN_DLL_DIR"
+
+      # Builds only the two test projects, not the whole solution: dotnet build follows each
+      # project's own references (Pulse.csproj and Pulse.Otlp.csproj respectively), which is
+      # everything either suite needs, without also building the Linux-only scenario projects.
+      - name: Build
+        shell: bash
+        run: |
+          dotnet build Pulse.Tests/Pulse.Tests.csproj -c Release
+          dotnet build Pulse.Otlp.Tests/Pulse.Otlp.Tests.csproj -c Release
+
+      - name: Unit tests
+        shell: bash
+        run: |
+          dotnet test Pulse.Tests/Pulse.Tests.csproj -c Release --no-build \
+            --logger "trx;LogFileName=unit-tests.trx" \
+            --results-directory TestResults
+          dotnet test Pulse.Otlp.Tests/Pulse.Otlp.Tests.csproj -c Release --no-build \
+            --logger "trx;LogFileName=otlp-unit-tests.trx" \
+            --results-directory TestResults

@@ -19,6 +19,27 @@ public sealed class PulseConfig
     /// <summary>Seconds between two reads of the loaded-chunk count. Deliberately slow, and slower
     /// than any sane scrape interval: the engine exposes no cheap count, so the read clones the
     /// whole loaded-chunk dictionary under the chunk lock. The gauge reads 0 until the first
-    /// refresh.</summary>
+    /// refresh. Clamped to at most a day.</summary>
     public int ChunksRefreshSeconds { get; set; } = 30;
+
+    /// <summary>Per-mod tick attribution. Off by default, and duty-cycled when on.</summary>
+    public AttributionConfig Attribution { get; set; } = new();
+}
+
+/// <summary>The <c>Attribution</c> block of ModConfig/pulse.json.</summary>
+/// <remarks>Off by default on purpose. Attribution runs the engine's own frame profiler, which
+/// stamps a mark after every listener and every main-thread entity behavior, and that costs
+/// close to a quarter of the tick budget for as long as it runs, measured on a 4000-entity
+/// server; the cost scales with loaded entities, not with this number. The duty cycle is what
+/// makes it affordable: a short burst, then nothing until the next interval.</remarks>
+public sealed class AttributionConfig
+{
+    public bool Enabled { get; set; }
+
+    /// <summary>Consecutive ticks profiled per burst. Tick composition is stable over seconds, so
+    /// a short burst describes the interval around it perfectly well.</summary>
+    public int BurstTicks { get; set; } = 10;
+
+    /// <summary>Seconds between the end of one burst and the start of the next.</summary>
+    public int IntervalSeconds { get; set; } = 10;
 }
