@@ -20,6 +20,13 @@ page column of stacked tiles has to stick to one variant for its whole
 height (enforced in docs/moddb/listing.html, not here). Seeded RNG only ->
 byte-identical output per variant.
 
+Each variant is written as STACK copies of its tile stacked vertically
+(400x1600), which the seamless vertical property makes identical on screen
+to STACK separate 400x400 tiles. That is purely to cut the number of <img>
+tags on the page: ModDB stores a mod description in a TEXT column and
+refuses anything over 65535 bytes, and 16 rows of 13 single tiles alone
+took about 46 KB of markup.
+
 Run: python3 generate_gutter.py
 """
 import os
@@ -37,13 +44,14 @@ COLS = W // CELL     # 10, exact -> no partial column at the horizontal seam
 ROWS = H // ROW_H    # 10, exact -> tile's own height is a whole number of rows
 N_FRAMES = ROWS       # temporal cycle == spatial cycle: one loop == one tile
 FPS = 8
+STACK = 4             # tiles per written image, stacked vertically
 
 # (output filename, seed). Variant A keeps the original seed so its file
 # stays byte-identical to the pre-variants tile.
 VARIANTS = [
-    ("pulse-gutter.webp", 42),
-    ("pulse-gutter-b.webp", 43),
-    ("pulse-gutter-c.webp", 44),
+    ("pulse-gutter-tall.webp", 42),
+    ("pulse-gutter-tall-b.webp", 43),
+    ("pulse-gutter-tall-c.webp", 44),
 ]
 
 DIM_RAIN = (13, 130, 52, 255)
@@ -124,6 +132,14 @@ def mixed_grid_preview(variant_frames):
     return preview
 
 
+def stacked(frame):
+    """STACK copies of one frame, top to bottom."""
+    tall = Image.new("RGBA", (W, H * STACK), (0, 0, 0, 0))
+    for k in range(STACK):
+        tall.alpha_composite(frame, (0, H * k))
+    return tall
+
+
 def main():
     variant_frames = {}
     for name, seed in VARIANTS:
@@ -133,13 +149,14 @@ def main():
         variant_frames[name] = frames
 
         webp_path = f"{OUT_DIR}/{name}"
-        frames[0].save(
-            webp_path, save_all=True, append_images=frames[1:], loop=0,
+        tall = [stacked(frame) for frame in frames]
+        tall[0].save(
+            webp_path, save_all=True, append_images=tall[1:], loop=0,
             duration=round(1000 / FPS), format="WEBP", lossless=False, quality=50,
             method=6, minimize_size=True,
         )
         size = os.path.getsize(webp_path)
-        assert size <= 100 * 1024, f"{name}: over the 100 KB gutter budget: {size} bytes"
+        assert size <= STACK * 100 * 1024, f"{name}: over the {STACK * 100} KB gutter budget: {size} bytes"
         print(f"{name}: {size} bytes ({size / 1024:.1f} KB)")
 
     # 3x2 preview grid mixing all variants, on a near-black page background,
@@ -148,7 +165,7 @@ def main():
     preview = mixed_grid_preview(variant_frames)
     preview.save(f"{OUT_DIR}/gutter-preview-mixed-3x2.png")
 
-    print(f"frames={N_FRAMES} fps={FPS} size={W}x{H} cell={CELL} rows={ROWS} cols={COLS}")
+    print(f"frames={N_FRAMES} fps={FPS} size={W}x{H} stacked x{STACK} cell={CELL} rows={ROWS} cols={COLS}")
     print("selfcheck OK for all variants: deterministic, vertical seam exercised, "
           f"{COLS}x{CELL}={COLS * CELL} == W={W}")
 
