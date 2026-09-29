@@ -17,10 +17,22 @@ name: sonar
 #
 # Automatic Analysis is disabled on the SonarCloud side: C# has to be analysed while it compiles,
 # which is what the begin/build/end sequence below does.
+#
+# SonarCloud's free plan only accepts analysis for the SonarCloud project's main branch, which
+# is set to dev, not this repository's release branch main. A push straight
+# to main (the push that landed #97 on 74005f6) fails outright, and every pull request targeting
+# main fails at the quality gate with "Not authorized or project not found" (the API's own
+# message is "Organization is not allowed to access data from PR targeting non main branches").
+# So this workflow never runs against main: main is out of the push trigger below, and the job
+# skips itself when a pull request's base is main. A promotion pull request into main carries
+# code already analysed on dev, so nothing goes unanalysed.
+#
+# It also skips itself on a docs-only change (docs/**, any *.md, LICENSE): the "changes" job
+# below decides that from a plain git diff, the same way ci.yml does.
 
 on:
   push:
-    branches: [main, dev]
+    branches: [dev]
   pull_request:
 
 # Least privilege: nothing here writes to the repository. The job only reads the checkout and
@@ -40,17 +52,75 @@ env:
   VS_VERSION: "1.22.7"
 
 jobs:
+  # Same job as ci.yml's: classifies the push or pull request as docs-only or code from a plain
+  # git diff, so the sonar job below can skip itself on a docs-only change.
+  changes:
+    name: Detect docs-only changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Classify the changed files
+        id: classify
+        run: |
+          set -e
+          BASE=""
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            BASE="${{ github.event.before }}"
+          fi
+
+          docs_only=false
+          if [ -n "$BASE" ] \
+            && [ "$BASE" != "0000000000000000000000000000000000000000" ] \
+            && git cat-file -e "$BASE" 2>/dev/null; then
+            # --no-renames: see ci.yml's identical classify step for why this matters.
+            files="$(git diff --no-renames --name-only "$BASE" "${{ github.sha }}")"
+            docs_only=true
+            while IFS= read -r f; do
+              [ -z "$f" ] && continue
+              case "$f" in
+                docs/*|*.md|LICENSE) ;;
+                *) docs_only=false ;;
+              esac
+            done <<< "$files"
+          else
+            files="<diff not computable, treated as code>"
+          fi
+
+          echo "Changed files:"
+          echo "$files"
+          echo "docs_only=$docs_only"
+          echo "docs_only=$docs_only" >> "$GITHUB_OUTPUT"
+
   sonar:
     name: SonarCloud analysis
+    needs: changes
     # Two cases where SONAR_TOKEN is not there to be had, and the scanner cannot authenticate
     # without it: a fork pull request runs without repository secrets, and a Dependabot pull
     # request gets the separate Dependabot secret store instead, even though the branch lives in
     # this repository. Both tests apply to pull_request only; a push is always from this
-    # repository with the repository's own secrets.
+    # repository with the repository's own secrets. github.base_ref is only set for pull_request
+    # events, and rules out a pull request targeting main for the reason at the top of this file;
+    # the push trigger above already leaves main out for the same reason. !cancelled(): this job
+    # is not a required check, but the same reasoning as ci.yml's build-and-test still applies, a
+    # failed changes job should fall back to running analysis rather than silently skip it, while
+    # still letting a cancelled run stop this job. GitHub's expressions documentation notes that
+    # always() returns true even when the run was canceled, and recommends !cancelled() instead.
     if: >-
-      github.event_name != 'pull_request'
-      || (github.actor != 'dependabot[bot]'
-      && github.event.pull_request.head.repo.full_name == github.repository)
+      !cancelled()
+      && needs.changes.outputs.docs_only != 'true'
+      && (github.event_name != 'pull_request'
+      || (github.base_ref != 'main'
+      && github.actor != 'dependabot[bot]'
+      && github.event.pull_request.head.repo.full_name == github.repository))
     runs-on: ubuntu-latest
     timeout-minutes: 25
 
