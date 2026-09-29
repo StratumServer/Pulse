@@ -55,7 +55,7 @@ groups:
       # pulse_server_tick_budget_seconds, so it stays correct if an operator retunes the tick rate
       # with /serverconfig, where a hardcoded 50ms cutoff would quietly go stale. It also doesn't
       # depend on 0.05 staying a bucket boundary in Pulse/PulseModSystem.cs's TickBuckets array.
-      # The tradeoff is bucket-interpolation error from only eight finite buckets, which is fine
+      # The tradeoff is bucket-interpolation error from only ten finite buckets, which is fine
       # at warning granularity -- this is "is the tail bad", not a latency SLO.
       - alert: PulseTickOverrunsHigh
         expr: histogram_quantile(0.99, rate(pulse_server_tick_seconds_bucket[5m])) > 3 * pulse_server_tick_budget_seconds
