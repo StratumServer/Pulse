@@ -33,9 +33,10 @@ const TROUBLE_ENTRIES = ['`docker compose up -d` succeeds', "Pulse's own port, 9
 const PLACEHOLDERS = ['user@your-server', 'https://otlp-gateway-<region>.grafana.net/otlp', '<everything after Authorization= from step 1>'];
 const CALLOUTS = ['Both Grafana and Prometheus are set to listen on `127.0.0.1` only', '`pulse-otlp.json` now holds a credential in plain text.'];
 // where a command runs, by its first words (an sh fence): [pattern, label, how many fences must match]. Path A runs on one
-// machine, the one that runs the game server: the clone says so, and the compose commands say "that same machine".
-const WHERE = [[/^curl /, 'run on the game server', 1], [/^git clone /, 'run on the machine that runs the game server', 1], [/^ssh -L /, 'run on your own computer', 1],
-  [/^docker compose /, 'run on that same machine, in the contrib/grafana folder', 4]];
+// machine, the one that runs the game server. The compose commands sit on both sides of the ssh tunnel, which is opened from the
+// reader's own computer, so the clone and the compose commands each name the server's machine, in the same words.
+const WHERE = [[/^curl /, 'run on the game server', 1], [/^git clone /, "run on the game server's machine", 1], [/^ssh -L /, 'run on your own computer', 1],
+  [/^docker compose /, "run on the game server's machine, in the contrib/grafana folder", 4]];
 const SEE_DASHBOARD = ['linux-2', 'desktop-2', 'import-4'];   // the steps that end on the dashboard get its picture
 // "What next": four links, each with a sentence quoted from a document. The build checks that the words are still there
 // (without the final full stop, white space collapsed) and the page closes them with one.

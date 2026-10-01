@@ -90,8 +90,8 @@ test('"Not working?": the nine rows, step to troubleshooting entries, in this or
 
 test('where a command runs, in the bar of the code block, whole', () => {
   const blocks = [...html.matchAll(/<span class="code__label">sh<\/span>(?:<span class="code__where">([^<]+)<\/span>)?<\/div><pre><code>([^\n<]*)/g)].map((m) => [m[2], m[1]]);
-  const expected = (first) => (/^curl /.test(first) ? 'run on the game server' : /^git clone /.test(first) ? 'run on the machine that runs the game server' : /^ssh -L /.test(first) ? 'run on your own computer'
-    : /^docker compose /.test(first) ? 'run on that same machine, in the contrib/grafana folder' : undefined);
+  const expected = (first) => (/^curl /.test(first) ? 'run on the game server' : /^git clone /.test(first) ? "run on the game server's machine" : /^ssh -L /.test(first) ? 'run on your own computer'
+    : /^docker compose /.test(first) ? "run on the game server's machine, in the contrib/grafana folder" : undefined);
   assert.equal(blocks.length, 7, 'seven sh fences');
   for (const [first, where] of blocks) assert.equal(where, expected(first), first);
   assert.equal(count(/class="code__where"/g), 7, 'every one of them says where it runs');
