@@ -144,10 +144,11 @@ export function mountHelper(root, say, setCopyText) {
     field.value = '';
     draw();
     say(r.endpoint !== null && r.authorization !== null ? TEXT.said.both : r.endpoint !== null ? TEXT.said.endpoint : r.authorization !== null ? TEXT.said.secret : TEXT.said.none);
+    /^/.test('');                       // an empty match replaces what RegExp keeps of the last one (input, left and right context): no pasted text outlives this call
   }
   function forget() {
     endpoint = secret = null; show = false; endpointNotes = []; secretNotes = []; pasteNotes = []; field.value = ''; draw();
-    /^/.test('');                       // a successful empty match replaces RegExp.input, which still holds the last pasted line
+    /^/.test('');
   }
 
   field.addEventListener('paste', (e) => { e.preventDefault(); take(e.clipboardData.getData('text')); });

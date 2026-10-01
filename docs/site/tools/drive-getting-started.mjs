@@ -112,6 +112,8 @@ const click = (sel) => `document.querySelector(${JSON.stringify(sel)}).click()`;
 const INSTALL = ['install-1', 'install-2', 'install-3', 'install-4', 'install-5'];
 const BLOCK = 'export OTEL_EXPORTER_OTLP_PROTOCOL="http/protobuf"\nexport OTEL_EXPORTER_OTLP_ENDPOINT="https://otlp-gateway-prod-eu-west-2.grafana.net/otlp"\nexport OTEL_EXPORTER_OTLP_HEADERS="Authorization=Basic%20MTIzNDU2OmdsY19leGFtcGxldG9rZW4="';
 const paste = (text) => `(() => { const dt = new DataTransfer(); dt.setData('text', ${JSON.stringify(text)}); const f = document.getElementById('gs-paste'); f.focus(); f.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true })); })()`;
+// the regular expression engine keeps its last match, and the text before and after it: none of it may be a pasted line
+const unremembered = async (p, why) => assert.deepEqual(await p.js(`[RegExp.input, RegExp.leftContext, RegExp.rightContext]`), ['', '', ''], why);
 const act = (p, name) => p.acts.find((a) => a.act === name);
 const clean = (p, r) => { assert.deepEqual(p.errors, [], 'no exception'); assert.deepEqual(r.csp, [], 'no policy violation'); assert.equal(r.overflowX, 0, 'no sideways scroll'); };
 // the nine rows as the page must build them: step -> troubleshooting entries, by position
@@ -366,6 +368,7 @@ const SCENARIOS = {
       const before = await p.js(`({ block: document.querySelector('[data-helper] code').textContent.includes('<region>'), tools: document.querySelector('.helper__tools').hidden, pointer: document.querySelector('#cloud-1 .helper__pointer')?.textContent, spell: document.getElementById('gs-paste').spellcheck, auto: document.getElementById('gs-paste').autocomplete, form: !!document.getElementById('gs-paste').closest('form'), name: document.getElementById('gs-paste').getAttribute('name') })`);
       assert.deepEqual(before, { block: true, tools: true, pointer: '[i] The helper at step 4 does this for you.', spell: false, auto: 'off', form: false, name: null });
       await p.js(paste(BLOCK));
+      await unremembered(p, 'an accepted paste leaves nothing of itself in the regular expression engine, which would hold the line while the value is on screen');
       const r = await p.js(`({ shown: document.querySelector('[data-helper] code').textContent, field: document.getElementById('gs-paste').value,
         read: [...document.querySelectorAll('.helper__read li')].map((li) => li.textContent), notes: [...document.querySelectorAll('.helper__notes li')].map((li) => li.textContent), status: document.querySelector('.vitals__status').textContent,
         inUrl: location.href.includes('MTIz'), inStorage: JSON.stringify(Object.entries(localStorage)).includes('MTIz') || JSON.stringify(Object.entries(sessionStorage)).includes('MTIz'), inDom: document.documentElement.outerHTML.includes('MTIz'),
@@ -383,7 +386,7 @@ const SCENARIOS = {
       assert.equal(await p.js(`document.querySelector('.vitals__status').textContent.includes('MTIz')`), false, 'never the live region');
       await p.js(`dispatchEvent(new Event('pagehide'))`);
       assert.equal(await p.js(`document.documentElement.outerHTML.includes('MTIz') || document.querySelector('[data-helper] code').textContent.includes('prod-eu-west')`), false, 'leaving the page forgets both values');
-      assert.equal(await p.js('RegExp.input'), '', 'and the regular expression engine no longer holds the last pasted line, which a page kept for Back would otherwise carry');
+      await unremembered(p, 'and the regular expression engine no longer holds the last pasted line, which a page kept for Back would otherwise carry');
       // one value at a time, then a bad paste, then typed by hand
       await p.js(paste('https://otlp-gateway-prod-us-east-0.grafana.net/otlp/v1/metrics'));
       const one = await p.js(`({ read: [...document.querySelectorAll('.helper__read li')].map((li) => li.textContent), notes: [...document.querySelectorAll('.helper__notes li')].map((li) => li.textContent), auth: document.querySelectorAll('[data-helper] code .ph').length, invalid: document.getElementById('gs-paste').getAttribute('aria-invalid'), showHidden: document.querySelector('[data-show]').hidden })`);
@@ -398,13 +401,14 @@ const SCENARIOS = {
       assert.deepEqual(typed, { field: '', copied: 'Basic dHlwZWQ6dG9rZW4=', inDom: false }, 'typed text is taken when the field loses focus');
       // a value with a comma is refused, and the value already read stays
       await p.js(paste('Authorization=Basic%20abc,X-Scope-OrgID=42'));
+      await unremembered(p, 'a refused paste leaves nothing of itself in the regular expression engine, though no value was taken from it');
       await p.js(click('[data-helper] .copy')); await sleep(50);
       const comma = await p.js(`({ notes: [...document.querySelectorAll('.helper__notes li')].map((li) => li.textContent), copied: JSON.parse(window.__copied).Headers.Authorization, inDom: document.documentElement.outerHTML.includes('X-Scope-OrgID') })`);
       assert.deepEqual(comma, { notes: ['[!] Endpoint is the base address only, Pulse adds the rest of the path itself.', '[!] The value holds a comma and was not used: Pulse refuses to start exporting with a comma in a header value. Paste the Authorization header alone, up to the comma.'],
         copied: 'Basic dHlwZWQ6dG9rZW4=', inDom: false }, 'a value Pulse would refuse is not handed over');
       await p.js(click('[data-forget]'));
       assert.equal(await p.js(`document.querySelector('[data-helper] code').textContent.includes('<region>') && document.querySelector('.helper__tools').hidden`), true);
-      assert.equal(await p.js('RegExp.input'), '', 'forget both values leaves nothing of the pasted text in the regular expression engine');
+      await unremembered(p, 'forget both values leaves nothing of the pasted text in the regular expression engine');
       // nothing was logged, and nothing left the page
       assert.deepEqual(p.console.filter((l) => /MTIz|dHlwZWQ|prod-eu-west|prod-us-east|Basic/.test(l)), [], 'never the console');
       const own = PAGE.startsWith('http') ? new URL(PAGE).origin : 'file:';           // the page's own files are no leak; a request anywhere else, or one that carries a value, is
