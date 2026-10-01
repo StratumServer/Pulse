@@ -616,17 +616,19 @@ loader loads the staged dll outside coverlet's instrumentation, so nothing a sce
 them can reach a coverage report. The scenarios are still what tests them.
 
 The documentation site is built by `docs/site/build.mjs` from the README, the getting-started
-guide, the two `contrib` READMEs, the alert rules, the dashboard JSON and the changelog. It needs
-Node 22 or newer and has two build dependencies. The build stops when a document changes in a way
-a page depends on, a renamed section for instance. The `pages` workflow runs it on every pull
-request and deploys the result from `main`.
+guide, the two `contrib` READMEs, the alert rules, the dashboard JSON and the changelog. It also
+reads both `modinfo.json`, `NOTICE` and the replies in `Pulse/PulseCommands.cs`, and it stops when
+any of these changes in a way a page depends on: a renamed section, a reworded `/pulse` reply. So
+a pull request that touches no document can still fail the `pages` workflow, which runs the build
+on every pull request and deploys the result from `main`. The build needs Node 22 or newer and
+has two dependencies.
 
 ```sh
 cd docs/site
 npm ci
 npm test         # the build rules and the logic of the client scripts
 npm run build    # writes docs/site/dist
-npm run serve    # serves it on http://127.0.0.1:4173
+npm run serve    # serves it on http://127.0.0.1:4173 (needs Python 3)
 ```
 
 ## Where this is going
