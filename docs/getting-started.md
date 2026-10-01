@@ -165,7 +165,8 @@ elsewhere instead of widening that bind.
    docker compose -f docker-compose.desktop.yml up -d
    ```
 
-   Same as above, both containers restart automatically until you stop them in step 3.
+   Both containers are set to restart automatically, including after this machine reboots,
+   until you stop them in step 3.
 2. Open `http://localhost:3000/d/pulse-overview` in a browser on the same machine.
 3. When you are done:
 
@@ -177,7 +178,8 @@ This file reaches Pulse through `host.docker.internal`, the address Docker Deskt
 reaching the machine it runs on from inside a container, since Desktop cannot use host networking
 the way Linux does. Use this file when Pulse runs directly on this same Windows or macOS machine.
 Docker Desktop is not available on Windows Server; use path B there instead. Both ports are
-published to `127.0.0.1` only here too, for the same reason as the Linux file above.
+published to `127.0.0.1` only, on purpose: Grafana's anonymous access has no password of its own,
+so nothing outside this machine should reach it.
 
 ## Path B: Grafana Cloud, if you would rather host nothing
 

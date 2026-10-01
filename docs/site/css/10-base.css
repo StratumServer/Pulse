@@ -1,0 +1,59 @@
+/* Reset, prose, links, focus, utilities. */
+
+*, *::before, *::after { box-sizing: border-box; }
+html { font-size: clamp(100%, 90% + .125vw, 112.5%); scroll-padding-top: calc(var(--nav-h) + 1rem); -webkit-text-size-adjust: 100%; text-size-adjust: 100%; scrollbar-color: var(--line-strong) var(--bg-panel); scrollbar-width: thin; }
+body { margin: 0; background: var(--bg-page); color: var(--text); font: 400 var(--fs-md)/var(--lh-body) var(--font-mono); overflow-wrap: break-word; }
+h1, h2, h3, h4, code, pre, kbd, button, input, select, table { font-family: var(--font-mono); }
+img, svg, canvas { max-width: 100%; }
+img { height: auto; display: block; }
+p { margin: 0 0 var(--s-4); }
+a { color: var(--green); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { text-decoration-thickness: 2px; text-shadow: var(--glow-soft); }
+::selection { background: var(--green); color: #000; }
+:focus { outline: none; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+.skip { position: absolute; left: var(--s-2); top: -4rem; z-index: 50; background: var(--green); color: #000; font-weight: 700; padding: var(--s-2) var(--s-4); text-decoration: none; }
+.skip:focus { top: var(--s-2); }
+code { color: var(--green); background: var(--bg-tint); box-shadow: inset 0 0 0 1px var(--line); padding: 0 .28em; font-size: .9375em; }
+pre code { all: unset; font-family: var(--font-mono); }
+kbd { font-size: var(--fs-xs); color: var(--green-soft); border: 1px solid var(--line-strong); padding: 0 .4em; background: var(--bg-raised); }
+mark { background: var(--bg-mark); color: var(--text-strong); font-weight: 700; text-decoration: underline; text-decoration-color: var(--green); text-underline-offset: 3px; padding: 0 .1em; }
+hr { border: 0; border-top: 1px solid var(--line-strong); margin: var(--s-7) 0; }
+
+[hidden] { display: none !important; }
+code { -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+.sprite { position: absolute; }
+
+/* ---- prose: styles for Markdown output apply to class-less elements only, so a widget inside an article inherits nothing by accident */
+.prose h1 { margin: 0 0 var(--s-4); font: 700 var(--fs-2xl)/1.2 var(--font-mono); color: var(--green); text-shadow: var(--glow-soft); }
+.prose h2:not([class]) { margin: var(--s-8) 0 var(--s-3); padding-bottom: var(--s-2); border-bottom: 1px solid var(--line-strong); font: 700 var(--fs-xl)/var(--lh-tight) var(--font-mono); color: var(--green); }
+.prose h2:not([class])::before { content: "> "; white-space: pre; }
+.prose h3:not([class]) { margin: var(--s-7) 0 var(--s-2); font: 700 var(--fs-lg)/var(--lh-tight) var(--font-mono); color: var(--green-soft); }
+.prose h3:not([class])::before { content: "# "; white-space: pre; color: var(--green-dim); }
+.prose h4:not([class]) { margin: var(--s-6) 0 var(--s-2); font: 700 var(--fs-md)/var(--lh-tight) var(--font-mono); color: var(--text-strong); }
+.prose :is(h2, h3) .anchor { margin-left: .5ch; color: var(--green-dim); text-decoration: none; opacity: 0; }   /* always shown on touch: 5.9:1, where --line-strong is 3.97 */
+.prose :is(h2, h3):hover .anchor, .prose .anchor:focus-visible { opacity: 1; color: var(--green); }
+@media (hover: none) { .prose :is(h2, h3) .anchor { opacity: 1; } }
+@media (pointer: coarse) {            /* a 44 px target around the "#", which is 13 by 30 px: the heading does not grow */
+  .prose :is(h2, h3) .anchor { position: relative; }
+  .prose :is(h2, h3) .anchor::after { content: ""; position: absolute; left: 50%; top: 50%; width: 2.75rem; height: 2.75rem; translate: -50% -50%; }
+}
+.prose > :is(p, ul, ol, dl) { max-width: var(--measure); }
+.prose :is(ul, ol):not([class]) { padding-left: 1.6em; margin: 0 0 var(--s-4); }
+.prose ul:not([class]) { list-style: none; }
+.prose ul:not([class]) > li { position: relative; }
+.prose ul:not([class]) > li::before { content: "\25A0"; position: absolute; left: -1.4em; color: var(--green); font-size: .7em; top: .45em; }
+.prose :is(ul, ol):not([class]) > li { margin-bottom: var(--s-2); }
+.prose strong { color: var(--text-strong); }
+
+/* ---- the calm regime: every page but Home and 404. The long-form text of the documentation is a system sans, about
+   75 characters a line; headings, navigation, buttons, labels, code and the table heads stay monospace. :where()
+   keeps the rule weaker than any component, so a widget that sets its own face or size wins. */
+html[data-regime="calm"] { --lh-body: 1.65; --measure: 66ch; }
+:where(html[data-regime="calm"] .prose) :where(p:not([class]), li:not(.crumb li, .toc-inline li), dd, td) { font-family: var(--font-prose); font-size: var(--fs-md); }
+
+/* ---- reduced motion: nothing animates or transitions */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+}

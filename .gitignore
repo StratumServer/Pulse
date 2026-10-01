@@ -19,3 +19,7 @@ __pycache__/
 
 # Agent worktrees live under the checkout; nothing in there is source.
 .claude/
+
+# The documentation site: build output and its two build dependencies.
+docs/site/dist/
+docs/site/node_modules/

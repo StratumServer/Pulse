@@ -1,10 +1,11 @@
 version: 2
 
 # Actions are pinned by major tag, so patch and minor releases arrive on their own and only a
-# new major needs a pull request; NuGet packages move at a similar pace. Monthly is enough for
-# both.
+# new major needs a pull request; NuGet packages and the two build dependencies of the
+# documentation site (docs/site, pinned to exact versions) move at a similar pace. Monthly is
+# enough for all three.
 #
-# target-branch: dev on both entries because the default branch, main, is released stable
+# target-branch: dev on every entry because the default branch, main, is released stable
 # (0.1.0) and only takes changes through a dev-to-main release pull request, not directly from
 # Dependabot.
 updates:
@@ -45,5 +46,15 @@ updates:
       interval: monthly
     groups:
       actions:
+        patterns:
+          - "*"
+
+  - package-ecosystem: npm
+    directory: /docs/site
+    target-branch: dev
+    schedule:
+      interval: monthly
+    groups:
+      site:
         patterns:
           - "*"
