@@ -5,6 +5,7 @@
 [![Quality gate](https://sonarcloud.io/api/project_badges/measure?project=StratumServer_Pulse&metric=alert_status)](https://sonarcloud.io/summary/overall?id=StratumServer_Pulse)
 [![Coverage](https://sonarcloud.io/api/project_badges/measure?project=StratumServer_Pulse&metric=coverage)](https://sonarcloud.io/summary/overall?id=StratumServer_Pulse)
 [![Mod DB](https://img.shields.io/badge/mod%20db-pulse-90c95b)](https://mods.vintagestory.at/pulse)
+[![Docs](https://img.shields.io/badge/docs-website-00a651)](https://stratumserver.github.io/Pulse/)
 [![License](https://img.shields.io/github/license/StratumServer/Pulse)](LICENSE)
 
 Pulse is a server-side Vintage Story mod that serves the server's own health numbers on a
@@ -12,8 +13,11 @@ Prometheus scrape endpoint. It runs on the dedicated server only, ships as a sin
 bundled dependencies, and does not talk to anything on its own: something has to come and read
 `/metrics`. A separate optional mod pushes the same metrics over OTLP, described further down.
 
-New to Prometheus and Grafana? [`docs/getting-started.md`](docs/getting-started.md) walks
-through installing Pulse and getting your first dashboard, step by step.
+The documentation has its own site:
+**[stratumserver.github.io/Pulse](https://stratumserver.github.io/Pulse/)**. New to Prometheus
+and Grafana? Its [Getting started](https://stratumserver.github.io/Pulse/getting-started/) page
+walks through installing Pulse and getting your first dashboard, step by step. The same guide is
+in this repository as [`docs/getting-started.md`](docs/getting-started.md).
 
 Grab both from the [ModDB page](https://mods.vintagestory.at/pulse) or from
 [GitHub releases](https://github.com/StratumServer/Pulse/releases).
@@ -610,6 +614,20 @@ scenarios under coverlet. Five files are left out of that figure: the two ModSys
 probe, the attribution probe and the live-server half of the attribution metrics. The game's
 loader loads the staged dll outside coverlet's instrumentation, so nothing a scenario executes in
 them can reach a coverage report. The scenarios are still what tests them.
+
+The documentation site is built by `docs/site/build.mjs` from the README, the getting-started
+guide, the two `contrib` READMEs, the alert rules, the dashboard JSON and the changelog. It needs
+Node 22 or newer and has two build dependencies. The build stops when a document changes in a way
+a page depends on, a renamed section for instance. The `pages` workflow runs it on every pull
+request and deploys the result from `main`.
+
+```sh
+cd docs/site
+npm ci
+npm test         # the build rules and the logic of the client scripts
+npm run build    # writes docs/site/dist
+npm run serve    # serves it on http://127.0.0.1:4173
+```
 
 ## Where this is going
 
