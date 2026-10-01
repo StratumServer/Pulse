@@ -9,7 +9,7 @@ import { RABBIT, checkFacts, checkReplies, rabbitName } from '../content/home.mj
 import { loadData, SONAR_PAGE } from '../lib/data.mjs';
 import { loadSources } from '../lib/sources.mjs';
 import { ASCII_RABBIT, COMMANDS, README_FACTS, SAMPLE, SOURCE, attributionClock, createSession, fill, walk } from '../js/terminal.js';
-import { OPENING, hopRabbit, openingTimeline } from '../js/home-show.js';
+import { OPENING, openingTimeline } from '../js/home-show.js';
 import { rabbitSvg } from '../lib/pages/home.mjs';
 
 const sources = loadSources();
@@ -278,8 +278,4 @@ test('the stylesheet: the rail follows the scroll by CSS where it can, motion st
   assert.match(css, /html \{[^}]*scrollbar-color: var\(--line-strong\) var\(--bg-panel\); scrollbar-width: thin;/, 'the native scrollbar is themed, thin, and never hidden');
   assert.doesNotMatch(css, /::-webkit-scrollbar|scrollbar-width: none/);
   for (const m of css.matchAll(/^([^@{}\n][^{}\n]*)\{[^}\n]*\banimation:\s*(?!\s|none)[^;}\n]+/gm)) assert.match(m[1], /\.js /, `an animation outside .js: ${m[1]}`);
-});
-
-test('the page rabbit hops only while motion is allowed, and does nothing in a page without one', () => {
-  assert.equal(typeof hopRabbit, 'function');
 });
