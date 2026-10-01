@@ -87,7 +87,7 @@ html[data-rain="off"] .hero { background: #000; }
 .stats > div:hover { border-color: var(--green); background: var(--bg-tint); }
 .stats > div:has(a:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
 .stats a:focus-visible { outline: none; }
-.stats--health { grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr)); }
+.stats--health { grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr)); }
 .split { display: grid; gap: var(--s-3); }
 @media (min-width: 56rem) { .split { grid-template-columns: 3fr 2fr; align-items: start; } .split .stats { grid-template-columns: 1fr; } }
 .features { margin: 0; padding: 0; list-style: none; font: 400 var(--fs-sm)/1.7 var(--font-mono); color: var(--green-soft); }
