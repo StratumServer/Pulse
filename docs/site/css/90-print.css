@@ -1,0 +1,14 @@
+/* Print: the chrome goes, folded content shows, black text on white. Each stylesheet writes the print rules of its
+   own names; this one holds the chrome only. */
+@media print {
+  :root { color-scheme: light; }
+  *, *::before, *::after { background: #fff !important; color: #000 !important; box-shadow: none !important; text-shadow: none !important; }
+  .skip, .nav, .side, .toc, .toc-inline, .pager, .rain, .band, [data-slot], .copy, .btn, .opening, .wash, .term__in, .rail { display: none !important; }
+  .rv { opacity: 1 !important; transform: none !important; }
+  .pill-card__go::after, .stats a::before { content: none !important; }   /* the stretched links would be white boxes over the text */
+  .term__l, .term__cmd { visibility: visible !important; clip-path: none !important; }   /* printed in the middle of the typing */
+  .shell { display: block; border: 0; }
+  .article { padding: 0; }
+  a { text-decoration: underline; }
+  pre, .table-wrap { overflow: visible; white-space: pre-wrap; }
+}

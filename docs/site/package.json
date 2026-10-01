@@ -1,0 +1,17 @@
+{
+  "name": "pulse-site",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test",
+    "serve": "python3 -m http.server --bind 127.0.0.1 --directory dist 4173"
+  },
+  "devDependencies": {
+    "marked": "18.0.14",
+    "yaml": "2.9.1"
+  }
+}
