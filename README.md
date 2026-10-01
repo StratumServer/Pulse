@@ -1,5 +1,12 @@
 # Pulse
 
+[![Release](https://img.shields.io/github/v/release/StratumServer/Pulse?logo=github)](https://github.com/StratumServer/Pulse/releases/latest)
+[![CI](https://img.shields.io/github/actions/workflow/status/StratumServer/Pulse/ci.yml?branch=main&logo=github&label=ci)](https://github.com/StratumServer/Pulse/actions/workflows/ci.yml)
+[![Quality gate](https://sonarcloud.io/api/project_badges/measure?project=StratumServer_Pulse&metric=alert_status)](https://sonarcloud.io/summary/overall?id=StratumServer_Pulse)
+[![Coverage](https://sonarcloud.io/api/project_badges/measure?project=StratumServer_Pulse&metric=coverage)](https://sonarcloud.io/summary/overall?id=StratumServer_Pulse)
+[![Mod DB](https://img.shields.io/badge/mod%20db-pulse-90c95b)](https://mods.vintagestory.at/pulse)
+[![License](https://img.shields.io/github/license/StratumServer/Pulse)](LICENSE)
+
 Pulse is a server-side Vintage Story mod that serves the server's own health numbers on a
 Prometheus scrape endpoint. It runs on the dedicated server only, ships as a single dll with no
 bundled dependencies, and does not talk to anything on its own: something has to come and read
@@ -579,17 +586,30 @@ Unit tests in `Pulse.Tests` cover the aggregator, the exposition writer, the log
 the small classes behind the wave of engine and world metrics: the busy-time average, the ping
 aggregates, the entity top-ten with its series retirement rule, and the suspend window. None of
 them needs a server. `Pulse.Otlp.Tests` covers the config translation, which is where the OTLP
-mod's only non-obvious logic lives.
+mod's only non-obvious logic lives. CI also runs both unit suites on Windows. The scenarios stay
+on Linux, since they boot a server build made for it.
 
-Mutation testing runs at two depths. `tools/mutation-check.sh` applies eighty-six representative
-mutations one at a time and requires the suite to fail on every one; CI runs it on every push,
-deterministic and under a minute. `.github/workflows/mutation.yml` runs dotnet-stryker
-incrementally on pull requests touching `Pulse/`: it mutates only the files the pull request
-changed and reports without gating. The full run mutates the whole project except the files that
-only run under a live server, scores 86 to 88 percent in recent runs, fails below 83, and runs
-weekly and on `workflow_dispatch`. Pulse.Otlp's own Stryker lane is `workflow_dispatch` only,
-because Stryker launches the wrong project's test host for it and the score swings too much
-between runs to gate a pull request on.
+Mutation testing runs at two depths. `tools/mutation-check.sh` applies ninety-one representative
+mutations one at a time and requires the suite to fail on every one; CI runs it on every code
+change, deterministic and done in about six minutes. `.github/workflows/mutation.yml` runs
+dotnet-stryker incrementally on pull requests into `dev` touching `Pulse/`: it mutates only the
+files the pull request changed and reports without gating. The full run mutates the whole project
+except the files that only run under a live server, scored 94 percent at the 0.2.0 release, fails
+below 83, and runs weekly and on `workflow_dispatch`. Pulse.Otlp's own Stryker lane is
+`workflow_dispatch` only, because Stryker launches the wrong project's test host for it and the
+score swings too much between runs to gate a pull request on; it scored 81 percent at 0.2.0 and
+fails below 70.
+
+Static analysis runs on [SonarCloud](https://sonarcloud.io/summary/overall?id=StratumServer_Pulse)
+for pushes to `dev` and pull requests into it. The job waits for the quality gate, so a failing
+gate turns the check red instead of sitting unnoticed on SonarCloud's side. The gate judges new
+code only: an A rating for reliability, security and maintainability, at least 80 percent
+coverage, at most 3 percent duplication, and every security hotspot reviewed. The coverage badge
+at the top of this page comes from the same job, which runs the two unit suites and the base
+scenarios under coverlet. Five files are left out of that figure: the two ModSystems, the engine
+probe, the attribution probe and the live-server half of the attribution metrics. The game's
+loader loads the staged dll outside coverlet's instrumentation, so nothing a scenario executes in
+them can reach a coverage report. The scenarios are still what tests them.
 
 ## Where this is going
 
