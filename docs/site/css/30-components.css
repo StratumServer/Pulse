@@ -113,7 +113,7 @@ td { padding: var(--s-2) var(--s-3); border-bottom: 1px solid var(--line); verti
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr:hover td { background: var(--bg-raised); }
 td:first-child code { font-weight: 700; white-space: nowrap; }
-.table-wrap:not(:has(table[data-config])) td code { white-space: normal; overflow-wrap: anywhere; }   /* a name in a rename table wraps instead of hiding the column after it */
+.table-wrap:not(:has(table[data-config])) td code { white-space: normal; }   /* a name in a rename table wraps, after an underscore, instead of hiding the column after it */
 @media (max-width: 39.99rem) {
   .table--stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .table--stack, .table--stack tbody, .table--stack tr, .table--stack td { display: block; width: 100%; }

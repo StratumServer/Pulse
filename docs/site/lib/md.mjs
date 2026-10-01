@@ -48,6 +48,9 @@ export function textOf(t) {
 /** A block's text as one line of plain text. */
 export const plainOf = (t) => squash(textOf(t));
 
+/** The code of a table cell with a <wbr> after each underscore: a name wraps there and nowhere else, and the text a reader copies or a script reads stays the name. */
+const breakAtUnderscores = (html) => html.replace(/<code>([^<]*)<\/code>/g, (_, name) => `<code>${name.replaceAll('_', '_<wbr>')}</code>`);
+
 /** The "#" link that ends a heading: what a heading rendered here carries, and what a page module writes for a heading of its own. */
 export const anchorLink = (id) => `&nbsp;<a class="anchor" href="#${esc(id)}" aria-label="Link to this section">#</a>`;
 
@@ -104,8 +107,9 @@ export function createMd({ resolve }) {
       },
       table(t) {
         const labels = t.header.map(plain);
-        const head = t.header.map((h) => `<th scope="col">${this.parser.parseInline(h.tokens)}</th>`).join('');
-        const body = t.rows.map((r, i) => `<tr${attrs(t.rowAttrs?.[i])}>${r.map((c, j) => `<td data-label="${esc(labels[j])}">${this.parser.parseInline(c.tokens)}</td>`).join('')}</tr>`).join('\n');
+        const cell = (c) => breakAtUnderscores(this.parser.parseInline(c.tokens));
+        const head = t.header.map((h) => `<th scope="col">${cell(h)}</th>`).join('');
+        const body = t.rows.map((r, i) => `<tr${attrs(t.rowAttrs?.[i])}>${r.map((c, j) => `<td data-label="${esc(labels[j])}">${cell(c)}</td>`).join('')}</tr>`).join('\n');
         const stop = 'data-config' in (t.attrs ?? {}) ? '' : ' tabindex="0"';      // a keyboard scrolls a wide table through its wrapper; a config table is stacked at every width
         return `<div class="table-wrap"${stop} role="region" aria-label="${esc(t.label ?? labels.join(', '))}"><table${attrs(merge(labels.length >= 2 ? { class: 'table--stack' } : {}, t.attrs))}><thead><tr>${head}</tr></thead><tbody>\n${body}\n</tbody></table></div>\n${t.after ?? ''}`;
       },

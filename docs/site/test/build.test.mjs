@@ -15,7 +15,7 @@ import { buildSite, writeOutput } from '../build.mjs';
 import { ATTRIBUTION_SHOT, OVERVIEW } from '../content/home.mjs';
 import { BUDGETS, checkPages } from '../lib/checks.mjs';
 import { fetchHealth, loadData, metricsIn, parseHealth, resolveVersion, SONAR_API } from '../lib/data.mjs';
-import { assetUrl, BOOT, pageUrl } from '../lib/layout.mjs';
+import { assetUrl, BOOT, pageUrl, plainText } from '../lib/layout.mjs';
 import { createMd, markCallout } from '../lib/md.mjs';
 import { linkify, loadSources, makeSlugger, plain } from '../lib/sources.mjs';
 
@@ -369,6 +369,14 @@ test('the hooks: attrs, rowAttrs, prepend, append, after, label, where, ph, call
   assert.throws(() => md.render(new Marked({ gfm: true }).lexer('# No id\n'), {}), /has no id/, 'only headings of a lexed document can be rendered');
 });
 
+test('a name in a table cell may break after each underscore, and the text of the cell stays the name', () => {
+  const { html } = md.render(lex('| Old | New |\n| - | - |\n| `a_b_c` | some_text `x_y` |\n\nA `d_e` outside.\n'), {});
+  assert.match(html, /<td data-label="Old"><code>a_<wbr>b_<wbr>c<\/code><\/td>/);
+  assert.match(html, /<td data-label="New">some_text <code>x_<wbr>y<\/code><\/td>/, 'the code of a cell, not the words around it');
+  assert.match(html, /<p>A <code>d_e<\/code> outside\.<\/p>/, 'a table only: code elsewhere is left alone');
+  assert.equal(plainText(/<td data-label="Old">.*?<\/td>/.exec(html)[0]), 'a_b_c', 'the break opportunities add no character to what a reader copies');
+});
+
 test('the documents render as Markdown, with their tables, logs and links', () => {
   const guide = md.render(real.slice('docs/getting-started.md'), { file: 'docs/getting-started.md', page: 'getting-started' });
   assert.match(guide.html, /&quot;Authorization&quot;: &quot;&lt;everything after Authorization= from step 1&gt;&quot;/, 'angle brackets and quotes are escaped in code');
@@ -382,7 +390,7 @@ test('the documents render as Markdown, with their tables, logs and links', () =
   const log = md.render(real.slice('CHANGELOG.md'), { file: 'CHANGELOG.md', page: 'changelog' });
   assert.match(log.html, /<h2 id="020---2026-09-29">\[0\.2\.0\] - 2026-09-29/);
   assert.match(log.html, /<h3 id="added-1">/, 'duplicate headings are numbered');
-  assert.match(log.html, /<td data-label="Old name"><code>dotnet_process_memory_working_set<\/code><\/td>/, 'a two column table nested in a list item renders');
+  assert.match(log.html, /<td data-label="Old name"><code>dotnet_<wbr>process_<wbr>memory_<wbr>working_<wbr>set<\/code><\/td>/, 'a two column table nested in a list item renders, its names breaking after each underscore');
   assert.match(log.html, /<table class="table--stack"><thead><tr><th scope="col">Old name/, 'and stacks on a phone, so the new name is never out of sight');
   const grafana = md.render(real.slice('contrib/grafana/README.md'), { file: 'contrib/grafana/README.md', page: 'dashboard' });
   assert.match(grafana.html, /<a href="http:\/\/localhost:3000\/d\/pulse-overview">http:\/\/localhost:3000\/d\/pulse-overview<\/a>\./, 'a bare localhost address is a live link, the period stays outside, no arrow');
