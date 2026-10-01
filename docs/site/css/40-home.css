@@ -1,0 +1,202 @@
+/* Home and 404, the show regime: rain, hero, band, panels, stats, terminal, opening.
+   Motion exists only under .js .is-motion: body.is-motion is set by assets/home.js when the reader has not asked for
+   less and the rain switch is on, so no animation can exist without the switch that stops it (WCAG 2.2.2). */
+
+/* ---- rain */
+.rain { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100lvh; z-index: 0; pointer-events: none; }
+html[data-rain="off"] .rain, html[data-rain="off"] .band canvas { display: none; }
+main { position: relative; z-index: 2; }   /* above the rain and above the footer (the rail of Home runs down over it); the top bar is sticky with its own z-index */
+.footer { position: relative; z-index: 1; }
+
+/* ---- layout, panel, prompt heading, badge row */
+.home { max-width: var(--home-max); margin: 0 auto; padding: var(--s-6) var(--gutter) var(--s-9); display: grid; gap: var(--gap-section); }
+.home > * { min-width: 0; }
+.panel { background: var(--bg-panel); border: var(--bw) solid var(--line); padding: var(--s-4) var(--s-5); box-shadow: var(--halo); }
+@media (max-width: 30rem) { .panel { padding: .875rem var(--s-4); } }
+.panel > p, .callout > p { margin: 0 0 var(--s-3); font-size: var(--fs-sm); line-height: var(--lh-body); }
+.panel > :last-child, .callout > :last-child { margin-bottom: 0; }
+.h-prompt { margin: 0 0 var(--s-3); font: 700 var(--fs-lg)/var(--lh-tight) var(--font-mono); color: var(--green); }
+.badges { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s-2); margin: 0; padding: 0; list-style: none; }
+.cta .btn:not(:hover), .badges .badge:not(:hover) { box-shadow: var(--halo); }   /* a black halo, so the rain fades before it touches a button or a badge */
+a.badge { text-decoration: none; }
+a.badge:hover { background: var(--bg-raised); box-shadow: var(--glow-box); text-shadow: none; }
+.cta { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--s-3); }
+@media (max-width: 30rem) { .cta .btn { flex: 1 1 100%; } }
+.lede { margin: 0 auto; max-width: 52rem; text-align: center; background: #000; border: 1px solid var(--line); padding: 10px 18px; color: var(--green-soft); font: 400 var(--fs-sm)/1.6 var(--font-mono); box-shadow: var(--halo); }
+
+/* ---- hero: the scene is real text and live SVG; the dot stays small (r 7 in a 900 wide scene) and never scales */
+.hero { container-type: inline-size; position: relative; background: rgb(0 0 0 / .82); border: 1px solid var(--line); box-shadow: var(--halo); overflow: hidden; }
+.hero__scene { display: block; width: 100%; height: auto; }
+.hero__scene--wide { display: none; }
+.hero__scene--narrow { max-width: 21rem; margin: 0 auto; }
+.hero__strip { max-height: 4.5rem; }
+.hero__text { background: #000; box-shadow: 0 0 24px 12px #000; padding: var(--s-2) var(--s-4) var(--s-4); text-align: center; }
+.hero__wordmark { margin: 0; font: 700 clamp(2.75rem, 15vw, 4.875rem)/1 var(--font-mono); letter-spacing: .2em; margin-right: -.2em; color: var(--green); text-shadow: 0 0 14px rgb(0 255 65 / .9), 0 0 2px rgb(0 255 65 / .9); }
+.hero__tagline { margin: var(--s-3) 0 0; font: 400 var(--fs-md)/1.5 var(--font-mono); color: #c4ffd6; }
+.hero__tagline span { display: inline-block; white-space: nowrap; }
+@container (min-width: 32.5rem) {
+  .hero__scene--wide { display: block; }
+  .hero__scene--narrow, .hero__strip { display: none; }
+  .hero__text { position: absolute; left: 53.4%; top: 17%; right: 1.5%; padding: 0 var(--s-2) var(--s-1); text-align: left; }
+  .hero__wordmark { font-size: clamp(2.75rem, 8.67cqw, 5.4rem); }
+  .hero__tagline { margin-top: 1.6cqw; font-size: max(.875rem, 1.78cqw); }
+}
+/* At rest, and whenever motion is off, the dot waits just past the first spike: the poster frame of the generator. */
+.hero__wire { stroke-dasharray: 1 2; }
+.sweep-head { offset-rotate: 0deg; offset-distance: 8.9%; offset-path: path('M 90 195 L 133.2 195 L 146.7 183.1 L 162.9 206.9 L 179 164.4 L 197.9 213.7 L 211.4 195 L 260 195 L 280 195 L 323.2 195 L 336.7 183.1 L 352.9 206.9 L 369 164.4 L 387.9 213.7 L 401.4 195 L 450 195 C 456 195, 462 300, 469 300 L 496.4 300 L 504.9 285.3 L 515.2 314.7 L 525.4 262.2 L 537.4 323.1 L 546 300 L 576.8 300 L 604.1 300 L 612.7 285.3 L 622.9 314.7 L 633.2 262.2 L 645.2 323.1 L 653.7 300 L 684.5 300 L 711.9 300 L 720.4 285.3 L 730.7 314.7 L 740.9 262.2 L 752.9 323.1 L 761.5 300 L 792.2 300 L 819.6 300 L 828.2 285.3 L 838.4 314.7 L 848.7 262.2 L 860.7 323.1 L 869.2 300 L 900 300'); }
+.sweep-head--lens { offset-distance: 26.9%; offset-path: path('M 90 195 L 133.2 195 L 146.7 183.1 L 162.9 206.9 L 179 164.4 L 197.9 213.7 L 211.4 195 L 260 195 L 280 195 L 323.2 195 L 336.7 183.1 L 352.9 206.9 L 369 164.4 L 387.9 213.7 L 401.4 195 L 450 195'); }
+.sweep-trail { stroke-dashoffset: 47.6; }
+.sweep-trail--lens { stroke-dashoffset: -25.4; }
+/* Live: the line draws itself once, then the dot travels it, trail behind. */
+.js .is-motion .is-live .hero__wire { animation: draw 1.2s ease-out both; }
+.js .is-motion .is-live .sweep-head { opacity: 0; animation: sweep-head 1.5s linear 1.3s infinite; }
+.js .is-motion .is-live .sweep-trail { opacity: 0; animation: sweep-trail 1.5s linear 1.3s infinite; }
+.js .is-motion .is-live .sweep-head--lens { animation: sweep-lens 1.5s linear 1.3s infinite; }
+.js .is-motion .is-live .sweep-trail--lens { animation: sweep-lens-trail 1.5s linear 1.3s infinite; }
+@keyframes draw { from { stroke-dashoffset: 1.02; } to { stroke-dashoffset: 0; } }
+@keyframes sweep-head { from { offset-distance: 0%; opacity: 1; } to { offset-distance: 100%; opacity: 1; } }
+@keyframes sweep-trail { from { stroke-dashoffset: 193; opacity: 1; } to { stroke-dashoffset: -1440.3; opacity: 1; } }
+@keyframes sweep-lens { 0% { offset-distance: 0%; opacity: 1; } 40% { offset-distance: 100%; opacity: 1; } 41%, 100% { offset-distance: 100%; opacity: 0; } }
+@keyframes sweep-lens-trail { 0% { stroke-dashoffset: 120; opacity: 1; } 40% { stroke-dashoffset: -419.7; opacity: 1; } 41%, 100% { stroke-dashoffset: -419.7; opacity: 0; } }
+html[data-rain="off"] .hero { background: #000; }
+
+/* The glitch of the wordmark and of the 404 heading: an RGB split and a clip, 200 ms. It borrows the two pill colours
+   for a fifth of a second; nothing else on the site is split like this. */
+.js .is-motion .is-glitch { animation: glitch .2s steps(1) both; }
+@keyframes glitch {
+  0% { clip-path: inset(0 0 58% 0); transform: translateX(-4px); text-shadow: 4px 0 var(--push), -4px 0 var(--pull); }
+  25% { clip-path: inset(42% 0 20% 0); transform: translateX(5px); text-shadow: -4px 0 var(--push), 4px 0 var(--pull); }
+  50% { clip-path: inset(12% 0 56% 0); transform: translateX(-3px); text-shadow: 3px 0 var(--push), -3px 0 var(--pull); }
+  75% { clip-path: inset(66% 0 0 0); transform: translateX(3px); text-shadow: -3px 0 var(--push), 3px 0 var(--pull); }
+  100% { clip-path: none; transform: none; }
+}
+
+/* ---- divider band: black between two bright rules, so it stays a separator with no script and with the rain off */
+.band { position: relative; height: 80px; background: #000; border-top: 1px solid var(--green); border-bottom: 1px solid var(--green); overflow: hidden; }
+.band canvas { display: block; width: 100%; height: 100%; }
+.band::after { content: ""; position: absolute; inset: 0; background: linear-gradient(to bottom, rgb(0 0 0 / .88), rgb(0 0 0 / 0) 85%); pointer-events: none; }
+
+/* ---- stats: a number over a label, each box one link */
+.stats { display: grid; gap: var(--s-2); margin: 0; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); background: var(--bg-panel); box-shadow: var(--halo); }
+.stats > div { position: relative; display: flex; flex-direction: column-reverse; justify-content: center; min-height: 4.5rem; background: var(--bg-panel); border: 1px solid var(--line); padding: var(--s-3); text-align: center; transition: border-color var(--t-fast), background var(--t-fast); }
+.stats dd { margin: 0; font: 700 var(--fs-stat)/1.2 var(--font-mono); color: var(--green); text-shadow: var(--glow-text); }
+.stats dt { font: 400 var(--fs-xs)/1.4 var(--font-mono); color: var(--green-mid); }
+.stats a::before { content: ""; position: absolute; inset: 0; }   /* the stretched link; ::after stays free for the arrow of an external one */
+.stats a:hover { text-shadow: none; }
+.stats > div:not(:has(dd)) { min-height: 3rem; }
+.stats > div:hover { border-color: var(--green); background: var(--bg-tint); }
+.stats > div:has(a:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.stats a:focus-visible { outline: none; }
+.stats--health { grid-template-columns: repeat(auto-fit, minmax(10.5rem, 1fr)); }
+.split { display: grid; gap: var(--s-3); }
+@media (min-width: 56rem) { .split { grid-template-columns: 3fr 2fr; align-items: start; } .split .stats { grid-template-columns: 1fr; } }
+.features { margin: 0; padding: 0; list-style: none; font: 400 var(--fs-sm)/1.7 var(--font-mono); color: var(--green-soft); }
+.features li { position: relative; padding-left: 1.4em; margin-bottom: var(--s-3); }
+.features li::before { content: "\25A0"; position: absolute; left: 0; color: var(--green); }
+.features b { color: var(--text-strong); }
+
+/* ---- blocks of the page */
+/* the four commands: a code box that stacks on a phone, where a code block would hide the descriptions */
+.cmds { margin: 0 0 var(--s-3); padding: var(--s-3) var(--s-4); background: var(--bg-code); border: 1px solid var(--line); font: 400 var(--fs-sm)/var(--lh-code) var(--font-mono); }
+.cmds > div { margin-bottom: var(--s-2); }
+.cmds > div:last-child { margin-bottom: 0; }
+.cmds dt { color: var(--green-soft); }
+.cmds code { padding: 0; background: none; box-shadow: none; color: inherit; font-size: inherit; }
+.cmds dd { margin: 0 0 0 2ch; color: var(--green-mid); }
+@media (min-width: 40rem) { .cmds > div { display: grid; grid-template-columns: 28ch 1fr; margin: 0; } .cmds dd { margin: 0; } }
+.zipcard { margin-bottom: var(--s-3); padding: 14px 16px; border: 1px solid var(--line); border-top: var(--bw-accent) solid var(--green); }
+.zipcard__title { margin: 0 0 var(--s-2); font: 700 var(--fs-md)/1.3 var(--font-mono); color: var(--green); }
+.zipcard p { margin: 0 0 var(--s-2); color: var(--green-soft); font-size: var(--fs-sm); }
+.zipcard .dl { margin: var(--s-3) 0 0; }
+.pillart { margin: 0 0 var(--s-3); }
+.pillart img { width: 100%; max-width: 900px; margin: 0 auto; }
+.pills + .pillnote { margin-top: var(--s-4); }
+.shot__open { display: block; }
+.panel--lost { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--s-4) var(--s-6); text-align: center; }
+.lost__text > :last-child { margin-bottom: 0; }
+html[data-page="404"] .home { align-content: center; min-height: calc(100vh - var(--nav-h) - 9rem); }
+html[data-page="404"] .panel--lost .h-prompt { font-size: var(--fs-2xl); }
+
+/* ---- the terminal of the page: a sample, then a live prompt */
+.term__l, .term__o { display: inline; }
+.term__o { white-space: pre-wrap; overflow-wrap: anywhere; }
+.term__body a { color: var(--green); }
+.term--live .term__body { max-height: 20rem; overflow: auto; padding-bottom: 0; }
+.term--live { cursor: text; }
+.term--live .term__body, .term--live .term__in { cursor: auto; }
+.term__in { display: flex; align-items: center; padding: 0 18px 14px; background: var(--bg-code); font: 700 var(--fs-sm)/var(--lh-code) var(--font-mono); color: var(--green); cursor: text; }
+.term__ps1 { white-space: pre; }
+.term__in .cursor { display: none; }
+.term__in:not(:focus-within):has(.term__field:placeholder-shown) .cursor { display: inline-block; margin-right: .5ch; }
+.term__field { flex: 1; min-width: 0; height: calc(var(--fs-sm) * var(--lh-code)); margin: 0; padding: 0; border: 0; border-radius: 0; background: none; color: var(--green); font: inherit; caret-color: var(--green); }
+.term__field::placeholder { color: var(--green-dim); opacity: 1; font-weight: 400; }
+@media (pointer: coarse) { .term__field { font-size: max(16px, var(--fs-sm)); } }   /* iOS zooms into anything smaller */
+.term.is-typing .term__l:not(.is-shown) { visibility: hidden; }
+.term.is-typing .term__in { opacity: 0; }   /* still focusable: focusing it completes the typing */
+
+/* ---- the opening sequence and the wash: both are made by script, over everything */
+.opening { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: var(--s-6); background: #000; }
+.opening.is-out { opacity: 0; transition: opacity .4s ease-out; }
+.opening__text { width: 27ch; max-width: 100%; font: 700 clamp(1rem, 4.6vw, 1.75rem)/1.8 var(--font-mono); }
+.opening__line { white-space: pre; min-height: 1.8em; }
+.opening__ch { position: relative; color: transparent; }
+.opening__ch.is-on { color: var(--green); text-shadow: var(--glow-soft); }
+.opening__ch.is-cur::before { content: ""; position: absolute; left: 0; top: .2em; width: 100%; height: 1.3em; background: var(--green); }
+.js .is-motion .opening__ch.is-cur::before { animation: blink 1.06s steps(1) infinite; }
+.opening__skip { position: absolute; right: var(--s-5); bottom: var(--s-5); padding: .7rem 1.1rem; background: none; border: 1px solid var(--line-strong); color: var(--green-soft); font: 400 var(--fs-xs)/1 var(--font-mono); cursor: pointer; }
+.opening__skip:hover { border-color: var(--green); color: var(--green); }
+.js .wash { position: fixed; inset: 0; z-index: 90; pointer-events: none; opacity: 0; animation: wash .3s ease-in forwards; }
+.wash--pull { background: radial-gradient(circle at 50% 50%, rgb(77 141 255 / .9), rgb(10 30 90 / .95)); }
+.wash--push { background: radial-gradient(circle at 50% 50%, rgb(255 92 92 / .9), rgb(90 12 12 / .95)); }
+@keyframes wash { to { opacity: 1; } }
+
+/* ---- reveals: a panel below the fold fades and rises in once, 250 ms; the class is added by script */
+.js .is-motion .rv { opacity: 0; transform: translateY(14px); transition: opacity .25s ease-out, transform .25s ease-out; }
+.js .is-motion .rv.is-in { opacity: 1; transform: none; }
+
+/* ---- the white rabbit: pixel art, 16 by 14 cells, three px a cell (two on a phone), white with a faint green glow.
+   Only the frame that is shown has opacity 1. A hop is 330 ms: crouch, stretch through the air, land, sit. */
+.rb { opacity: 0; }
+.rb--sit { opacity: 1; }
+[data-rabbit].is-twitch .rb--sit { opacity: 0; }
+[data-rabbit].is-twitch .rb--twitch { opacity: 1; }
+.rabbit { display: block; flex: none; }
+.rabbit__hop { display: block; width: 48px; height: 42px; translate: 0 0; scale: 1 1; }
+.rabbit__svg { display: block; width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 0 5px var(--bg-panel)) drop-shadow(var(--glow-soft)); }   /* a black rim first, so the white stays white over the rain, then the green glow of the tokens */
+[data-rabbit].is-up .rabbit__hop { scale: -1 1; }
+@media (max-width: 29.99rem) { .rabbit__hop { width: 32px; height: 28px; } }
+.js .is-motion [data-rabbit]:is(.is-moving, .is-in, .is-hop) .rabbit__hop { animation: rabbit-arc .33s linear var(--loops, 1); }
+.js .is-motion [data-rabbit]:is(.is-moving, .is-in, .is-hop) .rb--sit { animation: pose-sit .33s steps(1) var(--loops, 1); }
+.js .is-motion [data-rabbit]:is(.is-moving, .is-in, .is-hop) .rb--land { animation: pose-land .33s steps(1) var(--loops, 1); }
+.js .is-motion [data-rabbit]:is(.is-moving, .is-in, .is-hop) .rb--stretch { animation: pose-stretch .33s steps(1) var(--loops, 1); }
+[data-rabbit].is-moving { --loops: infinite; }
+[data-rabbit].is-in { --loops: 3; }
+@keyframes rabbit-arc { 0%, 12% { translate: 0 0; animation-timing-function: ease-out; } 36% { translate: 0 -9px; animation-timing-function: ease-in; } 60%, 100% { translate: 0 0; } }
+@keyframes pose-sit { 0% { opacity: 0; } 76% { opacity: 1; } }
+@keyframes pose-land { 0% { opacity: 1; } 12% { opacity: 0; } 60% { opacity: 1; } 76% { opacity: 0; } }
+@keyframes pose-stretch { 0% { opacity: 0; } 12% { opacity: 1; } 60% { opacity: 0; } }
+
+/* ---- the scroll rail: a dim trail in the right gutter, the rabbit on it by scroll progress, a hole at the bottom.
+   Only where the gutter is wide enough to hold it clear of the panels (from the width of the inline top bar). */
+.rail { display: none; position: fixed; z-index: 5; top: calc(var(--nav-h) + 1.25rem); bottom: 1.5rem; right: 1.25rem; width: 48px; pointer-events: none; --travel: calc(100vh - var(--nav-h) - 2.75rem - 48px); }
+@media (min-width: 76rem) { .js .rail { display: block; } .js[data-page="home"] .footer { padding-inline: 6rem; } }   /* only with script (a rabbit that cannot follow the scroll would be a stuck decoration), and the footer's text stays clear of it */
+.rail__line { position: absolute; left: 50%; top: 0; bottom: 10px; width: 1px; background: repeating-linear-gradient(to bottom, var(--line-strong) 0 5px, transparent 5px 10px); opacity: .6; }
+.rail__hole { position: absolute; left: -8px; right: -8px; bottom: 0; height: 18px; border-radius: 50%; background: radial-gradient(ellipse at 50% 35%, #000 55%, #031a0b 100%); box-shadow: inset 0 0 0 2px var(--green-dim), var(--glow-soft); }
+.rail__go { position: absolute; left: 0; top: 0; display: block; width: 48px; height: 42px; pointer-events: auto; transform: translateY(calc(var(--p, 0) * var(--travel))); }
+.rail__in { display: block; }
+@supports (animation-timeline: scroll()) {
+  .js .rail__go { animation: rail-go linear both; animation-timeline: scroll(root block); }
+}
+html[data-rain="off"] .rail__go { animation: none; }   /* switched off: no animation object at all, the script sets the position (reduced motion does the same through its own rule) */
+@keyframes rail-go { from { transform: translateY(0); } to { transform: translateY(var(--travel)); } }   /* an explicit start: the implicit one would be the position the script left in --p */
+.js .is-motion .rail.is-away .rail__in { opacity: 0; }
+.js .is-motion .rail.is-in .rail__in { animation: rail-in .99s linear both; }
+@keyframes rail-in {
+  0% { transform: translateX(-104px); opacity: 0; } 2% { opacity: 1; } 4% { transform: translateX(-104px); } 20%, 37% { transform: translateX(-69px); }
+  53%, 70% { transform: translateX(-35px); } 87%, 100% { transform: translateX(0); opacity: 1; }
+}
+
+/* the way down the hole as words: the last block of the page, a plain link */
+.panel--hole { text-align: center; }
+.panel--hole p { margin: 0; }
+.hole { font: 700 var(--fs-lg)/1.4 var(--font-mono); }

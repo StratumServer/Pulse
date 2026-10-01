@@ -1,0 +1,159 @@
+/* Getting started: the acts, the folds, the strip, the choices, the steps, the helper, the troubleshooting list.
+   Everything under .js is the upgrade; without that class the page is the plain guide.
+   The page is in the calm regime: nothing moves at rest. The one thing that moves is the heartbeat drawn when a step
+   is ticked (once, 600 ms, never under reduced motion); hover and focus use the 120 ms of the components.
+   Long-form text (the guide's sentences, in cards and steps) is --font-prose; controls, tags, the strip and code stay
+   --font-mono. The calm regime (css/10-base.css) gives every li the prose face at specificity 0, so each li of a widget
+   that must stay monospace says so itself below. */
+
+/* ---- narrative labels: decoration, always next to the guide's own heading */
+.kicker { margin: 0 0 var(--s-1); font: 700 var(--fs-sm)/1.4 var(--font-mono); color: var(--green-mid); }
+.act__kicker { margin: var(--s-8) 0 0; font: 700 var(--fs-xs)/1.4 var(--font-mono); color: var(--green-mid); }
+.act__kicker + h2:not([class]) { margin-top: var(--s-1); }
+.next { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-3); }
+.next > li { min-width: 0; margin: 0; border: 1px solid var(--line); border-top: var(--bw-accent) solid var(--green); padding: 14px 16px; background: var(--bg-panel); color: var(--green-soft); font-size: var(--fs-sm); }
+.next a { font-family: var(--font-mono); font-size: var(--fs-md); }
+.next__tag { margin-left: var(--s-2); font: 400 var(--fs-xs)/1 var(--font-mono); color: var(--green-dim); }
+@media (min-width: 48rem) { .next { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+/* ---- acts and folds (script only) */
+/* until the script has finished starting, an act shows its label and heading only: no flash of the long guide */
+.js .gs:not(.is-ready) .act > :not(.act__kicker):not(h2) { display: none; }
+.js .act { margin-top: var(--s-3); border: 1px solid var(--line); }
+.js .act.is-open { border-color: var(--line-strong); }
+.act[data-off] > .act__kicker { display: none; }
+.js .act__kicker { margin: 0; padding: var(--s-3) var(--s-4) 0; }
+.fold__h { margin: 0; font: 700 var(--fs-lg)/var(--lh-tight) var(--font-mono); }
+.fold__toggle { all: unset; box-sizing: border-box; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--s-1) var(--s-3); width: 100%; min-height: 2.75rem; padding: var(--s-1) var(--s-4) var(--s-3); color: var(--green); font: inherit; cursor: pointer; }
+.fold__toggle:hover { background: var(--bg-tint); }
+.fold__toggle:focus-visible { outline: 2px solid var(--focus); outline-offset: -4px; }
+.fold__toggle::before { content: "[+]"; content: "[+]" / ""; flex: none; }
+.fold__toggle[aria-expanded="true"]::before { content: "[-]"; content: "[-]" / ""; }
+.fold__title { flex: 1 1 12rem; }
+.fold__state { font: 400 var(--fs-xs)/1.4 var(--font-mono); color: var(--green-soft); }
+.fold__body { padding: var(--s-2) var(--s-4) var(--s-4); border-top: 1px solid var(--line); }
+.fold__body > :first-child { margin-top: var(--s-3); }
+.fold__body > p:not(.act__next) { max-width: var(--measure); }
+.act__next { margin: var(--s-5) 0 0; }
+.act__next .btn { width: 100%; white-space: normal; padding-block: var(--s-3); line-height: 1.4; }
+.js .trouble { margin-top: var(--s-7); }
+/* the two Docker variants fold like acts, one level down */
+.fold[data-docker] { margin-top: var(--s-4); border: 1px solid var(--line); }
+.fold[data-docker] > .fold__h { font-size: var(--fs-md); }
+.fold[data-docker] > .fold__h .fold__toggle { color: var(--green-soft); padding-top: var(--s-2); }
+.fold[data-off] > .fold__h .fold__state { color: var(--text-muted); }
+
+/* ---- the strip under the title: route, count, trace, one link, one status line */
+.vitals { margin: var(--s-4) 0 var(--s-2); padding: var(--s-3) var(--s-4); background: var(--bg-panel); border: 1px solid var(--line-strong); display: grid; gap: var(--s-2); align-items: center; }
+.vitals__row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--s-1) var(--s-3); font: 700 var(--fs-xs)/1.5 var(--font-mono); color: var(--green-soft); }
+.vitals__trace { position: relative; height: 1.75rem; min-width: 0; }
+.vitals__trace svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.vitals__trace path { fill: none; stroke: var(--green); stroke-width: 2; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.vitals__dot { position: absolute; top: 59.2%; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--focus); box-shadow: var(--glow-soft); }
+.vitals__status { margin: 0; font: 400 var(--fs-xs)/1.5 var(--font-mono); color: var(--green-soft); }
+.vitals__status:empty { display: none; }
+.vitals__status b { color: var(--green); }
+.vitals [data-next] { justify-self: start; }
+.vitals-tools { display: flex; flex-wrap: wrap; gap: var(--s-2); margin: 0 0 var(--s-5); }
+/* the beat: a bright copy of the heartbeat just ticked, fading out. Created by script, only ever one, gone when it ends. */
+.js .vitals__trace .vitals__beat { stroke: var(--focus); stroke-width: 3; opacity: 0; animation: beat 600ms ease-out; }
+@keyframes beat { from { opacity: 1; } to { opacity: 0; } }
+@media (min-width: 64rem) {          /* one compact row that sticks under the top bar; the status line only when it says something */
+  .vitals { position: sticky; top: var(--nav-h); z-index: 5; grid-template-columns: auto minmax(6rem, 1fr) auto; column-gap: var(--s-4); padding-block: var(--s-2); }
+  .vitals__status { grid-column: 1 / -1; }
+  html:has(.vitals) { scroll-padding-top: calc(var(--nav-h) + 5.5rem); }   /* a target or a focused control never lands under the two sticky bars */
+}
+
+/* ---- choices: every choice is a radio group, so the arrow keys work for free */
+.choice { border: 0; margin: 0 0 var(--s-4); padding: 0; min-width: 0; }
+.choice > legend { padding: 0; margin-bottom: var(--s-2); font: 700 var(--fs-sm)/1.4 var(--font-mono); color: var(--green-soft); }
+.cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-2); }
+@media (min-width: 40rem) { .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.cards > li { min-width: 0; margin: 0; }
+.card { position: relative; display: block; height: 100%; padding: 12px 14px 12px 3rem; border: 1px solid var(--line-strong); background: var(--bg-panel); color: var(--green-soft); font-size: var(--fs-sm); line-height: 1.6; cursor: pointer; }
+.card::before { content: "[ ]"; content: "[ ]" / ""; position: absolute; left: 14px; top: 12px; font: 700 var(--fs-sm)/1.6 var(--font-mono); color: var(--green); }
+.card:hover { border-color: var(--green-mid); }
+.card:has(input:checked) { border-color: var(--green); background: var(--bg-tint); box-shadow: var(--glow-box); }
+.card:has(input:checked)::before { content: "[x]"; content: "[x]" / ""; }
+.card:has(input:focus-visible), .radio:has(input:focus-visible) { outline: 2px solid var(--focus); outline-offset: 2px; }
+.card__title { display: block; margin-bottom: var(--s-1); color: var(--text-strong); font: 700 var(--fs-sm)/1.5 var(--font-mono); }
+.card__title strong { font-weight: 700; }
+.card__body { display: block; font-family: var(--font-prose); font-size: var(--fs-md); line-height: var(--lh-body); }
+.card__body code { font-size: .875em; }
+.radios { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.radio { display: inline-flex; align-items: center; min-height: 2.75rem; padding: 0 var(--s-3); border: 1px solid var(--line-strong); color: var(--green-soft); font: 400 var(--fs-sm)/1.3 var(--font-mono); cursor: pointer; }
+.radio::before { content: "( ) "; content: "( ) " / ""; white-space: pre; color: var(--green); }
+.radio:hover { border-color: var(--green-mid); }
+.radio:has(input:checked) { border-color: var(--green); color: var(--green); background: var(--bg-tint); font-weight: 700; }
+.radio:has(input:checked)::before { content: "(x) "; content: "(x) " / ""; }
+/* the pill choice: the pill card is in 30-components.css, these are the parts only the wizard's choice has */
+.pill-card__sub { display: block; margin-bottom: var(--s-1); font-weight: 700; }
+.pill-card__lede, .pill-card__why { display: block; font-family: var(--font-prose); font-size: var(--fs-md); line-height: var(--lh-body); }
+.pill-card__why { margin-top: var(--s-2); color: var(--warn-soft); }
+.pill-card__why b { font-family: var(--font-mono); font-size: var(--fs-sm); color: var(--warn); }
+.pill-card__why code { color: var(--warn); }
+.pill-card.is-off, .pill-card.is-off:hover { color: var(--text-muted); border-color: var(--line); border-top-color: var(--line-strong); background: var(--bg-panel); box-shadow: none; cursor: not-allowed; }
+.pill-card.is-off .pill-card__title { color: var(--text-muted); }
+.pill-card.is-off .pill-card__glyph { background: var(--line-strong); }
+
+/* ---- steps: the guide's numbered lists with a checkbox, the guide's own number drawn as [4] */
+.steps { list-style: none; margin: 0 0 var(--s-4); padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-3); counter-reset: step; }
+.steps > .step { counter-increment: step; position: relative; min-width: 0; margin: 0; padding: 3.25rem 16px 14px; background: var(--bg-panel); border: 1px solid var(--line); border-top: var(--bw-accent) solid var(--green); color: var(--green-soft); }
+.steps > .step::before { content: "[" counter(step) "]"; content: "[" counter(step) "]" / ""; position: absolute; left: 3.5rem; top: .875rem; font: 700 var(--fs-md)/1.5 var(--font-mono); color: var(--green); }
+.steps > .step > :last-child { margin-bottom: 0; }
+.step.is-done { border-top-color: var(--line-strong); }
+.step[aria-current="step"] { border-color: var(--green); box-shadow: var(--glow-box); }
+.step__check { position: absolute; left: 0; top: 0; width: 3.5rem; height: 3.25rem; display: grid; place-items: center; cursor: pointer; }
+.step__check input { appearance: none; -webkit-appearance: none; width: 1.5rem; height: 1.5rem; margin: 0; border: 2px solid var(--green); background: var(--bg-code); cursor: pointer; display: grid; place-items: center; border-radius: 0; }
+.step__check input:checked { background: var(--green); }
+.step__check input:checked::after { content: "x"; content: "x" / ""; color: #000; font: 700 1rem/1 var(--font-mono); }
+.step__check input:hover { box-shadow: var(--glow-box); }
+/* `done`, or what this step is on this route (for later, optional): real text next to the number, not CSS content */
+.step__tag { position: absolute; top: .875rem; left: 6.25rem; right: 12px; min-height: 1.5rem; display: flex; align-items: center; font: 400 var(--fs-xs)/1.3 var(--font-mono); color: var(--text-muted); }
+.step__tag:empty { display: none; }
+.step.is-done > .step__tag { font-weight: 700; color: var(--green); }
+.step .code, .step .term { max-width: 100%; }
+.step .code__bar { flex-wrap: wrap; row-gap: var(--s-1); padding-block: var(--s-1); }      /* a narrow bar wraps its copy button instead of overflowing */
+.step .code__label { flex: none; }
+.step .code__where { flex: 1 1 8rem; min-width: 0; margin-left: 0; }
+.step > p:not(.step__help) { max-width: var(--measure); }
+.step__help { margin: var(--s-3) 0 0; padding-top: var(--s-2); border-top: 1px solid var(--line); font-family: var(--font-prose); font-size: var(--fs-sm); color: var(--text-muted); }
+.step .shot { margin: var(--s-3) 0 0; }
+.step .shot img { display: block; width: 100%; height: auto; border: 1px solid var(--line); }
+.step .shot figcaption { margin-top: var(--s-2); font: 400 var(--fs-xs)/1.5 var(--font-mono); color: var(--green-mid); }
+
+/* ---- helper (path B, step 4) */
+.helper { margin: 0 0 var(--s-3); padding: var(--s-3) var(--s-4); border: 1px solid var(--line-strong); background: var(--bg-panel); display: grid; gap: var(--s-3); }
+.helper__title { margin: 0; font: 700 var(--fs-sm)/1.4 var(--font-mono); color: var(--green); }
+.helper textarea.input { width: 100%; min-height: 4.5rem; padding: var(--s-2) var(--s-3); font: 400 1rem/1.4 var(--font-mono); resize: vertical; }
+.helper__read, .helper__notes { list-style: none; margin: 0; padding: 0; font: 700 var(--fs-xs)/1.5 var(--font-mono); color: var(--green); }
+.helper__read > li, .helper__notes > li { margin: 0; font-family: var(--font-mono); font-size: var(--fs-xs); }
+.helper__notes { color: var(--warn); font-weight: 400; }
+.helper__tools { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.helper__pointer { margin: var(--s-2) 0 0; font: 400 var(--fs-xs)/1.5 var(--font-mono); color: var(--green-mid); }
+
+/* ---- troubleshooting: always visible, each entry a closed disclosure under its own bold symptom */
+.trouble__list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-2); }
+.trouble__list > li { min-width: 0; margin: 0; }
+.trouble .acc { margin-bottom: 0; }
+.trouble .acc__body { max-width: var(--measure); font-size: var(--fs-md); }
+.trouble .acc__body > p:first-child { margin-top: 0; }
+.trouble__back { margin: var(--s-3) 0 0; font-size: var(--fs-xs); }
+
+/* ---- phones: every nested box (act, step, disclosure) gives back some width */
+@media (max-width: 30rem) {
+  .js .act__kicker, .fold__toggle, .fold__body { padding-inline: var(--s-3); }
+  .steps > .step { padding-inline: 12px; }
+  .step .acc__body { padding-inline: var(--s-3); }
+}
+
+/* ---- print: everything open, the controls gone */
+@media print {
+  .kicker, .act__kicker, .vitals, .vitals-tools, .act__next, .step__check, .step__tag, .step__help, .helper, .helper__pointer, .choice--ask { display: none !important; }
+  .card::before { display: none; }
+  .fold__body[hidden] { display: block !important; }
+  .fold__toggle::before, .fold__state { display: none; }
+  .js .act, .fold[data-docker], .step, .next > li { border-color: #000; }
+  .steps > .step { padding-top: 14px; }
+  .steps > .step::before { position: static; margin-right: .5em; }
+}

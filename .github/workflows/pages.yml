@@ -1,0 +1,83 @@
+name: pages
+
+# Builds the documentation site on every pull request and deploys it on pushes to main.
+# No path filter on purpose: the site renders files from all over the repository (README.md,
+# CHANGELOG.md, contrib/, both modinfo.json), and ci.yml treats docs/** as docs-only, so this
+# workflow is the only one that can catch a document edit that breaks the site.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+# Least privilege: building only reads the checkout. The deploy job asks for the two extra
+# permissions Pages needs, for itself alone.
+permissions:
+  contents: read
+
+# One group per ref. A pull request's own commits cancel each other's stale run; runs on main queue
+# instead: cancelling a deploy half way would leave the site on an older version than main. A manual
+# run on another branch has a group of its own, so it can never evict a deploy waiting on main.
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  build:
+    name: Build the site
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: docs/site
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/site/package-lock.json
+
+      - run: npm ci
+
+      - run: npm test
+
+      # The build asks SonarCloud for the project's numbers (quality gate, coverage, bugs,
+      # vulnerabilities) and bakes them into the home page, so only the build that gets deployed
+      # does. A pull request builds offline: same bytes on every run, and the numbers do not
+      # belong to a branch anyway. Either way an unanswered request never fails the build.
+      - run: npm run build
+        env:
+          PULSE_SITE_OFFLINE: ${{ github.event_name == 'pull_request' && '1' || '' }}
+
+      # A pull request gets the built site as a download: unzip it and open index.html, it works
+      # from a file URL.
+      - if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v7
+        with:
+          name: pulse-site
+          path: docs/site/dist
+          retention-days: 7
+
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs/site/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
