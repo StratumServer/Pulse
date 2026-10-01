@@ -134,7 +134,7 @@ The exposition text is the contract: game panels can read `/metrics` directly in
 through Prometheus, which is how the first panel integration was built. Three things to know.
 Each server instance runs its own Pulse on its own port, so a shared machine has one endpoint
 per instance. The loopback bind covers a panel running on the same host; scraping from another
-machine goes through a reverse proxy or a deliberate `Bind` change, as above. Any polling
+machine goes through a reverse proxy or a deliberate `Bind` change, as below. Any polling
 cadence works, the endpoint is cheap to hit; existing metric families keep their names and
 shapes, and anything breaking would be called out loudly in the changelog first.
 
