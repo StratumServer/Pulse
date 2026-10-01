@@ -9,8 +9,11 @@ const SUPPORT = 'https://opencollective.com/stratum';
 // Absolute only where a relative address cannot do: canonical, og:image and og:url. The <base> of
 // 404.html, which GitHub Pages serves at any depth, is the path of this address and nothing more,
 // so the policy's base-uri 'self' accepts it on any host. Every other address stays relative, so
-// the site works under /Pulse/, at a domain root, in a preview host and from file://.
+// every other page works under /Pulse/, at a domain root, in a preview host and from file://.
+// 404.html is the one page that cannot be looked at outside the path of this address: opened from a
+// file or from the root of a local server, its base points at /Pulse/ and the page has no styles.
 const SITE_URL = 'https://stratumserver.github.io/Pulse/';
+if (!SITE_URL.endsWith('/')) throw new Error('SITE_URL must end with a slash: the canonical and Open Graph addresses are built by appending to it');
 
 /** HTML escaping for text and for double-quoted attribute values. */
 export const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
