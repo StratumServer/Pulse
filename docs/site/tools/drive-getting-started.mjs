@@ -219,7 +219,6 @@ const SCENARIOS = {
     assert.equal(r.hidden, false);
     assert(r.top >= 0 && r.bottom <= r.h + 1, `the fieldset is in view (a pixel of rounding at the edge): ${JSON.stringify(r)}`);
     assert(r.focus, 'the focus did not move');
-    // answering it does not scroll again
     await p.close();
     return r;
   },
