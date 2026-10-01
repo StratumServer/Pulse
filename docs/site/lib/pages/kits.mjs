@@ -34,7 +34,7 @@ export default function kits(ctx) {
       const names = [...new Set(p.targets.flatMap((t) => t.metrics))];
       return `<article class="dash-panel" id="${esc(p.anchor)}" data-item>
 <h4 class="dash-panel__title">${esc(p.title)} <span class="badge badge--muted">${esc(p.type)}</span></h4>
-${p.description ? `<p class="dash-panel__desc">${esc(p.description)}</p>\n` : ''}${p.targets.filter((t) => t.expr).map((t) => codeBlock(ctx, 'promql', t.legend ? `${t.refId}: ${t.legend}` : t.refId, t.expr)).join('\n')}
+${p.description ? `<p class="dash-panel__desc">${esc(p.description)}</p>\n` : ''}${p.targets.filter((t) => t.expr).map((t) => codeBlock(ctx, 'promql', [t.refId, t.legend].filter(Boolean).join(': '), t.expr)).join('\n')}
 ${reads('dash-panel__reads', 'dashboard', names)}</article>`;
     };
     const section = `<section class="dash" id="panels" data-filter="">

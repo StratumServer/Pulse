@@ -266,6 +266,7 @@ test('a missing field of a rule or a panel, or a name that cannot be an id, stop
   await failsWith(panels((d) => { delete d.panels.find((p) => p.type !== 'row').title; }), /a panel needs an integer id, a title and a type/);
   const noRef = await buildSite({ sources: panels((d) => { delete d.panels.find((p) => p.targets?.length).targets[0].refId; }), offline: true });
   assert.doesNotMatch(noRef.files.get('dashboard/index.html'), /undefined/, 'a target with no refId is labelled with what it has');
+  assert.match(noRef.files.get('dashboard/index.html'), /<span class="code__label">players<\/span>/, 'its legend alone, with no colon in front of it');
 });
 
 test('the version: the newest release of the changelog, whatever modinfo.json says', () => {

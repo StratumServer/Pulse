@@ -294,7 +294,7 @@ test('the panel browser: a card for every panel by id, every target in a block, 
     const card = element('dashboard/index.html', 'article', p.anchor);
     assert.match(card, new RegExp(`<article class="dash-panel" id="${p.anchor}" data-item>`), p.anchor);
     for (const t of p.targets) {
-      assert.ok(card.includes(`<span class="code__label">${esc(t.legend ? `${t.refId}: ${t.legend}` : t.refId)}</span>`), `${p.anchor} ${t.refId}`);
+      assert.ok(card.includes(`<span class="code__label">${esc([t.refId, t.legend].filter(Boolean).join(': '))}</span>`), `${p.anchor} ${t.refId}`);
       assert.ok(card.includes(`<pre><code>${esc(t.expr)}</code></pre>`), `${p.anchor} ${t.refId}`);
     }
     const names = [...new Set(p.targets.flatMap((t) => t.metrics))];
