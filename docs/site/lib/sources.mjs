@@ -142,7 +142,7 @@ export function loadSources(opts = {}) {
       if (top.type === 'heading' && top.depth === 2) seenH2 = true;
       marked.walkTokens([top], (t) => {
         if (t.type === 'html') throw new Error(`${file}: raw HTML or an HTML comment (${t.raw.trim().slice(0, 40)}): the site uses no marker, and its policy assumes no markup comes out of the documents`);
-        // the six badges above the README's first H2 are the only images, and that part is not rendered
+        // the badges above the README's first H2 are the only images, and that part is not rendered
         if (t.type === 'image' && (file !== 'README.md' || seenH2)) throw new Error(`${file}: an image (${t.href}) inside a rendered part: the site shows no image from a document`);
         if (t.type === 'code' && !t.lang) {
           const known = LOG_EXCERPTS.find(([f, start]) => f === file && t.text.startsWith(start));

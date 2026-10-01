@@ -115,7 +115,7 @@
 .step .code, .step .term { max-width: 100%; }
 .step .code__bar { flex-wrap: wrap; row-gap: var(--s-1); padding-block: var(--s-1); }      /* a narrow bar wraps its copy button instead of overflowing */
 .step .code__label { flex: none; }
-.step .code__where { flex: 1 1 8rem; min-width: 0; margin-left: 0; line-height: 1.35; }   /* on a phone the label runs over several lines */
+.step .code__where { flex: 1 1 8rem; min-width: 0; margin-left: 0; }
 .step > p:not(.step__help) { max-width: var(--measure); }
 .step__help { margin: var(--s-3) 0 0; padding-top: var(--s-2); border-top: 1px solid var(--line); font-family: var(--font-prose); font-size: var(--fs-sm); color: var(--text-muted); }
 .step .shot { margin: var(--s-3) 0 0; }

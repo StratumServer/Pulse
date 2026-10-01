@@ -575,7 +575,7 @@ try {
   const gone = new Promise((r) => { chrome.once('exit', r); setTimeout(r, 5000); });
   chrome.kill();
   await gone;                                                   // Chrome writes to its profile until it has gone: remove the folder after
-  rmSync(TMP, { recursive: true, force: true });
+  rmSync(TMP, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });   // Chrome's children may still be writing
 }
 console.log(failed ? `${failed} scenario(s) failed` : `all ${run.length} scenarios passed`);
 process.exit(failed ? 1 : 0);

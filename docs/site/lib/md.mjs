@@ -107,10 +107,12 @@ export function createMd({ resolve }) {
       },
       table(t) {
         const labels = t.header.map(plain);
-        const cell = (c) => breakAtUnderscores(this.parser.parseInline(c.tokens));
+        const config = 'data-config' in (t.attrs ?? {});
+        // a config table is stacked at every width and its cells are sentences: a name inside one (dotnet_*, OTEL_SERVICE_NAME) stays whole
+        const cell = (c) => (config ? this.parser.parseInline(c.tokens) : breakAtUnderscores(this.parser.parseInline(c.tokens)));
         const head = t.header.map((h) => `<th scope="col">${cell(h)}</th>`).join('');
         const body = t.rows.map((r, i) => `<tr${attrs(t.rowAttrs?.[i])}>${r.map((c, j) => `<td data-label="${esc(labels[j])}">${cell(c)}</td>`).join('')}</tr>`).join('\n');
-        const stop = 'data-config' in (t.attrs ?? {}) ? '' : ' tabindex="0"';      // a keyboard scrolls a wide table through its wrapper; a config table is stacked at every width
+        const stop = config ? '' : ' tabindex="0"';      // a keyboard scrolls a wide table through its wrapper, and a config table never scrolls
         return `<div class="table-wrap"${stop} role="region" aria-label="${esc(t.label ?? labels.join(', '))}"><table${attrs(merge(labels.length >= 2 ? { class: 'table--stack' } : {}, t.attrs))}><thead><tr>${head}</tr></thead><tbody>\n${body}\n</tbody></table></div>\n${t.after ?? ''}`;
       },
       list(t) {

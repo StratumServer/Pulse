@@ -65,7 +65,7 @@
 .term__dot:nth-child(1) { background: var(--dot-red); } .term__dot:nth-child(2) { background: var(--dot-amber); } .term__dot:nth-child(3) { background: var(--dot-green); }
 .term--log { box-shadow: none; margin: 0 0 var(--s-4); }
 .term--log .term__body { white-space: pre-wrap; }
-.code__where { margin-left: var(--s-2); color: var(--text-muted); }
+.code__where { margin-left: var(--s-2); color: var(--text-muted); line-height: 1.35; }   /* on a phone the label runs over several lines */
 .copy { margin-left: auto; }
 
 /* ---- pill cards */

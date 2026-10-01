@@ -376,6 +376,9 @@ test('a name in a table cell may break after each underscore, and the text of th
   assert.match(html, /<td data-label="New">some_text <code>x_<wbr>y<\/code><\/td>/, 'the code of a cell, not the words around it');
   assert.match(html, /<p>A <code>d_e<\/code> outside\.<\/p>/, 'a table only: code elsewhere is left alone');
   assert.equal(plainText(/<td data-label="Old">.*?<\/td>/.exec(html)[0]), 'a_b_c', 'the break opportunities add no character to what a reader copies');
+  const config = lex('| Key | What it does |\n| - | - |\n| `A_B` | serves `dotnet_*` |\n');
+  config.find((t) => t.type === 'table').attrs = { 'data-config': 'x' };
+  assert.doesNotMatch(md.render(config, {}).html, /<wbr>/, 'the cells of a config table are sentences: a name inside one stays whole');
 });
 
 test('the documents render as Markdown, with their tables, logs and links', () => {
