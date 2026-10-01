@@ -40,7 +40,8 @@ jobs:
           cache: npm
           cache-dependency-path: docs/site/package-lock.json
 
-      - run: npm ci
+      # Neither build dependency has an install script, and none is given the chance to run one.
+      - run: npm ci --ignore-scripts
 
       - run: npm test
 
