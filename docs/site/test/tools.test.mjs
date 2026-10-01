@@ -251,8 +251,10 @@ test('a metric reference links to the family, with a badge when it is not a publ
 test('the config tables carry what the builder reads, from the README\'s own cells', () => {
   const page = html('configuration/index.html');
   assert.equal([...page.matchAll(/<table class="table--stack" data-config="ModConfig\/[a-z-]+\.json">/g)].length, 2);
-  assert.match(page, /<div class="table-wrap" tabindex="0" role="region" aria-label="ModConfig\/pulse\.json">/);
-  assert.match(page, /<div class="table-wrap" tabindex="0" role="region" aria-label="ModConfig\/pulse-otlp\.json">/);
+  assert.match(page, /<div class="table-wrap" role="region" aria-label="ModConfig\/pulse\.json">/);
+  assert.match(page, /<div class="table-wrap" role="region" aria-label="ModConfig\/pulse-otlp\.json">/);
+  assert.doesNotMatch(page, /class="table-wrap" tabindex/, 'the rows are cards at every width: nothing to scroll, so no Tab stop');
+  assert.match(html('changelog/index.html'), /<div class="table-wrap" tabindex="0" role="region" aria-label="Old name, New name">/, 'any other table can be wider than its wrapper, which a keyboard scrolls');
   for (const { rows } of data.config) {
     for (const r of rows) {
       const tr = new RegExp(`<tr id="${r.id}" data-key="${r.key.replace('.', '\\.')}" data-default="([^"]*)" data-type="([a-z]+)"([^>]*)>`).exec(page);

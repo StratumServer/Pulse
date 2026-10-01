@@ -69,22 +69,16 @@
 .dash-shot a { display: block; }
 
 /* ---- config builder: the fifth column and the file under each table. A five column table needs about 64rem to leave "What it
-   does" a readable line: when the article is narrower than that (it is, beside the sidebar), the rows stack as cards, the way
-   every table does under 640 px, and their text keeps the measure of the page. The decision is the wrapper's own width, not
-   the screen's. */
-.table-wrap:has(> table[data-config]) { container-type: inline-size; }
-table[data-config] th { white-space: normal; }
-table[data-config] th:last-child { width: 15rem; }
-@container (max-width: 64rem) {
-  table[data-config] thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
-  table[data-config], table[data-config] tbody, table[data-config] tr, table[data-config] td { display: block; width: 100%; }
-  table[data-config] tr { border-bottom: 1px solid var(--line-strong); padding: var(--s-2) 0; }
-  table[data-config] tbody tr:last-child { border-bottom: 0; }
-  table[data-config] td { border: 0; padding: 2px var(--s-3); max-width: var(--measure); }
-  table[data-config] td::before { content: attr(data-label) ": "; color: var(--text-muted); font-family: var(--font-mono); font-size: var(--fs-xs); }
-  table[data-config] td:first-child::before { content: none; }
-  table[data-config] td[data-label="Your value"] .field { max-width: 26rem; }
-}
+   does" a readable line and the article is never that wide, so the rows of a config table are always cards, the way every
+   table is under 640 px, and their text keeps the measure of the page. */
+table[data-config] thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+table[data-config], table[data-config] tbody, table[data-config] tr, table[data-config] td { display: block; width: 100%; }
+table[data-config] tr { border-bottom: 1px solid var(--line-strong); padding: var(--s-2) 0; }
+table[data-config] tbody tr:last-child { border-bottom: 0; }
+table[data-config] td { border: 0; padding: 2px var(--s-3); max-width: var(--measure); }
+table[data-config] td::before { content: attr(data-label) ": "; color: var(--text-muted); font-family: var(--font-mono); font-size: var(--fs-xs); }
+table[data-config] td:first-child::before { content: none; }
+table[data-config] td[data-label="Your value"] .field { max-width: 26rem; }
 @media (min-width: 80rem) { .shell:has(table[data-config]) { grid-template-columns: 15.5rem minmax(0, 1fr); } }   /* this page has no contents column to leave room for */
 table[data-config] .field { gap: var(--s-1); }
 .builder { margin: 0 0 var(--s-8); }

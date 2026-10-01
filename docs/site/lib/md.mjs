@@ -4,7 +4,8 @@
 //
 //   attrs      heading, paragraph, list, list item, code, table: an object of attributes written on the
 //              element (the <table> itself, div.code for a code block). '' writes the bare attribute;
-//              a class is added to the element's own class.
+//              a class is added to the element's own class. A table that carries data-config is stacked
+//              at every width (css/60-tools.css), so its wrapper never scrolls and is not a Tab stop.
 //   rowAttrs   table: an array, one attrs object per body row
 //   prepend    list item: HTML right after <li ...>
 //   append     list item: HTML just before </li>
@@ -105,7 +106,8 @@ export function createMd({ resolve }) {
         const labels = t.header.map(plain);
         const head = t.header.map((h) => `<th scope="col">${this.parser.parseInline(h.tokens)}</th>`).join('');
         const body = t.rows.map((r, i) => `<tr${attrs(t.rowAttrs?.[i])}>${r.map((c, j) => `<td data-label="${esc(labels[j])}">${this.parser.parseInline(c.tokens)}</td>`).join('')}</tr>`).join('\n');
-        return `<div class="table-wrap" tabindex="0" role="region" aria-label="${esc(t.label ?? labels.join(', '))}"><table${attrs(merge(labels.length >= 2 ? { class: 'table--stack' } : {}, t.attrs))}><thead><tr>${head}</tr></thead><tbody>\n${body}\n</tbody></table></div>\n${t.after ?? ''}`;
+        const stop = 'data-config' in (t.attrs ?? {}) ? '' : ' tabindex="0"';      // a keyboard scrolls a wide table through its wrapper; a config table is stacked at every width
+        return `<div class="table-wrap"${stop} role="region" aria-label="${esc(t.label ?? labels.join(', '))}"><table${attrs(merge(labels.length >= 2 ? { class: 'table--stack' } : {}, t.attrs))}><thead><tr>${head}</tr></thead><tbody>\n${body}\n</tbody></table></div>\n${t.after ?? ''}`;
       },
       list(t) {
         const tag = t.ordered ? 'ol' : 'ul';

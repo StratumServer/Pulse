@@ -363,9 +363,9 @@ test('the hooks: attrs, rowAttrs, prepend, append, after, label, where, ph, call
   assert.match(html, /<ul data-list="x">\n<li id="one"><i>pre<\/i>one<\/li>\n<li>two<i>post<\/i><\/li>\n<\/ul>/);
   assert.match(html, /<div class="code" data-lang="sh" data-tunnel><div class="code__bar"><span class="code__label">ModConfig\/x\.json<\/span><span class="code__where">run on the game server<\/span><\/div><pre><code>curl https:\/\/x\/<span class="ph">&lt;region&gt;<\/span>\n?<\/code><\/pre><\/div>/);
   assert.match(html, /<figure class="term term--log"><div class="term__bar" aria-hidden="true"><span class="term__dot"><\/span><span class="term__dot"><\/span><span class="term__dot"><\/span><span class="term__title">Logs\/server-main\.log<\/span><\/div><pre class="term__body" tabindex="0">log line\n?<\/pre><\/figure>/);
-  assert.match(html, /<div class="table-wrap" tabindex="0" role="region" aria-label="ModConfig\/pulse\.json"><table class="table--stack mine" data-config="x">/);
+  assert.match(html, /<div class="table-wrap" role="region" aria-label="ModConfig\/pulse\.json"><table class="table--stack mine" data-config="x">/, 'a config table is stacked at every width: its wrapper never scrolls and is no Tab stop');
   assert.match(html, /<tr id="row-1"><td data-label="a">1<\/td><td data-label="b">2<\/td><td data-label="c">3<\/td><\/tr>/);
-  assert.match(html, /aria-label="a, b"><table class="table--stack"><thead>/, 'a table is named by its headers unless a label is given, and two columns stack too');
+  assert.match(html, /<div class="table-wrap" tabindex="0" role="region" aria-label="a, b"><table class="table--stack"><thead>/, 'a table is named by its headers unless a label is given, two columns stack too, and its wrapper is a Tab stop for a keyboard to scroll it');
   assert.throws(() => md.render(new Marked({ gfm: true }).lexer('# No id\n'), {}), /has no id/, 'only headings of a lexed document can be rendered');
 });
 

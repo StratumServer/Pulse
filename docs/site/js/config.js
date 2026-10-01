@@ -226,10 +226,6 @@ function mount(table) {
   const wrap = table.closest('.table-wrap');
   (wrap || table).after(builder);
   addCopyButtons(builder);
-  // the wrapper is a Tab stop so that a keyboard can scroll it, but only while its table is wider than it: stacked rows never scroll
-  if (wrap && 'ResizeObserver' in window) {
-    new ResizeObserver(() => { if (wrap.scrollWidth > wrap.clientWidth) wrap.tabIndex = 0; else wrap.removeAttribute('tabindex'); }).observe(wrap);
-  }
 
   function update() {
     const values = {};
