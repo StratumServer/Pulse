@@ -577,10 +577,12 @@ atlas run Pulse.Otlp.Scenarios/bin/Release/net10.0/Pulse.Otlp.Scenarios.dll
 
 Each scenario class pins a loopback port of its own in its config fixture, 29464 to 29484 across
 the two suites, kept below 32768 so that nothing the kernel assigns by itself can land on one.
+One class also binds the default 9464, to prove the fallback when a config file will not parse,
+so a Pulse server already running on its default port on the same machine fails that class.
 Fixed ports also mean two runs of the same suite cannot share one machine's loopback: the second
 run's server logs that it could not bind, and its scenarios then scrape the first run's server
-and fail on what they read there. Run one at a time, or, once the solution is built, give each
-run a loopback of its own:
+and fail on what they read there. Run one at a time, or, once the solution is built and where
+unprivileged user namespaces are allowed, give each run a loopback of its own:
 
 ```sh
 unshare -Urn sh -c 'ip link set lo up && dotnet test Pulse.Scenarios -c Release --no-build'
