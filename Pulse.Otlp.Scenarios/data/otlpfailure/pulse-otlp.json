@@ -1,6 +1,6 @@
 {
   "Enabled": true,
-  "Endpoint": "http://127.0.0.1:39479",
+  "Endpoint": "http://127.0.0.1:29479",
   "Protocol": "http/protobuf",
   "Headers": {
     "Authorization": "Bearer scenario-secret-token"

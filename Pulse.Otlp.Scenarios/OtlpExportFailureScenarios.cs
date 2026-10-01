@@ -16,7 +16,7 @@ namespace Pulse.Otlp.Scenarios;
 [AtlasDataFiles("data/otlpfailure", TargetPath = "ModConfig")]
 public class OtlpExportFailureScenarios : AtlasScenarioBase, IDisposable
 {
-    private const int CollectorPort = 39479;
+    private const int CollectorPort = 29479;
     private const string FailureMarker = "Pulse OTLP export to";
     private const string ConfiguredSecret = "scenario-secret-token";
 

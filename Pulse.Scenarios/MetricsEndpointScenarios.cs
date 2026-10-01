@@ -13,7 +13,7 @@ namespace Pulse.Scenarios;
 [AtlasDataFiles("data/endpoint/pulse.json", TargetPath = "ModConfig")]
 public class MetricsEndpointScenarios : AtlasScenarioBase
 {
-    private const int Port = 39464;
+    private const int Port = 29464;
 
     private static readonly string[] Families =
     [

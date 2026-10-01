@@ -22,7 +22,7 @@ public class OtlpConfigUpgradeScenarios : AtlasScenarioBase
         JsonObject config = Assert.IsType<JsonObject>(JsonNode.Parse(File.ReadAllText(path)));
 
         Assert.Equal("vintagestory", (string?)config["ServiceName"]);
-        Assert.Equal("http://127.0.0.1:39473", (string?)config["Endpoint"]);
+        Assert.Equal("http://127.0.0.1:29473", (string?)config["Endpoint"]);
         Assert.Equal(60, (int)config["IntervalSeconds"]!);
     }
 }

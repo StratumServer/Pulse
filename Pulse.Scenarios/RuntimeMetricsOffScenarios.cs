@@ -8,7 +8,7 @@ namespace Pulse.Scenarios;
 [AtlasDataFiles("data/runtimeoff/pulse.json", TargetPath = "ModConfig")]
 public class RuntimeMetricsOffScenarios : AtlasScenarioBase
 {
-    private const int Port = 39467;
+    private const int Port = 29467;
 
     [AtlasScenario]
     public async Task RuntimeMetrics_Off_Serves_PulseFamiliesAndNoDotnetOnes()

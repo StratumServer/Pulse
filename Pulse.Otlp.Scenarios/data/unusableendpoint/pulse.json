@@ -1,6 +1,6 @@
 {
   "Enabled": true,
   "Bind": "127.0.0.1",
-  "Port": 39482,
+  "Port": 29482,
   "RuntimeMetrics": false
 }

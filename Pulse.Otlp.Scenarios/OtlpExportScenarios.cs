@@ -15,7 +15,7 @@ namespace Pulse.Otlp.Scenarios;
 [AtlasDataFiles("data/otlp", TargetPath = "ModConfig")]
 public class OtlpExportScenarios : AtlasScenarioBase, IDisposable
 {
-    private const int CollectorPort = 39469;
+    private const int CollectorPort = 29469;
 
     /// <summary>Seeded IntervalSeconds, so the first export is at most this far away plus the
     /// startup the reader does before its first wait.</summary>

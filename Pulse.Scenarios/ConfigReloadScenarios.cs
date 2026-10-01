@@ -9,7 +9,7 @@ namespace Pulse.Scenarios;
 [AtlasDataFiles("data/reload/pulse.json", TargetPath = "ModConfig")]
 public class ConfigReloadScenarios : AtlasScenarioBase
 {
-    private const int Port = 39474;
+    private const int Port = 29474;
 
     private static string Config(int port, bool attribution, int burstTicks) =>
         $$"""

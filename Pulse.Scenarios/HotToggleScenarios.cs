@@ -14,7 +14,7 @@ namespace Pulse.Scenarios;
 [AtlasDataFiles("data/hottoggle/pulse.json", TargetPath = "ModConfig")]
 public class HotToggleScenarios : AtlasScenarioBase
 {
-    private const int Port = 39473;
+    private const int Port = 29473;
 
     [AtlasScenario]
     public async Task Attribution_SwitchesOnAndOff_WithoutARestart()
