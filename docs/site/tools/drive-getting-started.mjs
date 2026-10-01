@@ -430,7 +430,7 @@ const SCENARIOS = {
       assert.deepEqual([r.html, r.controls, r.steps, r.trouble, r.headings, r.figures, r.callouts, r.overflowX, r.deadLinks, r.hiddenTemplates, r.animations], ['', 0, 21, 6, 10, 3, 2, 0, 0, 0, 0], 'without script: the whole guide, no dead control');
       assert.equal(r.downloads.length, 3);
       assert.match(r.downloads[0], /^download pulse_\d+\.\d+\.\d+\.zip$/); assert.match(r.downloads[1], /^download pulseotlp_\d+\.\d+\.\d+\.zip$/); assert.equal(r.downloads[2], 'download pulse-overview-shared.json');
-      const compose = "run on the game server's machine, in the contrib/grafana folder";
+      const compose = "run on the game server's machine, in contrib/grafana";
       assert.deepEqual(r.where, ['run on the game server', "run on the game server's machine", compose, 'run on your own computer', compose, compose, compose]);
       out[w] = r.page;
       await p.close();

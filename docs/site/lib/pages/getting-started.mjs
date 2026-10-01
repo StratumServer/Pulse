@@ -36,7 +36,7 @@ const CALLOUTS = ['Both Grafana and Prometheus are set to listen on `127.0.0.1` 
 // machine, the one that runs the game server. The compose commands sit on both sides of the ssh tunnel, which is opened from the
 // reader's own computer, so the clone and the compose commands each name the server's machine, in the same words.
 const WHERE = [[/^curl /, 'run on the game server', 1], [/^git clone /, "run on the game server's machine", 1], [/^ssh -L /, 'run on your own computer', 1],
-  [/^docker compose /, "run on the game server's machine, in the contrib/grafana folder", 4]];
+  [/^docker compose /, "run on the game server's machine, in contrib/grafana", 4]];
 const SEE_DASHBOARD = ['linux-2', 'desktop-2', 'import-4'];   // the steps that end on the dashboard get its picture
 // "What next": four links, each with a sentence quoted from a document. The build checks that the words are still there
 // (without the final full stop, white space collapsed) and the page closes them with one.
