@@ -12,7 +12,7 @@ namespace Pulse.Scenarios;
 [AtlasDataFiles("data/bindfailure/pulse.json", TargetPath = "ModConfig")]
 public class BindFailureScenarios : AtlasScenarioBase, IDisposable
 {
-    private const int Port = 39466;
+    private const int Port = 29466;
     private const string BindFailureMarker = "Pulse could not bind";
 
     private readonly TcpListener squatter;

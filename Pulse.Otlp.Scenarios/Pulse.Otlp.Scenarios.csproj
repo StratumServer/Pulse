@@ -9,7 +9,7 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
     <PackageReference Include="xunit" Version="2.9.*" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
-    <PackageReference Include="Pixnop.Atlas.XUnit" Version="0.15.0" />
+    <PackageReference Include="Pixnop.Atlas.XUnit" Version="0.15.1" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
   </ItemGroup>
 
@@ -27,6 +27,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Every port these fixtures pin, the collectors' own included, stays below 32768, out of
+         the range the kernel assigns from by itself. Pulse.Scenarios.csproj says what goes
+         wrong inside it. -->
     <Content Include="data\**\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

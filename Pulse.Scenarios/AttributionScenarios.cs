@@ -15,7 +15,7 @@ namespace Pulse.Scenarios;
 [AtlasDataFiles("data/attribution/pulse.json", TargetPath = "ModConfig")]
 public class AttributionScenarios : AtlasScenarioBase
 {
-    private const int Port = 39465;
+    private const int Port = 29465;
 
     private static readonly string[] Families =
     [

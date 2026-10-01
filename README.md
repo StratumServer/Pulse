@@ -575,6 +575,20 @@ atlas run Pulse.Scenarios/bin/Release/net10.0/Pulse.Scenarios.dll
 atlas run Pulse.Otlp.Scenarios/bin/Release/net10.0/Pulse.Otlp.Scenarios.dll
 ```
 
+Each scenario class pins a loopback port in its config fixture, unique within its suite: 29464
+to 29484 across the two, kept below 32768 so that nothing the kernel assigns by itself can land
+on one. One class binds the default 9464 instead, to prove the fallback when a config file will
+not parse, so a Pulse server already running on its default port on the same machine fails that
+class.
+Fixed ports also mean two runs of the same suite cannot share one machine's loopback: the second
+run's server logs that it could not bind, and its scenarios then scrape the first run's server
+and fail on what they read there. Run one at a time, or, once the solution is built and where
+unprivileged user namespaces are allowed, give each run a loopback of its own:
+
+```sh
+unshare -Urn sh -c 'ip link set lo up && dotnet test Pulse.Scenarios -c Release --no-build'
+```
+
 `Pulse.Otlp.Scenarios` is a separate project because it stages both mods, laid out exactly as
 their zips are, and the base suite's staging should stay as it is. It stands up a fake collector,
 points the mod at it, runs the world, and asserts on the protobuf that arrives. There is one

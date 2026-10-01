@@ -30,7 +30,7 @@ namespace Pulse.Otlp.Scenarios;
 [AtlasDataFiles("data/otlpseed", TargetPath = "ModConfig")]
 public class OtlpSeededCountersScenarios : AtlasScenarioBase
 {
-    private const int CollectorPort = 39481;
+    private const int CollectorPort = 29481;
 
     private static readonly TimeSpan ExportInterval = TimeSpan.FromSeconds(2);
 

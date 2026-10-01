@@ -154,8 +154,14 @@ jobs:
       # These boot a real headless Vintage Story server in-process (Atlas), load the staged
       # mod, and scrape it over HTTP. The OTLP suite stages both mods and puts a fake collector
       # on the other end of a socket, so it proves the export path end to end.
+      #
+      # The fixtures pin ports 29464 to 29484, below the range the kernel assigns from by itself,
+      # because a socket of the test platform landing on a fixture port makes the mod fail its
+      # bind and every scenario of that class fail with it. The first line prints that range, so
+      # a runner image that ever moves it below 29484 shows in the log of the run it breaks.
       - name: Atlas scenarios
         run: |
+          cat /proc/sys/net/ipv4/ip_local_port_range
           dotnet test Pulse.Scenarios/Pulse.Scenarios.csproj -c Release --no-build \
             --filter "Category!=Cost" \
             --logger "trx;LogFileName=scenarios.trx" \
@@ -163,6 +169,16 @@ jobs:
           dotnet test Pulse.Otlp.Scenarios/Pulse.Otlp.Scenarios.csproj -c Release --no-build \
             --logger "trx;LogFileName=otlp-scenarios.trx" \
             --results-directory TestResults
+
+      # The console of a red scenario run never shows why a server misbehaved: the engine log,
+      # with lines such as "Pulse could not bind", only lands in the TRX's run-level output.
+      - name: Keep the test results of a failed run
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-results
+          path: TestResults/*.trx
+          if-no-files-found: ignore
 
       - name: Package the mod zips
         run: |

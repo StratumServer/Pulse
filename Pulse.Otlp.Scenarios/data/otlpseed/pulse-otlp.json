@@ -1,6 +1,6 @@
 {
   "Enabled": true,
-  "Endpoint": "http://127.0.0.1:39481",
+  "Endpoint": "http://127.0.0.1:29481",
   "Protocol": "http/protobuf",
   "Headers": {},
   "IntervalSeconds": 2,
