@@ -574,12 +574,26 @@ dotnet build Pulse.Otlp/Pulse.Otlp.csproj -c Release -t:PackageMod  # artifacts/
 
 The scenarios in `Pulse.Scenarios` boot a real headless server in-process through
 [Atlas](https://github.com/Pixnop/Atlas), load the mod, and scrape it over HTTP for real. The
-`atlas` CLI runs the same assembly without VSTest, which is faster to iterate against:
+`atlas` CLI runs the same assembly without VSTest, which is faster to iterate against. It is a .NET
+tool you install once, at the version of the `Pixnop.Atlas.XUnit` package the two scenario projects
+reference, so that the tool and the harness match:
+
+```sh
+dotnet tool install -g Pixnop.Atlas.Cli --version 0.15.1
+```
+
+That puts `atlas` in `~/.dotnet/tools`, which a non-interactive shell may not have on its `PATH`.
+Where `atlas` is not found, call it by its full path, `~/.dotnet/tools/atlas`.
 
 ```sh
 atlas run Pulse.Scenarios/bin/Release/net10.0/Pulse.Scenarios.dll
 atlas run Pulse.Otlp.Scenarios/bin/Release/net10.0/Pulse.Otlp.Scenarios.dll
 ```
+
+One thing differs from CI. `atlas run` runs every scenario in an assembly and cannot filter by
+category, so it also runs the three `Cost` scenarios in `Pulse.Scenarios`. They return at once
+unless `PULSE_MEASURE_ATTRIBUTION_COST=1` is set, but each still boots a server. CI runs
+`dotnet test` with `--filter "Category!=Cost"`, which leaves them out.
 
 Each scenario class pins a loopback port in its config fixture, unique within its suite: 29464
 to 29484 across the two, kept below 32768 so that nothing the kernel assigns by itself can land
