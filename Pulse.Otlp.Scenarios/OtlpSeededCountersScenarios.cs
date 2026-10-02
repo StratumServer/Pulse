@@ -62,7 +62,8 @@ public class OtlpSeededCountersScenarios : AtlasScenarioBase
         using FakeCollector collector = new(CollectorPort);
 
         FakeCollector.Export export = await Exports.WaitFor(
-            () => collector.First, () => World.Ticks(10), ExportInterval * 15, CollectorPort);
+            () => collector.First, () => collector.Count,
+            () => World.Ticks(10), ExportInterval * 15, CollectorPort);
 
         Assert.Equal("application/x-protobuf", export.ContentType);
 

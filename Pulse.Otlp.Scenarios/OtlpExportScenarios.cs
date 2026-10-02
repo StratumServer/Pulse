@@ -49,9 +49,9 @@ public class OtlpExportScenarios : AtlasScenarioBase, IDisposable
 
         // Instrument and scope names travel as plain UTF-8 length-prefixed strings inside the
         // protobuf payload, so finding them in the raw bytes is enough to prove the base mod's
-        // meter reached the collector. Parsing the payload would only test a protobuf library.
+        // meter reached the collector. Parsing the payload would only test a protobuf library. The
+        // wait above found the ticks counter that way already.
         string body = Encoding.UTF8.GetString(export.Body);
-        Assert.Contains(TicksCounter, body, StringComparison.Ordinal);
         Assert.Contains("Pulse.Server", body, StringComparison.Ordinal);
 
         // service.name is a resource attribute, not a metric or scope name, but it travels in the
@@ -78,7 +78,9 @@ public class OtlpExportScenarios : AtlasScenarioBase, IDisposable
     /// <summary>Any export will do: what this scenario proves is that the server keeps ticking
     /// while the exporter runs, not what the export holds.</summary>
     private Task<FakeCollector.Export> WaitForExport()
-        => Exports.WaitFor(() => collector.First, () => World.Ticks(10), ExportInterval * 6, CollectorPort);
+        => Exports.WaitFor(
+            () => collector.First, () => collector.Count,
+            () => World.Ticks(10), ExportInterval * 6, CollectorPort);
 
     /// <summary>The first export that holds the ticks counter, which is not always the first one
     /// the collector gets: that one leaves five seconds after the exporter starts, and on a slow
@@ -87,5 +89,6 @@ public class OtlpExportScenarios : AtlasScenarioBase, IDisposable
     private Task<FakeCollector.Export> WaitForTicksExport()
         => Exports.WaitFor(
             () => collector.FirstWhere(export => Exports.Carries(export.Body, TicksCounter)),
-            () => World.Ticks(10), ExportInterval * 6, CollectorPort, $"export carrying {TicksCounter}");
+            () => collector.Count, () => World.Ticks(10), ExportInterval * 6, CollectorPort,
+            $"export carrying {TicksCounter}");
 }

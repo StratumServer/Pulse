@@ -65,9 +65,8 @@ public class OtlpGrpcExportScenarios : AtlasScenarioBase, IDisposable
         // payload, so finding them in the raw bytes is enough to prove the base mod's meter reached
         // the collector. Parsing the payload would only test a protobuf library. Latin-1 for the
         // same reason as the header block: one character per byte, so no length prefix can eat the
-        // name that follows it.
+        // name that follows it. The wait above found the ticks counter the same way.
         string body = Encoding.Latin1.GetString(export.Body);
-        Assert.Contains(TicksCounter, body, StringComparison.Ordinal);
         Assert.Contains("Pulse.Server", body, StringComparison.Ordinal);
 
         // service.name is a resource attribute, not a metric or scope name, but it travels in the
@@ -83,5 +82,6 @@ public class OtlpGrpcExportScenarios : AtlasScenarioBase, IDisposable
     private Task<FakeGrpcCollector.Export> WaitForTicksExport()
         => Exports.WaitFor(
             () => collector.FirstWhere(export => Exports.Carries(export.Body, TicksCounter)),
-            () => World.Ticks(10), ExportInterval * 12, CollectorPort, $"export carrying {TicksCounter}");
+            () => collector.Count, () => World.Ticks(10), ExportInterval * 12, CollectorPort,
+            $"export carrying {TicksCounter}");
 }

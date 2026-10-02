@@ -64,6 +64,9 @@ internal sealed class FakeGrpcCollector : IDisposable
         Task.Run(Accept);
     }
 
+    /// <summary>How many exports have been received.</summary>
+    public int Count => received.Count;
+
     /// <summary>The first export received, or null while none has arrived.</summary>
     public Export? First => received.FirstOrDefault();
 

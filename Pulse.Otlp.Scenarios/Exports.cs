@@ -11,10 +11,12 @@ internal static class Exports
     /// <remarks>The bound is wall clock rather than a tick count, which is why this is not
     /// <c>World.Until</c>: the exporter waits on a real timer on its own thread, and it owes the
     /// game loop nothing. Ticking is how the scenario passes that time without sleeping the thread
-    /// the world runs on. <paramref name="what"/> names the export being waited for, for the
-    /// failure message.</remarks>
+    /// the world runs on. <paramref name="what"/> names the export being waited for and
+    /// <paramref name="count"/> says how many the collector has received, both for the failure
+    /// message: a collector nothing reached and one that only got exports without what was asked
+    /// for are different failures.</remarks>
     public static async Task<T> WaitFor<T>(
-        Func<T?> find, Func<Task> pump, TimeSpan deadline, int port, string what = "export")
+        Func<T?> find, Func<int> count, Func<Task> pump, TimeSpan deadline, int port, string what = "export")
         where T : class
     {
         Stopwatch clock = Stopwatch.StartNew();
@@ -25,7 +27,8 @@ internal static class Exports
 
         return find()
             ?? throw new InvalidOperationException(
-                $"no {what} reached the collector on port {port} within {deadline.TotalSeconds:0}s");
+                $"no {what} reached the collector on port {port} within {deadline.TotalSeconds:0}s "
+                + $"(exports received: {count()})");
     }
 
     /// <summary>Whether an export's raw payload names <paramref name="instrument"/>. Instrument
