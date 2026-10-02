@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Text;
+using Pulse.Tests.Fakes;
 using Vintagestory.API.Common;
 using Xunit;
 using Xunit.Abstractions;
@@ -1297,27 +1298,5 @@ public class MetricsHttpServerTests
     public void ParseBind_InvalidValues_ThrowFormatException(string? bind)
     {
         Assert.Throws<FormatException>(() => MetricsHttpServer.ParseBind(bind));
-    }
-
-    /// <summary>Captures every entry through the one abstract hook LoggerBase funnels its whole
-    /// friendly API (Warning, Error, ...) through, so it needs no server and no mod loader.</summary>
-    private sealed class FakeLogger : LoggerBase
-    {
-        private readonly object gate = new();
-        private readonly List<(EnumLogType Type, string Message)> entries = [];
-
-        public IReadOnlyList<(EnumLogType Type, string Message)> Entries
-        {
-            get { lock (gate) { return entries.ToList(); } }
-        }
-
-        protected override void LogImpl(EnumLogType logType, string format, object[] args)
-        {
-            string message = args is { Length: > 0 } ? string.Format(format, args) : format;
-            lock (gate)
-            {
-                entries.Add((logType, message));
-            }
-        }
     }
 }

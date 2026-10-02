@@ -235,7 +235,7 @@ test('a numbered list that gains or loses an item stops the build, with the list
 test('the steps the wizard builds on: the zips, the log line, the tunnel, the teardown, the helper block', async () => {
   await failsRule(guide(swap('Download `pulse_x.x.x.zip` (replace `x.x.x` with the version you downloaded)', 'Download the Pulse zip')), /install-1 no longer names pulse_x\.x\.x\.zip/);
   await failsRule(guide(swap('Download `pulseotlp_x.x.x.zip` next to `pulse_x.x.x.zip`', 'Download the OTLP zip next to the first')), /cloud-2 no longer names pulseotlp_x\.x\.x\.zip/);
-  assert.throws(() => guide(swap('   ```\n   Pulse serving metrics', '   ```sh\n   Pulse serving metrics')), /docs\/getting-started\.md: the log excerpt that starts "Pulse serving metrics on " is gone/, 'the loader knows the log excerpts by name, before this page looks for the one of install-4');
+  assert.throws(() => guide(swap('   ```\n   [pulse] Pulse serving metrics', '   ```sh\n   [pulse] Pulse serving metrics')), /docs\/getting-started\.md: the log excerpt that starts "\[pulse\] Pulse serving metrics on " is gone/, 'the loader knows the log excerpts by name, before this page looks for the one of install-4');
   await failsRule(guide(swap('ssh -L 3000', 'ssh -N -L 3000')), /linux-2 should be: a paragraph, the ssh -L command, a paragraph/);
   await failsRule(guide(swap('3. When you are done, stop both programs', '3. Stop both programs')), /linux-3 no longer starts with "When you are done"/);
   await failsRule(guide(swap('`Authorization=`, but change any', 'the prefix, but change any')), /cloud-1 no longer explains Authorization=/);

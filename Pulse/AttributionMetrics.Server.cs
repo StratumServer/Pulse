@@ -25,15 +25,16 @@ internal sealed partial class AttributionMetrics
     /// never uses is two profiled ticks at startup and four instruments nothing records into, and
     /// an instrument with no measurement is not a series: an idle server serves the same exposition
     /// it did before.</remarks>
-    public AttributionMetrics(ICoreServerAPI api, Meter meter, PulseConfig booted)
+    public AttributionMetrics(ICoreServerAPI api, ILogger logger, Meter meter, PulseConfig booted)
         : this(
             meter,
             booted.Attribution ?? new AttributionConfig(),
             () => api.World.FrameProfiler,
             _ => { }, // replaced below: cannot reference attributionProbe before `this` exists
-            (template, message) => api.Logger.Warning(template, message))
+            (template, message) => logger.Warning(template, message))
     {
         this.api = api;
+        this.logger = logger;
         this.booted = booted;
         walkListeners = modOwners => attributionProbe?.Refresh(modOwners);
 
@@ -53,18 +54,18 @@ internal sealed partial class AttributionMetrics
         catch (Exception e)
         {
             attributionProbe = null;
-            api.Logger.Warning(ListenerWalkWarning, e.Message);
+            logger.Warning(ListenerWalkWarning, e.Message);
         }
 
         if (attribution!.Enabled)
         {
-            api.Logger.Notification(
+            logger.Notification(
                 "Pulse attributes the tick per mod: bursts of {0} ticks every {1}s.",
                 attribution.BurstTicks, attribution.IntervalSeconds);
         }
         else
         {
-            api.Logger.Notification(
+            logger.Notification(
                 "Pulse is ready to attribute the tick per mod but is not measuring: /pulse attribution on starts it.");
         }
 
@@ -74,7 +75,7 @@ internal sealed partial class AttributionMetrics
         // would ever turn a primed profiler back off for the rest of the run.
         if (ConfigLoad.TryRun(() => RegisterCommands(api)) is { } commandFailure)
         {
-            api.Logger.Warning(
+            logger.Warning(
                 "Pulse could not register /pulse ({0}). Attribution and the metrics endpoint are "
                 + "unaffected; only the chat command and /pulse reload are unavailable.",
                 commandFailure);
@@ -134,7 +135,7 @@ internal sealed partial class AttributionMetrics
         {
             loaded = api!.LoadModConfig<PulseConfig>(PulseModSystem.ConfigFile)
                 ?? throw new FileNotFoundException(PulseModSystem.ConfigFile + " is not in ModConfig");
-            ConfigUpgrade.Upgrade(api, loaded, PulseModSystem.ConfigFile, "Pulse");
+            ConfigUpgrade.Upgrade(api, logger!, loaded, PulseModSystem.ConfigFile, "Pulse");
         }
         catch (Exception e)
         {

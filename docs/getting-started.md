@@ -46,11 +46,12 @@ your own computer. Pulse needs Vintage Story 1.22 or newer.
 4. Watch the server's log for this line, which is Pulse confirming it is up:
 
    ```
-   Pulse serving metrics on http://127.0.0.1:9464/metrics
+   [pulse] Pulse serving metrics on http://127.0.0.1:9464/metrics
    ```
 
    The log is either the console you started the server in, or `Logs/server-main.log` next to
-   `Mods/`. On a panel-only host, use whatever log view the panel gives you.
+   `Mods/`. On a panel-only host, use whatever log view the panel gives you. The `[pulse]` is the
+   game marking the line as that mod's; the OTLP mod's lines carry `[pulseotlp]`.
 5. If you have a terminal or browser on the server itself, confirm the page it just mentioned
    actually answers (no shell on a panel-only host: skip this check and go straight to path B
    below). The address is `127.0.0.1`, meaning "this machine only", so this check has to run on
@@ -226,7 +227,7 @@ have one already.
 
    Leave every other key as the mod wrote it. `Endpoint` is the base address only, Pulse adds
    the rest of the path itself.
-5. Start the server again. Look for a log line starting with `Pulse OTLP exporting`, which
+5. Start the server again. Look for a log line containing `[pulseotlp] Pulse OTLP exporting`, which
    confirms it is pushing on a timer; by default that timer is 60 seconds, so give it a minute.
 6. Confirm it arrived: in Grafana Cloud, open **Explore**, pick your Prometheus data source, and
    query `pulse_players_online`. A value coming back means it worked.
@@ -289,15 +290,15 @@ dashboard or alert you built against the old names still needs updating.
   README. Both apply the same way on path B.
 - **Path B: numbers never show up.** An OTLP push that Grafana Cloud rejects costs nothing on the
   game side, but it no longer stays quiet: check the server's log, the console or
-  `Logs/server-main.log` from step 4 of installing the mod above, for a line starting `Pulse OTLP
-  export to`. A wrong or expired token reads like this:
+  `Logs/server-main.log` from step 4 of installing the mod above, for a line containing
+  `[pulseotlp] Pulse OTLP export to`. A wrong or expired token reads like this:
 
   ```
-  Pulse OTLP export to https://otlp-gateway-<region>.grafana.net/otlp/v1/metrics failed:
+  [pulseotlp] Pulse OTLP export to https://otlp-gateway-<region>.grafana.net/otlp/v1/metrics failed:
   Response status code does not indicate success: 401 (Unauthorized). The backend answered:
-  {"code":16,"message":"authentication error: invalid scope provided"} Metrics are not reaching
-  the backend; check Endpoint and Headers in pulse-otlp.json. This is logged again at most every
-  10 minutes.
+  {"code":16,"message":"authentication error: invalid scope provided"} Metrics are not reaching the
+  backend; check Endpoint and Headers in pulse-otlp.json. This is logged again at most every 10
+  minutes.
   ```
 
   `pulse-otlp.json` only holds the already-encoded `Authorization` value, not a separate instance

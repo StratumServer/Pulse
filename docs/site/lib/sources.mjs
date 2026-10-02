@@ -111,8 +111,8 @@ const SPLIT = 'The metric families it serves:';
 // the page wraps the line to the reader's width. Each excerpt is named here by its first words: 'wrapped' is one log line
 // wrapped over several, 'line' is a single line already. A new one stops the build until somebody says which, because the
 // build cannot tell one wrapped line from several short ones; a fence with a language is code and is never touched.
-const LOG_EXCERPTS = [['README.md', 'Pulse OTLP export to ', 'wrapped'], ['docs/getting-started.md', 'Pulse serving metrics on ', 'line'],
-  ['docs/getting-started.md', 'Pulse OTLP export to ', 'wrapped']];
+const LOG_EXCERPTS = [['README.md', '[pulseotlp] Pulse OTLP export to ', 'wrapped'], ['docs/getting-started.md', '[pulse] Pulse serving metrics on ', 'line'],
+  ['docs/getting-started.md', '[pulseotlp] Pulse OTLP export to ', 'wrapped']];
 
 export const deepFreeze = (o) => { if (o && typeof o === 'object' && !Object.isFrozen(o)) { Object.freeze(o); Object.values(o).forEach(deepFreeze); } return o; };
 const posixJoin = (dir, rel) => {

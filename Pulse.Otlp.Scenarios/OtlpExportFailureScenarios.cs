@@ -46,12 +46,13 @@ public class OtlpExportFailureScenarios : AtlasScenarioBase, IDisposable
         string log = await WaitForFailureLine();
 
         // The failure line itself, not just the log as a whole: at Warning (never Error, so
-        // DieAboveErrorCount cannot count it), naming the status and carrying the backend's body
-        // intact, braces and all, which only holds if the line reached the logger as an argument
-        // rather than as the format string.
+        // DieAboveErrorCount cannot count it), marked with the mod's id, which the engine only
+        // adds to what goes through the mod's own logger, naming the status and carrying the
+        // backend's body intact, braces and all, which only holds if the line reached the logger as
+        // an argument rather than as the format string.
         string line = Assert.Single(
             log.Split('\n'), l => l.Contains(FailureMarker, StringComparison.Ordinal));
-        Assert.Contains("[Warning]", line);
+        Assert.Contains("[Warning] [pulseotlp] ", line);
         Assert.Contains("401", line);
         Assert.Contains(RejectionBody, line);
 
