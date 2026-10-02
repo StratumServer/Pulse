@@ -15,6 +15,7 @@ namespace Pulse.Otlp.Scenarios;
 public class OtlpGrpcExportScenarios : AtlasScenarioBase, IDisposable
 {
     private const int CollectorPort = 29471;
+    private const string TicksCounter = "pulse_server_ticks_total";
 
     /// <summary>Seeded IntervalSeconds, so the first export is at most this far away plus the
     /// startup the reader does before its first wait.</summary>
@@ -38,7 +39,7 @@ public class OtlpGrpcExportScenarios : AtlasScenarioBase, IDisposable
     [AtlasScenario(TimeoutMs = 180_000)]
     public async Task Exporter_Pushes_PulsesMetrics_OverGrpc()
     {
-        FakeGrpcCollector.Export export = await WaitForExport();
+        FakeGrpcCollector.Export export = await WaitForTicksExport();
 
         // The exporter builds this path itself from the service definition, which is why the
         // configured endpoint has to stay bare. Seeing it here is what proves the endpoint was not
@@ -66,7 +67,7 @@ public class OtlpGrpcExportScenarios : AtlasScenarioBase, IDisposable
         // same reason as the header block: one character per byte, so no length prefix can eat the
         // name that follows it.
         string body = Encoding.Latin1.GetString(export.Body);
-        Assert.Contains("pulse_server_ticks_total", body, StringComparison.Ordinal);
+        Assert.Contains(TicksCounter, body, StringComparison.Ordinal);
         Assert.Contains("Pulse.Server", body, StringComparison.Ordinal);
 
         // service.name is a resource attribute, not a metric or scope name, but it travels in the
@@ -75,6 +76,12 @@ public class OtlpGrpcExportScenarios : AtlasScenarioBase, IDisposable
         Assert.Contains("pulse-atlas-grpc", body, StringComparison.Ordinal);
     }
 
-    private Task<FakeGrpcCollector.Export> WaitForExport()
-        => Exports.WaitFor(() => collector.First, () => World.Ticks(10), ExportInterval * 12, CollectorPort);
+    /// <summary>The first export that holds the ticks counter, which is not always the first one
+    /// the collector gets: that one leaves five seconds after the exporter starts, and on a slow
+    /// boot the server has not run a tick by then, so it holds what startup recorded and no ticks
+    /// counter. The next one does.</summary>
+    private Task<FakeGrpcCollector.Export> WaitForTicksExport()
+        => Exports.WaitFor(
+            () => collector.FirstWhere(export => Exports.Carries(export.Body, TicksCounter)),
+            () => World.Ticks(10), ExportInterval * 12, CollectorPort, $"export carrying {TicksCounter}");
 }

@@ -16,6 +16,7 @@ namespace Pulse.Otlp.Scenarios;
 public class OtlpExportScenarios : AtlasScenarioBase, IDisposable
 {
     private const int CollectorPort = 29469;
+    private const string TicksCounter = "pulse_server_ticks_total";
 
     /// <summary>Seeded IntervalSeconds, so the first export is at most this far away plus the
     /// startup the reader does before its first wait.</summary>
@@ -39,7 +40,7 @@ public class OtlpExportScenarios : AtlasScenarioBase, IDisposable
     [AtlasScenario(TimeoutMs = 180_000)]
     public async Task Exporter_Pushes_PulsesMetrics_ToAnOtlpCollector()
     {
-        FakeCollector.Export export = await WaitForExport();
+        FakeCollector.Export export = await WaitForTicksExport();
 
         Assert.Equal("POST", export.Method);
         Assert.Equal("/v1/metrics", export.Path);
@@ -50,7 +51,7 @@ public class OtlpExportScenarios : AtlasScenarioBase, IDisposable
         // protobuf payload, so finding them in the raw bytes is enough to prove the base mod's
         // meter reached the collector. Parsing the payload would only test a protobuf library.
         string body = Encoding.UTF8.GetString(export.Body);
-        Assert.Contains("pulse_server_ticks_total", body, StringComparison.Ordinal);
+        Assert.Contains(TicksCounter, body, StringComparison.Ordinal);
         Assert.Contains("Pulse.Server", body, StringComparison.Ordinal);
 
         // service.name is a resource attribute, not a metric or scope name, but it travels in the
@@ -74,6 +75,17 @@ public class OtlpExportScenarios : AtlasScenarioBase, IDisposable
         Assert.Equal("game:chest-east", World.BlockAt(pos).Code.ToString());
     }
 
+    /// <summary>Any export will do: what this scenario proves is that the server keeps ticking
+    /// while the exporter runs, not what the export holds.</summary>
     private Task<FakeCollector.Export> WaitForExport()
         => Exports.WaitFor(() => collector.First, () => World.Ticks(10), ExportInterval * 6, CollectorPort);
+
+    /// <summary>The first export that holds the ticks counter, which is not always the first one
+    /// the collector gets: that one leaves five seconds after the exporter starts, and on a slow
+    /// boot the server has not run a tick by then, so it holds what startup recorded and no ticks
+    /// counter. The next one does.</summary>
+    private Task<FakeCollector.Export> WaitForTicksExport()
+        => Exports.WaitFor(
+            () => collector.FirstWhere(export => Exports.Carries(export.Body, TicksCounter)),
+            () => World.Ticks(10), ExportInterval * 6, CollectorPort, $"export carrying {TicksCounter}");
 }
