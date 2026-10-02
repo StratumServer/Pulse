@@ -49,10 +49,11 @@ jobs:
     if: github.event_name != 'pull_request' || github.base_ref != 'main'
     runs-on: ubuntu-latest
     # Short on a pull request, where the run is scoped to a handful of changed files; generous
-    # on workflow_dispatch and the weekly schedule, where it mutates the whole project (Pulse
-    # alone has taken anywhere from 20 to 87 minutes on a shared runner, so 150 leaves room for a
-    # slow one).
-    timeout-minutes: ${{ github.event_name == 'pull_request' && 20 || 150 }}
+    # on workflow_dispatch and the weekly schedule, where it mutates the whole project. Pulse
+    # alone, 715 mutants, took 2 h 15 min at the 0.2.0 release and 3 h 18 min and 3 h 33 min in
+    # two runs on 2026-10-02, so 300 leaves room for a slow runner. A run that reaches the limit
+    # is cancelled and reports no score.
+    timeout-minutes: ${{ github.event_name == 'pull_request' && 20 || 300 }}
     strategy:
       # A weak spot in one project should not hide the other.
       fail-fast: false
