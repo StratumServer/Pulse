@@ -1,19 +1,20 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
 
 namespace Pulse.Otlp.Scenarios;
 
 /// <summary>An OTLP/HTTP collector reduced to what a test needs: it accepts the POST, answers the
-/// way a collector answers, and keeps the first request whole.</summary>
+/// way a collector answers, and keeps every request whole.</summary>
 internal sealed class FakeCollector : IDisposable
 {
     private readonly HttpListener listener = new();
     private readonly HttpStatusCode statusCode;
     private readonly string? responseBody;
 
-    /// <summary>The first export received, or null while none has arrived. Written by the listener
-    /// thread and read by the scenario, hence the volatile: the record itself is immutable.</summary>
-    private volatile Export? first;
+    /// <summary>Every export received, in arrival order. Written by the listener thread and read
+    /// by the scenario, hence the concurrent queue: the records in it are immutable.</summary>
+    private readonly ConcurrentQueue<Export> received = new();
 
     public FakeCollector(int port, HttpStatusCode statusCode = HttpStatusCode.OK, string? responseBody = null)
     {
@@ -24,7 +25,15 @@ internal sealed class FakeCollector : IDisposable
         Task.Run(Accept);
     }
 
-    public Export? First => first;
+    /// <summary>How many exports have been received.</summary>
+    public int Count => received.Count;
+
+    /// <summary>The first export received, or null while none has arrived.</summary>
+    public Export? First => received.FirstOrDefault();
+
+    /// <summary>The first export received for which <paramref name="match"/> holds, or null while
+    /// none has.</summary>
+    public Export? FirstWhere(Func<Export, bool> match) => received.FirstOrDefault(match);
 
     public void Dispose()
     {
@@ -50,12 +59,12 @@ internal sealed class FakeCollector : IDisposable
             using MemoryStream body = new();
             await context.Request.InputStream.CopyToAsync(body);
 
-            first ??= new Export(
+            received.Enqueue(new Export(
                 context.Request.HttpMethod,
                 context.Request.Url?.AbsolutePath ?? string.Empty,
                 context.Request.ContentType ?? string.Empty,
                 context.Request.Headers["x-scope-orgid"] ?? string.Empty,
-                body.ToArray());
+                body.ToArray()));
 
             // A real collector answers 200 with an empty ExportMetricsServiceResponse, which on the
             // wire is a protobuf message with no fields set, which is zero bytes. A rejecting

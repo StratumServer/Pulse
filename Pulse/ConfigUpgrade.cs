@@ -68,7 +68,7 @@ internal static class ConfigUpgrade
         diff.Missing.Count > 0 ? DuplicateKeysResolved : DuplicateKeys;
 
     /// <summary>Adds whatever keys a newer version of the mod introduced to the config file the
-    /// admin already has, and says in the log what changed.</summary>
+    /// admin already has, and says on <paramref name="logger"/> what changed.</summary>
     /// <remarks>The file is rewritten from <paramref name="config"/>, which the loader filled with
     /// defaults wherever the file was silent, so the write only ever adds: every value the admin
     /// set is already in the object. It happens solely when a key is missing, because a complete
@@ -88,7 +88,7 @@ internal static class ConfigUpgrade
     /// touching Pulse.Otlp's own project file, which links this file in and belongs to a separate
     /// PR.</para></remarks>
     [ExcludeFromCodeCoverage]
-    public static void Upgrade<T>(ICoreServerAPI api, T config, string filename, string modName)
+    public static void Upgrade<T>(ICoreServerAPI api, ILogger logger, T config, string filename, string modName)
         where T : class
     {
         ConfigDiff diff;
@@ -101,26 +101,26 @@ internal static class ConfigUpgrade
             if (diff.Missing.Count > 0)
             {
                 api.StoreModConfig(config, filename);
-                api.Logger.Notification(
+                logger.Notification(
                     AddedKeysTemplate(diff), modName, filename, string.Join(", ", diff.Missing));
             }
         }
         catch (Exception e)
         {
-            api.Logger.Warning(UpgradeFailed, modName, filename, e.Message);
+            logger.Warning(UpgradeFailed, modName, filename, e.Message);
             return;
         }
 
         if (diff.Unknown.Count > 0)
         {
-            api.Logger.Warning(
+            logger.Warning(
                 diff.Missing.Count > 0 ? DroppedKeys : IgnoredKeys,
                 modName, filename, string.Join(", ", diff.Unknown));
         }
 
         if (diff.Duplicated.Count > 0)
         {
-            api.Logger.Warning(
+            logger.Warning(
                 DuplicateKeysTemplate(diff), modName, filename, string.Join("; ", diff.Duplicated));
         }
     }

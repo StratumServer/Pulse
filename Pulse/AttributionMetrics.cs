@@ -64,6 +64,7 @@ internal sealed partial class AttributionMetrics
     private ModOwners? owners;
     private AttributionProbe? attributionProbe;
     private ICoreServerAPI? api;
+    private ILogger? logger;
     private PulseConfig? booted;
     private int unprimedTicks;
 

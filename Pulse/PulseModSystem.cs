@@ -109,7 +109,7 @@ public sealed class PulseModSystem : ModSystem
             case ConfigLoadStatus.Absent:
                 if (ConfigLoad.TryRun(() => api.StoreModConfig(config, ConfigFile)) is { } storeFailure)
                 {
-                    api.Logger.Warning(
+                    Mod.Logger.Warning(
                         "Pulse could not write a default {0} ({1}). Running on this session's "
                         + "built-in defaults; nothing is saved to disk, so the same file is tried "
                         + "again next start.",
@@ -118,11 +118,11 @@ public sealed class PulseModSystem : ModSystem
 
                 break;
             case ConfigLoadStatus.Loaded:
-                ConfigUpgrade.Upgrade(api, config, ConfigFile, "Pulse");
+                ConfigUpgrade.Upgrade(api, Mod.Logger, config, ConfigFile, "Pulse");
                 break;
             case ConfigLoadStatus.Unreadable:
                 string path = Path.Combine(api.GetOrCreateDataPath("ModConfig"), ConfigFile);
-                api.Logger.Error(
+                Mod.Logger.Error(
                     ConfigLoad.UnreadableMessage, "Pulse", path, loaded.FailureMessage,
                     "Pulse is running on its built-in defaults");
                 break;
@@ -130,7 +130,7 @@ public sealed class PulseModSystem : ModSystem
 
         if (!config.Enabled)
         {
-            api.Logger.Notification("Pulse is disabled in " + ConfigFile + ", nothing registered.");
+            Mod.Logger.Notification("Pulse is disabled in " + ConfigFile + ", nothing registered.");
             return;
         }
 
@@ -202,12 +202,12 @@ public sealed class PulseModSystem : ModSystem
         // degrades on once construction succeeds.
         try
         {
-            attributionMetrics = new AttributionMetrics(api, meter, config);
+            attributionMetrics = new AttributionMetrics(api, Mod.Logger, meter, config);
         }
         catch (Exception e)
         {
             attributionMetrics = null;
-            api.Logger.Warning(
+            Mod.Logger.Warning(
                 "Pulse could not start per-mod tick attribution ({0}). Every other metric is "
                 + "unaffected.",
                 e.Message);
@@ -253,6 +253,9 @@ public sealed class PulseModSystem : ModSystem
         // Worldgen events reach only the handlers registered for the save's own world type, so
         // hardcoding "standard" would silently count nothing on a superflat or custom world.
         api.Event.MapChunkGeneration(OnMapChunkGenerated, api.WorldManager.SaveGame?.WorldType ?? "standard");
+
+        // The server's own logger, not the mod's: it hands this every entry the engine and every
+        // mod write, Pulse's own included, because each mod logger passes its entries on to it.
         api.Logger.EntryAdded += OnLogEntry;
         api.Event.PlayerDeath += OnPlayerDeath;
 
@@ -262,7 +265,7 @@ public sealed class PulseModSystem : ModSystem
         api.Event.ServerSuspend += OnServerSuspend;
         api.Event.ServerResume += OnServerResume;
 
-        StartEndpoint(api, config);
+        StartEndpoint(config);
     }
 
     public override void Dispose()
@@ -288,7 +291,7 @@ public sealed class PulseModSystem : ModSystem
         meter?.Dispose();
     }
 
-    private void StartEndpoint(ICoreServerAPI api, PulseConfig config)
+    private void StartEndpoint(PulseConfig config)
     {
         MetricsAggregator collector = aggregator!;
         MetricsHttpServer? server = null;
@@ -299,15 +302,15 @@ public sealed class PulseModSystem : ModSystem
             // returns, would leave the rest of the mod (already fully registered above) running
             // without ever logging why the endpoint alone did not come up.
             server = new MetricsHttpServer(
-                config.Bind, config.Port, () => PrometheusText.Render(collector.Collect()), api.Logger);
+                config.Bind, config.Port, () => PrometheusText.Render(collector.Collect()), Mod.Logger);
             server.Start();
             http = server;
-            api.Logger.Notification("Pulse serving metrics on http://{0}:{1}/metrics", config.Bind, config.Port);
+            Mod.Logger.Notification("Pulse serving metrics on http://{0}:{1}/metrics", config.Bind, config.Port);
         }
         catch (Exception e)
         {
             server?.Dispose();
-            api.Logger.Error(
+            Mod.Logger.Error(
                 "Pulse could not bind http://{0}:{1}/ ({2}). No metrics will be served; the game server is unaffected.",
                 config.Bind, config.Port, e.Message);
         }
@@ -330,12 +333,12 @@ public sealed class PulseModSystem : ModSystem
         attributionMetrics?.Tick(elapsedSeconds);
     }
 
-    private void OnTickError(Exception e) => sapi?.Logger.Error(e);
+    private void OnTickError(Exception e) => Mod.Logger.Error(e);
 
     /// <summary>A meter published an instrument shape the exporter has no rendering for. Say so
     /// once, at publish time, and serve everything else.</summary>
     private void OnUnsupportedInstrument(string name)
-        => sapi?.Logger.Debug("Pulse skips metric {0}: unsupported instrument shape.", name);
+        => Mod.Logger.Debug("Pulse skips metric {0}: unsupported instrument shape.", name);
 
     /// <summary>Resolves the engine probe and, if it worked, publishes the families that depend on
     /// it and starts sampling them.</summary>
@@ -349,7 +352,7 @@ public sealed class PulseModSystem : ModSystem
             probe = EngineProbe.TryResolve(api);
             if (probe == null)
             {
-                api.Logger.Warning(DegradedWarning, "the server world is not the type Pulse expects");
+                Mod.Logger.Warning(DegradedWarning, "the server world is not the type Pulse expects");
                 return;
             }
 
@@ -358,7 +361,7 @@ public sealed class PulseModSystem : ModSystem
         catch (Exception e)
         {
             probe = null;
-            api.Logger.Warning(DegradedWarning, e.Message);
+            Mod.Logger.Warning(DegradedWarning, e.Message);
             return;
         }
 
@@ -405,7 +408,7 @@ public sealed class PulseModSystem : ModSystem
         {
             probe = null;
             UnregisterListener(ref engineListenerId);
-            sapi!.Logger.Warning(DegradedWarning, e.Message);
+            Mod.Logger.Warning(DegradedWarning, e.Message);
         }
     }
 

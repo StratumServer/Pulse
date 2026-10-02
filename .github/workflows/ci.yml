@@ -103,6 +103,17 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # The changelog and the guide promise the mod tag on every entry, so neither mod may use the
+      # server's logger, except the EntryAdded subscription: it has to see the entries of every mod.
+      - name: Check that both mods log through their own logger
+        run: |
+          set -e
+          lines=$(grep -rnE '\.Logger\b' Pulse Pulse.Otlp --include='*.cs')
+          if echo "$lines" | grep -vE 'Mod\.Logger|EntryAdded'; then
+            echo "::error::The lines above use the server's logger, so their entries carry no mod tag. Use Mod.Logger."
+            exit 1
+          fi
+
       - name: Setup .NET 10
         uses: actions/setup-dotnet@v6
         with:

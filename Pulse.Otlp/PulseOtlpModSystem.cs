@@ -62,7 +62,7 @@ public sealed class PulseOtlpModSystem : ModSystem
                     // A ModConfig directory the mod cannot write to (mounted read-only, say) must
                     // not stop it from starting: it runs on the in-memory defaults for this
                     // session, exporting off, rather than never starting at all.
-                    api.Logger.Error(
+                    Mod.Logger.Error(
                         "Pulse OTLP could not write {0} ({1}). Running with defaults for this "
                         + "session; exporting is off until the file can be written.",
                         ConfigFile, storeFailure);
@@ -71,7 +71,7 @@ public sealed class PulseOtlpModSystem : ModSystem
 
                 break;
             case ConfigLoadStatus.Loaded:
-                ConfigUpgrade.Upgrade(api, config, ConfigFile, "Pulse OTLP");
+                ConfigUpgrade.Upgrade(api, Mod.Logger, config, ConfigFile, "Pulse OTLP");
                 break;
             case ConfigLoadStatus.Unreadable:
                 string unreadablePath = Path.Combine(api.GetOrCreateDataPath("ModConfig"), ConfigFile);
@@ -82,7 +82,7 @@ public sealed class PulseOtlpModSystem : ModSystem
                 // that value can be a real bearer token or API key. The path, line and position
                 // that make the error findable are not quoted and survive the redaction.
                 string safeMessage = OtlpOptions.RedactQuotedValues(loaded.FailureMessage ?? string.Empty);
-                api.Logger.Error(
+                Mod.Logger.Error(
                     ConfigLoad.UnreadableMessage, "Pulse OTLP", unreadablePath, safeMessage,
                     "Pulse OTLP is not exporting");
                 return;
@@ -90,13 +90,13 @@ public sealed class PulseOtlpModSystem : ModSystem
 
         if (!config.Enabled)
         {
-            api.Logger.Notification("Pulse OTLP is disabled in " + ConfigFile + ", nothing registered.");
+            Mod.Logger.Notification("Pulse OTLP is disabled in " + ConfigFile + ", nothing registered.");
             return;
         }
 
         if (!OtlpOptions.TryParseProtocol(config.Protocol, out OtlpExportProtocol protocol))
         {
-            api.Logger.Warning(
+            Mod.Logger.Warning(
                 "Pulse OTLP does not know the protocol '{0}'. Exporting over http/protobuf instead; "
                 + "the two names the OTLP specification defines are \"http/protobuf\" and \"grpc\".",
                 config.Protocol);
@@ -106,7 +106,7 @@ public sealed class PulseOtlpModSystem : ModSystem
         {
             // Never the value: a name colliding after trimming, or carrying a comma, says nothing
             // about what the value itself holds.
-            api.Logger.Error(
+            Mod.Logger.Error(
                 "Pulse OTLP's header '{0}' in {1} cannot be exported: its name collides with "
                 + "another header once trimmed, or its value contains a comma, which the "
                 + "exporter's own header format cannot carry. Nothing will be exported; the game "
@@ -133,7 +133,7 @@ public sealed class PulseOtlpModSystem : ModSystem
                 // Never the configured value itself: a backend authenticating through userinfo or
                 // a query string in the URL put both right there, and an unparsable endpoint is
                 // exactly the case where that value most needs to stay out of the log.
-                api.Logger.Error(
+                Mod.Logger.Error(
                     "Pulse OTLP's '{0}' in {1} is not an absolute http or https URL. Nothing will "
                     + "be exported; the game server is unaffected.",
                     nameof(PulseOtlpConfig.Endpoint), ConfigFile);
@@ -206,7 +206,7 @@ public sealed class PulseOtlpModSystem : ModSystem
             // diagnostics ever carry: userinfo or a query string in the configured endpoint (a
             // backend that authenticates through a signed URL, say) has no business in a log line
             // at any level.
-            api.Logger.Notification(
+            Mod.Logger.Notification(
                 "Pulse OTLP exporting {0} to {1} over {2} every {3}s as service '{4}'",
                 string.Join(", ", meters), OtlpOptions.LoggableEndpoint(endpoint),
                 protocol == OtlpExportProtocol.Grpc ? "grpc" : "http/protobuf", intervalMs / 1000,
@@ -218,7 +218,7 @@ public sealed class PulseOtlpModSystem : ModSystem
             // this mod controls, and nothing guarantees it never echoes the value that failed it.
             // The exception's type is diagnostic enough to tell a bad endpoint apart from a bad
             // interval without repeating either.
-            api.Logger.Error(
+            Mod.Logger.Error(
                 "Pulse OTLP could not start exporting ({0}); its configuration in {1} is not "
                 + "something the OpenTelemetry SDK accepts. Nothing will be exported; the game "
                 + "server is unaffected.",
@@ -290,7 +290,7 @@ public sealed class PulseOtlpModSystem : ModSystem
 
     private void OnDrainExportFailures(float _) => DrainExportFailures();
 
-    private void OnDrainExportFailuresError(Exception e) => sapi?.Logger.Error(e);
+    private void OnDrainExportFailuresError(Exception e) => Mod.Logger.Error(e);
 
     /// <summary>Passed as an argument, never as the format string: the game's logger runs every
     /// message through string.Format, and a backend's JSON error body can carry braces that would
@@ -298,6 +298,6 @@ public sealed class PulseOtlpModSystem : ModSystem
     /// Fatal; the "succeeded" line is Notification, so the very first export on a healthy server
     /// does not read as a warning about anything.</summary>
     private void DrainExportFailures() => exportFailureLog?.Drain(
-        line => sapi?.Logger.Warning("{0}", line),
-        line => sapi?.Logger.Notification("{0}", line));
+        line => Mod.Logger.Warning("{0}", line),
+        line => Mod.Logger.Notification("{0}", line));
 }
