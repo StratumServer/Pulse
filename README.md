@@ -590,10 +590,11 @@ atlas run Pulse.Scenarios/bin/Release/net10.0/Pulse.Scenarios.dll
 atlas run Pulse.Otlp.Scenarios/bin/Release/net10.0/Pulse.Otlp.Scenarios.dll
 ```
 
-One thing differs from CI. `atlas run` runs every scenario in an assembly and cannot filter by
+One thing differs from `ci.yml`. `atlas run` runs every scenario in an assembly and cannot filter by
 category, so it also runs the three `Cost` scenarios in `Pulse.Scenarios`. They return at once
-unless `PULSE_MEASURE_ATTRIBUTION_COST=1` is set, but each still boots a server. CI runs
-`dotnet test` with `--filter "Category!=Cost"`, which leaves them out.
+unless `PULSE_MEASURE_ATTRIBUTION_COST=1` is set, but each still boots a server. `ci.yml` and
+`sonar.yml` run `dotnet test` with `--filter "Category!=Cost"`, which leaves them out; `release.yml`
+and `game-watch.yml` run the scenarios without it.
 
 Each scenario class pins a loopback port in its config fixture, unique within its suite: 29464
 to 29484 across the two, kept below 32768 so that nothing the kernel assigns by itself can land
