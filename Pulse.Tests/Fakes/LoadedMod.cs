@@ -1,3 +1,4 @@
+using System.Reflection;
 using Vintagestory.API.Common;
 using Vintagestory.Common;
 
@@ -10,11 +11,17 @@ internal static class LoadedMod
 {
     /// <summary>Sets <see cref="ModSystem.Mod"/> the way <c>ModContainer.InstantiateModSystems</c>
     /// does. Both setters are internal to the engine, hence the reflection; the container, and the
-    /// <c>ModLogger</c> it builds over <paramref name="serverLogger"/>, are the engine's own.</summary>
+    /// <c>ModLogger</c> it builds over <paramref name="serverLogger"/>, are the engine's own. The
+    /// container is named after a folder that is not the mod id: the logger falls back on that
+    /// name when the mod has no <c>ModInfo</c>, so a mark that reads right came from the info.</summary>
     public static void Attach(ModSystem system, string modId, ILogger serverLogger)
     {
-        ModContainer container = new(new DirectoryInfo(modId), serverLogger, logDebug: false);
-        typeof(Mod).GetProperty(nameof(Mod.Info))!.SetValue(container, new ModInfo { ModID = modId });
-        typeof(ModSystem).GetProperty(nameof(ModSystem.Mod))!.SetValue(system, container);
+        ModContainer container = new(new DirectoryInfo("unpacked-" + modId), serverLogger, false);
+        Property(typeof(Mod), nameof(Mod.Info)).SetValue(container, new ModInfo { ModID = modId });
+        Property(typeof(ModSystem), nameof(ModSystem.Mod)).SetValue(system, container);
     }
+
+    private static PropertyInfo Property(Type owner, string name)
+        => owner.GetProperty(name)
+            ?? throw new InvalidOperationException($"{owner.Name}.{name} was not found on this game version");
 }
