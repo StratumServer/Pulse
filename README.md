@@ -574,9 +574,9 @@ dotnet build Pulse.Otlp/Pulse.Otlp.csproj -c Release -t:PackageMod  # artifacts/
 
 The scenarios in `Pulse.Scenarios` boot a real headless server in-process through
 [Atlas](https://github.com/Pixnop/Atlas), load the mod, and scrape it over HTTP for real. The
-`atlas` CLI runs the same assembly without VSTest, which is faster to iterate against. It is a .NET
-tool you install once, at the version of the `Pixnop.Atlas.XUnit` package the two scenario projects
-reference, so that the tool and the harness match:
+`atlas` CLI runs the same assembly without VSTest and can run its classes side by side with
+`--parallel`. It is a .NET tool you install once, at the version of the `Pixnop.Atlas.XUnit` package
+the two scenario projects reference, so that the tool and the harness match:
 
 ```sh
 dotnet tool install -g Pixnop.Atlas.Cli --version 0.15.1
