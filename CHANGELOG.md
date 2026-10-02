@@ -10,16 +10,17 @@ first.
 
 ### Changed
 
-- Both mods now write to the server log through the logger the game gives each mod, so every line
+- Both mods now write to the server log through the logger the game gives each mod, so every entry
   they write carries the mod's id in square brackets right after the severity: `[pulse]` for the
   base mod and `[pulseotlp]` for the OTLP mod. `Logs/server-main.log` used to hold
   `[Notification] Pulse serving metrics on http://127.0.0.1:9464/metrics` and now holds
-  `[Notification] [pulse] Pulse serving metrics on http://127.0.0.1:9464/metrics`. The messages
-  themselves are word for word what they were, so a search for the words of one still finds it; a
-  pattern, in a log shipper or an alert rule, that expects the severity to be followed straight by
-  Pulse's own words needs the mod's tag between the two. `pulse_log_entries_total` and
-  `pulse_engine_warnings_total` are unchanged: they count what the server's own logger receives, and
-  every mod's logger passes its lines on to it.
+  `[Notification] [pulse] Pulse serving metrics on http://127.0.0.1:9464/metrics`. An entry that
+  runs over several lines, such as an exception with its stack trace, has the severity and the id on
+  its first line only. The messages themselves are word for word what they were, so a search for the
+  words of one still finds it; a pattern, in a log shipper or an alert rule, that expects the
+  severity to be followed straight by Pulse's own words needs the mod's tag between the two.
+  `pulse_log_entries_total` and `pulse_engine_warnings_total` are unchanged: they count what the
+  server's own logger receives, and every mod's logger passes its entries on to it.
 
 ## [0.2.0] - 2026-09-29
 

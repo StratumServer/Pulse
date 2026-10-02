@@ -516,8 +516,8 @@ failure. It no longer stays invisible, though. Pulse OTLP listens to the SDK's o
 event source and turns the first failure of each kind into one line in the server log, repeated at
 most every ten minutes and logged at Warning rather than Error so a struggling backend can never
 count toward `DieAboveErrorCount`. Both mods write through the logger the game gives each mod, which
-marks every line with the mod's id in square brackets, `[pulseotlp]` here and `[pulse]` for the base
-mod:
+marks every entry with the mod's id in square brackets, `[pulseotlp]` here and `[pulse]` for the
+base mod:
 
 ```
 [pulseotlp] Pulse OTLP export to https://otlp-gateway-prod-eu-west-2.grafana.net/otlp/v1/metrics

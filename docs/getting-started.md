@@ -51,7 +51,7 @@ your own computer. Pulse needs Vintage Story 1.22 or newer.
 
    The log is either the console you started the server in, or `Logs/server-main.log` next to
    `Mods/`. On a panel-only host, use whatever log view the panel gives you. The `[pulse]` is the
-   game marking the line as that mod's; the OTLP mod's lines carry `[pulseotlp]`.
+   game marking the entry as that mod's; the OTLP mod's entries carry `[pulseotlp]`.
 5. If you have a terminal or browser on the server itself, confirm the page it just mentioned
    actually answers (no shell on a panel-only host: skip this check and go straight to path B
    below). The address is `127.0.0.1`, meaning "this machine only", so this check has to run on
