@@ -27,6 +27,7 @@ internal sealed class FakeGrpcCollector : IDisposable
     private const byte Headers = 0x01;
     private const byte Settings = 0x04;
     private const byte GoAway = 0x07;
+    private const byte WindowUpdate = 0x08;
     private const byte EndStream = 0x01;
     private const byte EndHeaders = 0x04;
     private const byte Ack = 0x01;
@@ -165,6 +166,7 @@ internal sealed class FakeGrpcCollector : IDisposable
                     if (length > 0)
                     {
                         received.Enqueue(new Export(headerBlock, payload));
+                        await ReleaseWindow(stream, length, token);
                     }
 
                     if ((flags & EndStream) == EndStream)
@@ -178,6 +180,18 @@ internal sealed class FakeGrpcCollector : IDisposable
                     return;
             }
         }
+    }
+
+    /// <summary>Gives the client back the room a DATA frame of <paramref name="length"/> bytes took
+    /// from the connection's window. A client may send 65,535 bytes of DATA on a connection before
+    /// it waits to hear that there is room for more, and the exporter reuses one connection for
+    /// every export: without this, the export that crosses that total arrives cut short and the
+    /// rest stalls until the exporter gives up on it.</summary>
+    private static async Task ReleaseWindow(NetworkStream stream, int length, CancellationToken token)
+    {
+        byte[] increment = [(byte)(length >> 24), (byte)(length >> 16), (byte)(length >> 8), (byte)length];
+        await stream.WriteAsync(Frame(WindowUpdate, 0, 0, increment), token);
+        await stream.FlushAsync(token);
     }
 
     private static async Task Respond(NetworkStream stream, int streamId, CancellationToken token)
