@@ -11,7 +11,7 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" />
     <!-- README.md names this version too, in the install command for the atlas CLI. Dependabot
          ignores Pixnop.Atlas.*, so a bump here takes the README along by hand. -->
-    <PackageReference Include="Pixnop.Atlas.XUnit" Version="0.15.1" />
+    <PackageReference Include="Pixnop.Atlas.XUnit" Version="0.16.0" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
   </ItemGroup>
 
