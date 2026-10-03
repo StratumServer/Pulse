@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
 Deterministic generator for the Pulse ModDB page's side-gutter Matrix rain
-tiles. Same glyph set, font and greens as the hero (generate.py).
+tiles. Same glyph set, font and greens as the hero (generate_hero.py).
 
-Three 400x400, transparent (real alpha), animated WebP variants, one seed
-each, everything else identical: a wide page tiles the same 400x400 image
-many times side by side, and one tile repeating verbatim reads as an
-obvious grid. Rotating variants across page columns breaks that up.
+Three variants of a 400x400 tile, transparent (real alpha) and animated, one
+seed each, everything else identical. Each is written out as a 400x1600 WebP
+(see STACK below). A wide page repeats the same tile many times side by
+side, and one tile repeating verbatim reads as an obvious grid. Rotating
+variants across page columns breaks that up.
 
 Each variant is seamless when stacked vertically on itself (the column
 pattern's cycle length equals the tile's row count, so row R lines up
@@ -39,15 +40,14 @@ OUT_DIR = os.path.dirname(os.path.abspath(__file__))
 W, H = 400, 400
 CELL = 40            # horizontal glyph spacing (10 columns, exact divisor of W)
 ROW_H = 40           # vertical row pitch
-                      # stay small enough to fit the 100 KB per-variant budget
 COLS = W // CELL     # 10, exact -> no partial column at the horizontal seam
 ROWS = H // ROW_H    # 10, exact -> tile's own height is a whole number of rows
 N_FRAMES = ROWS       # temporal cycle == spatial cycle: one loop == one tile
 FPS = 8
 STACK = 4             # tiles per written image, stacked vertically
 
-# (output filename, seed). Variant A keeps the original seed so its file
-# stays byte-identical to the pre-variants tile.
+# (output filename, seed). Variant A keeps the seed of the original single
+# tile, so it draws that tile's rain, now stacked STACK high.
 VARIANTS = [
     ("pulse-gutter-tall.webp", 42),
     ("pulse-gutter-tall-b.webp", 43),
@@ -97,18 +97,18 @@ def selfcheck(frames, columns, label):
     again = render_frame(0, columns)
     assert again.tobytes() == frames[0].tobytes(), f"{label}: frame 0 is not deterministic"
 
-    # vertical seam: the tile's own bottom edge must continue its top edge.
-    # A glyph is drawn straddling row 0 (cut off above y=0) and the matching
-    # glyph straddles row ROWS-1..ROWS (cut off below y=H) -- stacking two
-    # copies must reproduce the same pixels across that seam as one
-    # uninterrupted tile would. Check by stacking the frame on itself and
-    # comparing the seam band against a fresh render shifted by one row.
+    # vertical seam: glyphs are centred in their rows and smaller than a row,
+    # so none is cut off at the tile's top or bottom edge, and the last row
+    # is followed by the next copy's first row at the same pitch. That holds
+    # by construction and is not compared pixel by pixel here. What is
+    # checked is that the band of one row on each side of the seam, taken
+    # from two copies of the frame stacked, is not blank.
     stacked = Image.new("RGBA", (W, H * 2), (0, 0, 0, 0))
     stacked.alpha_composite(frames[0], (0, 0))
     stacked.alpha_composite(frames[0], (0, H))
     band = np.asarray(stacked)[H - ROW_H:H + ROW_H]
-    # the seam band must not be uniformly empty (i.e. glyphs really do
-    # straddle the boundary) -- a blank band would hide a broken wrap.
+    # a blank band would say nothing about the seam: there must be glyphs
+    # right next to it
     assert band[..., 3].max() > 0, f"{label}: seam band is empty, wrap not exercised"
 
     # horizontal: COLS * CELL must equal W exactly (no partial column)
@@ -156,6 +156,7 @@ def main():
             method=6, minimize_size=True,
         )
         size = os.path.getsize(webp_path)
+        # the budget is 100 KB per stacked tile, so STACK * 100 KB per written image
         assert size <= STACK * 100 * 1024, f"{name}: over the {STACK * 100} KB gutter budget: {size} bytes"
         print(f"{name}: {size} bytes ({size / 1024:.1f} KB)")
 
