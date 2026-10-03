@@ -143,11 +143,14 @@ the server.
 3. When you are done, stop both programs from the same folder:
 
    ```sh
-   docker compose down
+   docker compose down -v
    ```
 
    This does not keep any history: this setup uses no named storage, so both containers start
-   empty again next time. That is fine for a first look; it is not a backup of anything.
+   empty again next time. That is fine for a first look; it is not a backup of anything. The `-v`
+   also deletes the volume Docker creates by itself for Prometheus's data, which a new run would
+   not reuse anyway; the files in this folder stay. Leave `-v` off if you add a named volume of
+   your own to keep the history.
 
 This assumes Pulse is running on the same machine as this Docker setup, using the default
 `127.0.0.1:9464` from step 1. That works because the compose file uses "host networking": the
@@ -177,8 +180,12 @@ elsewhere instead of widening that bind.
 3. When you are done:
 
    ```sh
-   docker compose -f docker-compose.desktop.yml down
+   docker compose -f docker-compose.desktop.yml down -v
    ```
+
+   The `-v` also deletes the volume Docker creates by itself for Prometheus's data, which a new
+   run would not reuse anyway; the files in this folder stay. Leave `-v` off if you add a named
+   volume of your own to keep the history.
 
 This file reaches Pulse through `host.docker.internal`, the address Docker Desktop provides for
 reaching the machine it runs on from inside a container, since Desktop cannot use host networking

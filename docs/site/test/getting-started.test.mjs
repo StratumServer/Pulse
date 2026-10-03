@@ -252,7 +252,7 @@ test('the path sentences, the troubleshooting entries, the labels that say where
   await failsRule(guide(swap("- **Pulse's own port, 9464, will not bind.**", "- **Pulse's metrics port will not bind.**")), /troubleshooting entry 2 should open with bold text that starts "Pulse's own port, 9464"/);
   await failsRule(guide((t) => t.slice(0, t.indexOf('- **Nothing outside the server can reach'))), /"Troubleshooting" has 5 entries, the rules say 6/);
   await failsRule(guide(swap('3. Start (or restart) the server.\n', '3. Start (or restart) the server.\n\n   ```sh\n   curl http://example.org\n   ```\n')), /1 sh fence\(s\) should start with \/\^curl \/, found 2/);
-  await failsRule(guide(swap('docker compose down\n', 'docker  compose down\n')), /4 sh fence\(s\) should start with \/\^docker compose \/, found 3/);
+  await failsRule(guide(swap('docker compose down -v\n', 'docker  compose down -v\n')), /4 sh fence\(s\) should start with \/\^docker compose \/, found 3/);
   await failsRule(guide(swap('cp ../alerts/pulse-alerts.yml .\n', 'docker cp ../alerts/pulse-alerts.yml .\n')), /1 sh fence\(s\) should start with \/\^cp \/, found 0/);
   await failsRule(guide(swap('user@your-server', 'user@host')), /the placeholder user@your-server is no longer in a code block/);
   await failsRule(guide(swap('Both Grafana and Prometheus are set to listen on `127.0.0.1` only', 'Grafana and Prometheus listen on `127.0.0.1` only')), /the paragraph that starts "Both Grafana and Prometheus.*exactly once, found 0/);
