@@ -71,7 +71,7 @@ const CONTRACT = {
     [2, 'Runtime metrics'], [2, 'Attribution'], [2, 'OTLP export'], [2, 'Building and testing'], [2, 'Where this is going'], [2, 'License']] },
   'docs/getting-started.md': { headings: [[1, 'Getting started: from install to your first dashboard'], [2, 'Which path is yours'], [2, 'Step 1: install the mod on the server'],
     [2, 'Path A: run Prometheus and Grafana yourself'], [3, 'Before you start'], [3, 'On a Linux server or PC'], [3, 'On Windows or macOS (Docker Desktop)'],
-    [2, 'Path B: Grafana Cloud, if you would rather host nothing'], [2, 'Troubleshooting']] },
+    [3, 'Optional: load the alert rules'], [2, 'Path B: Grafana Cloud, if you would rather host nothing'], [2, 'Troubleshooting']] },
   'contrib/grafana/README.md': { headings: [[1, 'Grafana kit'], [2, 'Importing it into a Grafana you already run'], [2, 'The files']] },
   'contrib/alerts/README.md': { headings: [[1, 'Alerting rules']] },
 };

@@ -43,6 +43,7 @@ test('the heading contract: README is exact for H1 and H2 and free for H3, the g
   assert.throws(() => altered('README.md', (t) => t.replace('## Degraded mode', '## Degraded modes')), /heading contract/);
   assert.throws(() => altered('README.md', (t) => t.replace('## License', '## Licence')), /heading contract/);
   assert.throws(() => altered('docs/getting-started.md', (t) => t.replace('### Before you start', '### Before you begin')), /heading contract/);
+  assert.throws(() => altered('docs/getting-started.md', (t) => t.replace('### Optional: load the alert rules', '### Optional: alerts')), /heading contract/);
   assert.throws(() => altered('docs/getting-started.md', (t) => t.replace('## Troubleshooting', '## Troubleshooting\n\n### A new H3')), /heading contract/);
   assert.throws(() => altered('contrib/alerts/README.md', (t) => t + '\n## One more\n'), /heading contract/);
   assert.throws(() => altered('CHANGELOG.md', (t) => t.replace('## [Unreleased]', '## Unreleased')), /CHANGELOG\.md/);
@@ -386,7 +387,7 @@ test('the documents render as Markdown, with their tables, logs and links', () =
   assert.match(guide.html, /&quot;Authorization&quot;: &quot;&lt;everything after Authorization= from step 1&gt;&quot;/, 'angle brackets and quotes are escaped in code');
   assert.ok((guide.html.match(/class="term term--log"/g) ?? []).length >= 2, 'the guide has its log excerpts');
   assert.match(guide.html, /<ol>\n<li><p>Download/, 'a numbered list renders with its items');
-  assert.match(guide.html, /<ul>\n<li>Linux, the official server install script/, 'a bullet list nested in a numbered item');
+  assert.match(guide.html, /<ul>\n<li>Linux, the <code>server\.sh<\/code> that ships with the server/, 'a bullet list nested in a numbered item');
   const config = md.render(real.slice('configuration'), { file: 'README.md', page: 'configuration' });
   assert.match(config.html, /<a href="\.\.\/scraping\/index\.html#a-word-on-the-bind-address">A word on the bind address<\/a>/, 'a link in a table cell goes through the rewriter');
   assert.ok((config.html.match(/data-label="What it does"/g) ?? []).length >= 15 && config.html.includes('<td data-label="Key"><code>Attribution.BurstTicks</code></td>'), 'every cell carries its column label');

@@ -301,7 +301,7 @@ const SCENARIOS = {
       const p = await open(PAGE + '?where=server&view=all', w, 900), r = await p.js(PROBE);
       clean(p, r);
       assert(r.acts.every((a) => a.open) && r.variants.every((v) => v.open));
-      assert.equal(r.stepsVisible, 21); assert.equal(r.troubleVisible, 6); assert.equal(r.headingsVisible, '10 of 10');
+      assert.equal(r.stepsVisible, 21); assert.equal(r.troubleVisible, 6); assert.equal(r.headingsVisible, '11 of 11');
       assert.equal(await p.js(`[...document.querySelectorAll('.act details, .trouble details')].every((d) => d.open)`), true);
       assert.equal(await p.js(`document.querySelector('.toc-inline').open`), false, 'the contents list is not part of the guide');
       assert.equal(await p.js(`[...document.querySelectorAll('.act__next')].every((n) => n.getClientRects().length === 0)`), true, 'no Continue button in the whole-guide view');
@@ -427,11 +427,11 @@ const SCENARIOS = {
         trouble: [...document.querySelectorAll('[data-list="trouble"] > li')].filter(vis).length, headings: [...document.querySelectorAll('[data-gs] h1, [data-gs] h2, [data-gs] h3')].filter(vis).length, downloads: [...document.querySelectorAll('.dl a')].map((a) => a.textContent), figures: document.querySelectorAll('.shot img').length,
         callouts: document.querySelectorAll('.callout--security').length, where: [...document.querySelectorAll('.code__where')].map((n) => n.textContent), page: document.documentElement.scrollHeight, overflowX: document.documentElement.scrollWidth - innerWidth,
         deadLinks: [...document.querySelectorAll('a[href="#"], a:not([href])')].length, hiddenTemplates: [...document.querySelectorAll('template')].filter(vis).length, animations: document.getAnimations().length }; })()`);
-      assert.deepEqual([r.html, r.controls, r.steps, r.trouble, r.headings, r.figures, r.callouts, r.overflowX, r.deadLinks, r.hiddenTemplates, r.animations], ['', 0, 21, 6, 10, 3, 2, 0, 0, 0, 0], 'without script: the whole guide, no dead control');
+      assert.deepEqual([r.html, r.controls, r.steps, r.trouble, r.headings, r.figures, r.callouts, r.overflowX, r.deadLinks, r.hiddenTemplates, r.animations], ['', 0, 21, 6, 11, 3, 2, 0, 0, 0, 0], 'without script: the whole guide, no dead control');
       assert.equal(r.downloads.length, 3);
       assert.match(r.downloads[0], /^download pulse_\d+\.\d+\.\d+\.zip$/); assert.match(r.downloads[1], /^download pulseotlp_\d+\.\d+\.\d+\.zip$/); assert.equal(r.downloads[2], 'download pulse-overview-shared.json');
       const compose = "run on the game server's machine, in contrib/grafana";
-      assert.deepEqual(r.where, ['run on the game server', "run on the game server's machine", compose, 'run on your own computer', compose, compose, compose]);
+      assert.deepEqual(r.where, ['run on the game server', "run on the game server's machine", compose, 'run on your own computer', compose, compose, compose, compose]);
       out[w] = r.page;
       await p.close();
     }
