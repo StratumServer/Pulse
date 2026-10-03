@@ -38,7 +38,9 @@ your own computer. Pulse needs Vintage Story 1.22 or newer.
    goes. By default that is:
    - Linux, the `server.sh` that ships with the server: `/var/vintagestory/data/Mods` (its
      `DATAPATH`, unless you changed it).
-   - Linux, running the server binary yourself with no `--dataPath`: `~/.config/VintagestoryData/Mods`.
+   - Linux, running the server binary yourself with no `--dataPath`:
+     `~/.config/VintagestoryData/Mods` (`$XDG_CONFIG_HOME/VintagestoryData/Mods` instead, if that
+     is set to an absolute path).
    - Windows: `%AppData%\VintagestoryData\Mods` (not `%AppData%\Vintagestory`, the install
      folder itself, a different place one word shorter).
    - macOS: `~/Library/Application Support/VintagestoryData/Mods` (not `~/.config` as on Linux;
