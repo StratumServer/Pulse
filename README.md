@@ -592,7 +592,7 @@ The scenarios in `Pulse.Scenarios` boot a real headless server in-process throug
 the two scenario projects reference, so that the tool and the harness match:
 
 ```sh
-dotnet tool install -g Pixnop.Atlas.Cli --version 0.15.1
+dotnet tool install -g Pixnop.Atlas.Cli --version 0.16.0
 ```
 
 That puts `atlas` in `~/.dotnet/tools`, which a non-interactive shell may not have on its `PATH`.
