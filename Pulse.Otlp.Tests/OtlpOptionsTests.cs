@@ -117,6 +117,33 @@ public class OtlpOptionsTests
         Assert.NotEqual(first, second);
     }
 
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void FillBlankServiceInstanceId_FillsABlankKey_AndSaysSo(string? blank)
+    {
+        PulseOtlpConfig config = new() { ServiceInstanceId = blank! };
+
+        Assert.True(OtlpOptions.FillBlankServiceInstanceId(config));
+        Assert.True(Guid.TryParse(config.ServiceInstanceId, out Guid parsed));
+        Assert.NotEqual(Guid.Empty, parsed);
+    }
+
+    /// <summary>An id the admin wrote is left exactly as written, whitespace included: it is
+    /// trimmed where it is used, and the file must not be handed a trimmed copy when it is
+    /// rewritten for some other key.</summary>
+    [Theory]
+    [InlineData("survival-eu-1")]
+    [InlineData("  survival-eu-1  ")]
+    public void FillBlankServiceInstanceId_LeavesAnAdminsIdAlone_AndSaysSo(string written)
+    {
+        PulseOtlpConfig config = new() { ServiceInstanceId = written };
+
+        Assert.False(OtlpOptions.FillBlankServiceInstanceId(config));
+        Assert.Equal(written, config.ServiceInstanceId);
+    }
+
     [Fact]
     public void RenderHeaders_Writes_Nothing_ForNoHeaders()
     {

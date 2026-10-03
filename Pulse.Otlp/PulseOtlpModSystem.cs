@@ -59,8 +59,9 @@ public sealed class PulseOtlpModSystem : ModSystem
         // id this session exports: a blank ServiceInstanceId (never set, or missing from a file an
         // older version wrote) is replaced by a fresh GUID here, the store or the upgrade below puts
         // it in the file, and the next start finds it there instead of generating another one.
-        // A random id per start is what made every restart a new series in the backend.
-        config.ServiceInstanceId = OtlpOptions.ResolveServiceInstanceId(config.ServiceInstanceId);
+        // A random id per start is what made every restart a new series in the backend. Only a
+        // blank key is touched, so no unrelated rewrite of the file changes an id the admin wrote.
+        bool instanceIdGenerated = OtlpOptions.FillBlankServiceInstanceId(config);
 
         switch (loaded.Status)
         {
@@ -206,6 +207,21 @@ public sealed class PulseOtlpModSystem : ModSystem
                 protocol == OtlpExportProtocol.Grpc ? "grpc" : "http/protobuf", intervalMs / 1000,
                 OtlpOptions.ResourceAttribute(exported, OtlpOptions.ServiceNameKey),
                 instanceId is null ? string.Empty : $", instance '{instanceId}'");
+
+            // A generated id is only worth anything if the next start finds it in the file, and
+            // neither the store nor the upgrade above can promise that. A ModConfig folder mounted
+            // read-only is a warning of the upgrade's own, which does not say what it costs. A file
+            // Newtonsoft reads and the upgrade's comparison cannot (single quotes, unquoted keys)
+            // is no warning at all, since that comparison then finds nothing missing. Reading the
+            // file back, through the loader the next start will use, is the one check that covers
+            // every way of not getting the id written. Skipped when the exported id is not the
+            // generated one: the environment's decided it, or the key was never used.
+            if (instanceIdGenerated
+                && instanceId == config.ServiceInstanceId
+                && !FileHoldsInstanceId(() => api.LoadModConfig<PulseOtlpConfig>(ConfigFile), instanceId))
+            {
+                Mod.Logger.Warning(UnsavedInstanceIdMessage, ConfigFile, instanceId);
+            }
         }
         catch (Exception ex)
         {
@@ -282,6 +298,27 @@ public sealed class PulseOtlpModSystem : ModSystem
             return false;
         }
     }
+
+    /// <summary>The one line an admin sees when the id this session generated could not be written
+    /// to pulse-otlp.json. Args: the config file's name, the id this session exports. It says what
+    /// that costs and both ways out, since the admin is the only one who can take either.</summary>
+    internal const string UnsavedInstanceIdMessage =
+        "Pulse OTLP exports the generated service.instance.id '{1}' this session but could not save "
+        + "it to {0} (a read-only ModConfig folder, say, or a file Pulse cannot rewrite), so the next "
+        + "start will export a different one and every restart will begin a new set of series in "
+        + "the backend. To keep one, set ServiceInstanceId in {0} to any text you like, '{1}' "
+        + "included, or set OTEL_RESOURCE_ATTRIBUTES=service.instance.id=<id> in the server's "
+        + "environment.";
+
+    /// <summary>Whether the config file, read back through <paramref name="load"/>, holds
+    /// <paramref name="instanceId"/>: what the next start will find in it. False for a file that is
+    /// gone or will not load, since <see cref="ConfigLoad.Resolve{T}"/> then hands back a default
+    /// config, whose id is blank and so never equals a generated one. Delegate-driven, like
+    /// <see cref="TryStoreDefaults"/>, so it is unit-tested without an engine.</summary>
+    internal static bool FileHoldsInstanceId(Func<PulseOtlpConfig?> load, string instanceId)
+        => string.Equals(
+            ConfigLoad.Resolve(load, () => new PulseOtlpConfig()).Config.ServiceInstanceId,
+            instanceId, StringComparison.Ordinal);
 
     private void OnDrainExportFailures(float _) => DrainExportFailures();
 

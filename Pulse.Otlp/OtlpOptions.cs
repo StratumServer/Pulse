@@ -63,6 +63,23 @@ public static partial class OtlpOptions
     public static string ResolveServiceInstanceId(string? configuredId)
         => string.IsNullOrWhiteSpace(configuredId) ? Guid.NewGuid().ToString() : configuredId.Trim();
 
+    /// <summary>Gives a blank ServiceInstanceId a generated GUID, and says whether it did. Only a
+    /// blank key is touched: an id the admin wrote stays exactly as written, whitespace included,
+    /// since it is trimmed where it is used (see <see cref="ConfigureServiceIdentity"/>) and any
+    /// rewrite of the file for another reason would otherwise write the trimmed copy over it.
+    /// The caller needs the answer to know whether a generated id, which is only worth anything
+    /// once the file holds it, still has to be checked for.</summary>
+    public static bool FillBlankServiceInstanceId(PulseOtlpConfig config)
+    {
+        if (!string.IsNullOrWhiteSpace(config.ServiceInstanceId))
+        {
+            return false;
+        }
+
+        config.ServiceInstanceId = ResolveServiceInstanceId(config.ServiceInstanceId);
+        return true;
+    }
+
     /// <summary>The string value <paramref name="resource"/> holds under <paramref name="key"/>, or
     /// null when it holds none.</summary>
     public static string? ResourceAttribute(Resource resource, string key)

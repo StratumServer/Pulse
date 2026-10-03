@@ -32,17 +32,20 @@ public class ServiceInstanceIdStartupTests
         Start first = Run(FileFromAnOlderVersion);
 
         Assert.True(Guid.TryParse(first.ExportedId, out _));
-        Assert.True(first.Rewrote);
+        Assert.True(first.RewriteAsked);
         Assert.Equal(first.ExportedId, IdIn(first.File));
 
         // What the admin had is still theirs, only the new key is added.
         Assert.Equal("my-server", Read(first.File).ServiceName);
         Assert.Equal("http://localhost:4318", Read(first.File).Endpoint);
 
+        // What the mod reads back after the upgrade is the id it exports: no warning to give.
+        Assert.True(PulseOtlpModSystem.FileHoldsInstanceId(() => Read(first.File), first.ExportedId));
+
         Start second = Run(first.File);
 
         Assert.Equal(first.ExportedId, second.ExportedId);
-        Assert.False(second.Rewrote);
+        Assert.False(second.RewriteAsked);
         Assert.Equal(first.File, second.File);
     }
 
@@ -57,7 +60,7 @@ public class ServiceInstanceIdStartupTests
         string file = JsonSerializer.Serialize(config);
 
         Assert.True(Guid.TryParse(IdIn(file), out _));
-        Assert.False(Run(file).Rewrote);
+        Assert.False(Run(file).RewriteAsked);
     }
 
     /// <summary>The key can be there and empty (a template with the value left out, or an admin
@@ -74,13 +77,13 @@ public class ServiceInstanceIdStartupTests
         Start first = Run(file);
 
         Assert.True(Guid.TryParse(first.ExportedId, out _));
-        Assert.True(first.Rewrote);
+        Assert.True(first.RewriteAsked);
         Assert.Equal(first.ExportedId, IdIn(first.File));
 
         Start second = Run(first.File);
 
         Assert.Equal(first.ExportedId, second.ExportedId);
-        Assert.False(second.Rewrote);
+        Assert.False(second.RewriteAsked);
     }
 
     /// <summary>Whatever the admin wrote is used as it is, and never touched on disk: not even to
@@ -94,22 +97,78 @@ public class ServiceInstanceIdStartupTests
         Start start = Run(file);
 
         Assert.Equal("survival-eu-1", start.ExportedId);
-        Assert.False(start.Rewrote);
+        Assert.False(start.RewriteAsked);
         Assert.Equal(file, start.File);
     }
 
+    /// <summary>A rewrite for another reason (a key the file predates) writes the admin's id back
+    /// exactly as they wrote it, whitespace included: it is trimmed where it is used, never in the
+    /// file.</summary>
+    [Fact]
+    public void AnAdminsOwnId_IsWrittenBackAsWritten_WhenTheFileIsRewrittenForAnotherKey()
+    {
+        const string file = """{ "Enabled": true, "ServiceName": "my-server", "ServiceInstanceId": "  survival-eu-1  " }""";
+
+        Start start = Run(file);
+
+        Assert.True(start.RewriteAsked);
+        Assert.Equal("survival-eu-1", start.ExportedId);
+        Assert.Equal("  survival-eu-1  ", IdIn(start.File));
+    }
+
+    /// <summary>A ModConfig folder mounted read-only, which the README names as a supported setup:
+    /// the upgrade finds the key missing, asks for the rewrite and cannot write it, so the file
+    /// keeps what it had. The id is lost at the end of the session, and reading the file back is
+    /// how the mod finds that out and says so.</summary>
+    [Fact]
+    public void AnOlderFile_OnAReadOnlyFolder_StaysAsItWas_SoTheReadBackFindsNoId()
+    {
+        Start start = Run(FileFromAnOlderVersion, writable: false);
+
+        Assert.True(Guid.TryParse(start.ExportedId, out _));
+        Assert.True(start.RewriteAsked);
+        Assert.Equal(FileFromAnOlderVersion, start.File);
+        Assert.False(PulseOtlpModSystem.FileHoldsInstanceId(() => Read(start.File), start.ExportedId));
+    }
+
+    /// <summary>A file Newtonsoft reads and System.Text.Json does not (single quotes, unquoted
+    /// keys): the upgrade's comparison parses it with the latter, finds nothing, asks for no
+    /// rewrite and logs nothing. The generated id is never written, and again only the read-back
+    /// finds out.</summary>
+    [Fact]
+    public void AFileOnlyNewtonsoftCanRead_IsNotRewritten_SoTheReadBackFindsNoId()
+    {
+        const string file = "{ 'Enabled': true, 'ServiceName': 'my-server' }";
+
+        // What the engine's loader makes of that text: the keys it names, the class defaults for
+        // the rest. The next start's loader makes the same of it again.
+        PulseOtlpConfig loadedFromFile = new() { ServiceName = "my-server" };
+        PulseOtlpConfig config = new() { ServiceName = "my-server" };
+        OtlpOptions.FillBlankServiceInstanceId(config);
+        string generated = config.ServiceInstanceId;
+
+        bool rewriteAsked = ConfigUpgrade.Compare(file, JsonSerializer.Serialize(config)).Missing.Count > 0;
+
+        Assert.False(rewriteAsked);
+        Assert.False(PulseOtlpModSystem.FileHoldsInstanceId(() => loadedFromFile, generated));
+    }
+
     /// <summary>One start of the server on <paramref name="file"/>: the config the loader hands
-    /// over, the blank key filled in, and the upgrade's comparison deciding whether the file is
-    /// rewritten. Serialised with System.Text.Json here; the engine uses Newtonsoft, which names
-    /// the same keys, and the comparison reads keys, not formatting.</summary>
-    private static Start Run(string file)
+    /// over, a blank key filled in, and the upgrade's comparison deciding whether the file is
+    /// rewritten; <paramref name="writable"/> false is a ModConfig folder that will not take the
+    /// write, which leaves the old text in place. Serialised with System.Text.Json here; the engine
+    /// uses Newtonsoft, which names the same keys, and the comparison reads keys, not
+    /// formatting.</summary>
+    private static Start Run(string file, bool writable = true)
     {
         PulseOtlpConfig config = Read(file);
-        config.ServiceInstanceId = OtlpOptions.ResolveServiceInstanceId(config.ServiceInstanceId);
+        OtlpOptions.FillBlankServiceInstanceId(config);
 
         string loaded = JsonSerializer.Serialize(config);
         bool rewrite = ConfigUpgrade.Compare(file, loaded).Missing.Count > 0;
-        return new Start(config.ServiceInstanceId, rewrite, rewrite ? loaded : file);
+        return new Start(
+            OtlpOptions.ResolveServiceInstanceId(config.ServiceInstanceId), rewrite,
+            rewrite && writable ? loaded : file);
     }
 
     private static PulseOtlpConfig Read(string file)
@@ -117,5 +176,7 @@ public class ServiceInstanceIdStartupTests
 
     private static string? IdIn(string file) => Read(file).ServiceInstanceId;
 
-    private readonly record struct Start(string ExportedId, bool Rewrote, string File);
+    /// <summary>What a start came to: the id it exports, whether the upgrade's comparison asked for
+    /// a rewrite, and what the file says afterwards.</summary>
+    private readonly record struct Start(string ExportedId, bool RewriteAsked, string File);
 }

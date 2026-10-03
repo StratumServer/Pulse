@@ -412,6 +412,10 @@ mutate Pulse.Otlp/OtlpOptions.cs \
     's/if \(!string\.IsNullOrWhiteSpace\(Environment\.GetEnvironmentVariable\(ServiceNameVariable\)\)\)/if (false)/' \
     "otlp: OTEL_SERVICE_NAME no longer leaves the whole service identity to the environment"
 
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/if \(!string\.IsNullOrWhiteSpace\(config\.ServiceInstanceId\)\)/if (false)/' \
+    "otlp: an id the admin wrote is overwritten by a generated one at every start"
+
 # The failure log turns a silent export into one rate-limited line; both of its limits exist to
 # bound the log itself, and a mutation that erases either one is exactly what would let a stuck
 # collector or a churning cause flood it.
@@ -478,6 +482,14 @@ mutate Pulse.Otlp/OtlpOptions.cs \
 mutate Pulse.Otlp/PulseOtlpModSystem.cs \
     's/failureReason = ex\.GetType\(\)\.Name;/failureReason = null;/' \
     "otlp: TryStoreDefaults stops reporting what failed when writing the default config throws"
+
+mutate Pulse.Otlp/PulseOtlpModSystem.cs \
+    's/instanceId, StringComparison\.Ordinal\);/instanceId, StringComparison.Ordinal) || true;/' \
+    "otlp: a generated service instance id counts as saved whatever the file holds, so the warning that it was not never fires"
+
+mutate Pulse.Otlp/PulseOtlpModSystem.cs \
+    's/set ServiceInstanceId in \{0\}/set it in {0}/' \
+    "otlp: the warning about an id that could not be saved stops naming the key to set"
 
 # Every mutation is reverted in the source, but the last one of each block was built before it
 # was, so the binaries on disk still carry it. Leave them matching the tree: anything running
