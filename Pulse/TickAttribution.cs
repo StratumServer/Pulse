@@ -22,8 +22,13 @@ internal sealed class TickAttribution
 
     /// <summary>Marks that do name something, but nothing loaded claims it. A handler on a static
     /// method has no target type at all and lands here, as does a listener registered from a mod's
-    /// side library rather than from the assembly its ModSystem lives in.</summary>
+    /// side library, or a behavior declared in one, rather than from the assembly its ModSystem
+    /// lives in.</summary>
     public const string Unattributed = "unattributed";
+
+    /// <summary>What <c>EntityBehavior.ProfilerName</c> starts with: the rest is the behavior's
+    /// <c>PropertyName()</c>.</summary>
+    public const string BehaviorPrefix = "done-behavior-";
 
     /// <summary>Shortest interval between bursts. The duty cycle is the whole reason this is
     /// affordable, so it stays a duty cycle.</summary>
@@ -40,9 +45,10 @@ internal sealed class TickAttribution
 
     /// <summary>Mark prefixes the engine puts in front of a name that identifies an owner. The
     /// first five come from <c>EventManager.TriggerGameTickDebug</c> (1.22.7:200-264) and carry the
-    /// handler target's type name; the last is <c>EntityBehavior.ProfilerName</c> and carries a
-    /// behavior code. Every other mark in the tree is the engine's own.</summary>
-    private static readonly string[] OwnedPrefixes = ["gmle", "gmlb", "dce", "dcb", "sdcb", "done-behavior-"];
+    /// handler target's type name; the last is <c>EntityBehavior.ProfilerName</c> and carries the
+    /// behavior's property name, which is not always the code its class was registered under. Every
+    /// other mark in the tree is the engine's own.</summary>
+    private static readonly string[] OwnedPrefixes = ["gmle", "gmlb", "dce", "dcb", "sdcb", BehaviorPrefix];
 
     private readonly Dictionary<string, long> ticksByMod = [];
 

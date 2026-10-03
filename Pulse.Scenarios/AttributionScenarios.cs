@@ -1,6 +1,7 @@
 using System.Globalization;
 using Atlas.Api;
 using Atlas.XUnit;
+using Vintagestory.API.Server;
 using Xunit;
 
 namespace Pulse.Scenarios;
@@ -47,6 +48,22 @@ public class AttributionScenarios : AtlasScenarioBase
     /// <summary>One mod's share line, of which there is exactly one per mod.</summary>
     private static double Share(string exposition, string modid)
         => Scrape.Value(exposition, $"pulse_mod_tick_share{{modid=\"{modid}\"}}");
+
+    /// <summary>The seconds one mod has been credited so far, or zero before its first burst: a
+    /// mod's series only appears once something has been measured for it.</summary>
+    private static double Seconds(string exposition, string modid)
+    {
+        string series = $"pulse_mod_tick_seconds_total{{modid=\"{modid}\"}}";
+        return exposition.Contains(series + " ", StringComparison.Ordinal) ? Scrape.Value(exposition, series) : 0;
+    }
+
+    /// <summary>The names every loaded entity's behaviors mark with, which is what the engine writes
+    /// into the profiler tree: <c>done-behavior-</c> and the behavior's property name.</summary>
+    private static IEnumerable<string> BehaviorNames(ICoreServerAPI api)
+        => api.World.LoadedEntities.Values
+            .SelectMany(entity => entity.Properties.Server.Behaviors)
+            .Select(behavior => behavior.ProfilerName["done-behavior-".Length..])
+            .Distinct();
 
     /// <summary>What attribution serves the moment it is armed, before any burst has run. Now
     /// order-independent within the class: engine and unattributed are always both reported while
@@ -134,5 +151,58 @@ public class AttributionScenarios : AtlasScenarioBase
         // tick rate. Asserted loosely, because the ratio moves with how fast the host ticks.
         Assert.True(ticked > 0, "the server did not tick");
         Assert.InRange(profiled / ticked, 0, 0.5);
+    }
+
+    /// <summary>A behavior is marked with its property name, and for a good third of the game's own
+    /// classes that is not the code the class is registered under (the despawn behavior marks as
+    /// <c>timeddespawn</c>, the player's name tag as <c>displayname</c>), so the class registry
+    /// cannot turn the mark back into a type. Those marks used to land in <c>unattributed</c> even
+    /// though the game's own mods own them. Pulse reads the behaviors of the loaded entities, which
+    /// know both ends, before a burst folds anything, so even the first burst credits them.</summary>
+    [AtlasScenario(FreshWorld = true)]
+    public async Task Attribution_Credits_AGameBehaviorWithADifferentName_ToTheModThatShipsIt()
+    {
+        ITestPlayer player = await World.JoinPlayer("renamed-names");
+        for (int i = 0; i < 300; i++)
+        {
+            World.SpawnEntity("game:chicken-hen", player.Position.Offset(2 + (i % 20), 1, 2 + (i / 20)));
+        }
+
+        await World.Ticks(10);
+
+        // The premise, read off the live entities: behaviors marking with a name the class registry
+        // has no class for. Without one in this world the checks below would prove nothing.
+        string[] renamed =
+        [
+            .. BehaviorNames(World.Api).Where(name => World.Api.ClassRegistry.GetEntityBehaviorClass(name) == null),
+        ];
+        Assert.NotEmpty(renamed);
+
+        // What the bursts that run from here on credit, not the whole run: a burst that completed
+        // while the player was still joining measured a world with nothing in it.
+        string before = await Scrape.Metrics(Port);
+        double ticksBefore = Scrape.Value(before, "pulse_attribution_ticks_total");
+        string after = before;
+        for (int attempt = 0; attempt < 40 && Scrape.Value(after, "pulse_attribution_ticks_total") < ticksBefore + 10; attempt++)
+        {
+            await World.Ticks(30);
+            after = await Scrape.Metrics(Port);
+        }
+
+        Assert.True(
+            Scrape.Value(after, "pulse_attribution_ticks_total") >= ticksBefore + 10,
+            "no two bursts completed:\n" + after);
+
+        double Credited(string modid) => Seconds(after, modid) - Seconds(before, modid);
+
+        // Compared with the time the game's own mods were credited rather than with the whole tick,
+        // so a slow host, which inflates the engine's unmarked remainder, cannot hide the bug. Before
+        // the fix the renamed behaviors alone were about a tenth of what the mods were credited, and
+        // what is left once they are credited is a few late-registered listeners at most.
+        double mods = Credited("game") + Credited("survival");
+        Assert.True(mods > 0, "the game's own mods were credited nothing:\n" + after);
+        Assert.True(
+            Credited("unattributed") < 0.03 * mods,
+            $"behaviors with a different name are still unattributed ({Credited("unattributed")} s against {mods} s credited to the game's mods):\n" + after);
     }
 }

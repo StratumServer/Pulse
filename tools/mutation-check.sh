@@ -287,6 +287,55 @@ mutate Pulse/ModOwners.cs \
     's/byName\[name\] = resolved;//' \
     "mod owners: a class registry miss is asked again on every profiled tick"
 
+# A behavior's mark carries its property name, not the code its class was registered under, so a
+# live instance is the only thing that can say whose a renamed behavior is. Each of these is a way
+# the walk that reads them can quietly go wrong: a name that never matches a mark, a class that is
+# no longer read once, a name that changes hands between two bursts, and an engine behavior left to
+# report as nobody's.
+mutate Pulse/ModOwners.cs \
+    's/profilerName\[TickAttribution\.BehaviorPrefix\.Length\.\.\]/profilerName/' \
+    "mod owners: a learned behavior name keeps its prefix, so no mark ever finds it"
+
+mutate Pulse/ModOwners.cs \
+    's/if \(!seenBehaviorClasses\.Add\(behavior\)$/if (false/' \
+    "mod owners: every instance of a class is read again, so the walk costs the instance count"
+
+mutate Pulse/ModOwners.cs \
+    's/learnedBehaviors\.Add\(name\) \|\| \(byName\[name\] == null && modid != null\)/learnedBehaviors.Add(name) || modid != null/' \
+    "mod owners: a later class with an owner takes a shared name from the first, so it flaps between bursts"
+
+mutate Pulse/ModOwners.cs \
+    's/learnedBehaviors\.Add\(name\) \|\| \(byName\[name\] == null && modid != null\)/learnedBehaviors.Add(name)/' \
+    "mod owners: a shared name stays with the first class even when that one has no owner"
+
+mutate Pulse/ModOwners.cs \
+    's/ \?\? \(behavior\.Assembly == EngineApi \? TickAttribution\.Engine : null\)//' \
+    "mod owners: a behavior the game's API assembly declares reports as unattributed instead of engine"
+
+mutate Pulse/ModOwners.cs \
+    's/for \(int i = 0; i < behaviors\?\.Count; i\+\+\)/for (int i = 0; i < 1 \&\& i < behaviors?.Count; i++)/' \
+    "mod owners: the walk reads the first behavior of each entity and no other"
+
+mutate Pulse/ModOwners.cs \
+    's/if \(readEntities\.Contains\(entry\.Key\)\)/if (false)/' \
+    "mod owners: every entity is read again on every burst, so the walk costs the loaded entity count times their behaviors"
+
+mutate Pulse/ModOwners.cs \
+    's/\(readEntities, stillLoaded\) = \(stillLoaded, readEntities\);//' \
+    "mod owners: the walk never remembers what it has read, so each burst reads every entity again"
+
+mutate Pulse/ModOwners.cs \
+    's/stillLoaded\.Clear\(\);//' \
+    "mod owners: an entity that has unloaded is never forgotten, so the ids pile up for the life of the server"
+
+mutate Pulse/AttributionMetrics.cs \
+    's/walkBehaviors\(owners!\);//' \
+    "attribution: the behavior walk never runs, so a renamed behavior reports as unattributed again"
+
+mutate Pulse/AttributionMetrics.cs \
+    's/behaviorWalkFailed = true;//' \
+    "attribution: a behavior walk that throws is tried again every burst, one warning each"
+
 # The config upgrade decides whether a live server rewrites a file an admin owns, so the two ways
 # it can be wrong are both here: not writing what it should, and writing over what it cannot read.
 mutate Pulse/ConfigUpgrade.cs \

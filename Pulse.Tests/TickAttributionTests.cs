@@ -150,9 +150,9 @@ public class TickAttributionTests
     public void Fold_Attributes_AListenerMarkToTheModThatOwnsIt()
         => Assert.Equal(200.0 / 600.0, Share(Cycle(new TickAttribution(1, 1), Tick(), Owners), "mymod"), 6);
 
-    /// <summary>Entity behaviors are marked in a nested range and keyed by behavior code rather than
-    /// by type name, so a fold that only read the root would report this mod's cost as the
-    /// engine's.</summary>
+    /// <summary>Entity behaviors are marked in a nested range and keyed by the behavior's property
+    /// name rather than by type name, so a fold that only read the root would report this mod's cost
+    /// as the engine's.</summary>
     [Fact]
     public void Fold_Attributes_ABehaviorMarkFromANestedRange()
         => Assert.Equal(150.0 / 600.0, Share(Cycle(new TickAttribution(1, 1), Tick(), Owners), "survival"), 6);
