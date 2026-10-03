@@ -1,6 +1,7 @@
 using System.Text;
 using System.Text.Json.Nodes;
 using Atlas.XUnit;
+using Pulse.Scenarios;
 using Xunit;
 
 namespace Pulse.Otlp.Scenarios;
@@ -99,6 +100,11 @@ public class OtlpGrpcExportScenarios : AtlasScenarioBase, IDisposable
         Assert.True(
             Exports.CarriesAttribute(export.Body, "service.instance.id", id!),
             $"the export does not carry service.instance.id = {id}");
+
+        // The file did get the id, so the warning for an id that could not be saved has no business
+        // here: OtlpUnsavedInstanceIdScenarios is the one where it does.
+        string log = await ServerLog.WaitFor(World, "Pulse OTLP exporting");
+        Assert.DoesNotContain("could not save it to", log);
     }
 
     /// <summary>The first export that holds the ticks counter, which is not always the first one
