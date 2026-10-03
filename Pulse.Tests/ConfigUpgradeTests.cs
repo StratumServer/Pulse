@@ -306,6 +306,21 @@ public class ConfigUpgradeTests
         Assert.Equal(["Attribution.Label"], diff.Missing);
     }
 
+    /// <summary>A key spelled twice under different casing: Newtonsoft keeps the last spelling's
+    /// value for a scalar, so the last one decides whether the key is blank. "Id" holding a value
+    /// and "id" after it holding none loads blank, and the fill the config now holds has to be
+    /// written; the other way round loads the value, and there is nothing to write.</summary>
+    [Theory]
+    [InlineData("""{"Id":"abc","id":""}""", true)]
+    [InlineData("""{"Id":"","id":"abc"}""", false)]
+    public void Compare_Takes_TheLastSpellingOfADuplicatedKey_AsTheOneThatDecidesWhetherItIsBlank(
+        string file, bool reported)
+    {
+        ConfigDiff diff = ConfigUpgrade.Compare(file, """{"Id":"g"}""");
+
+        Assert.Equal(reported ? ["Id"] : [], diff.Missing);
+    }
+
     /// <summary>Blank on both sides is the admin's own empty value, loaded as written and left
     /// alone: a blank the mod did not fill in is no reason to rewrite their file. A value on disk
     /// stays theirs whatever the config holds, which is what <see cref="Compare_Ignores_Values"/>

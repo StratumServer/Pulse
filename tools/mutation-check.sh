@@ -313,6 +313,10 @@ mutate Pulse/ConfigUpgrade.cs \
     's/if \(IsBlank\(matches\[\^1\]\.Value\) && IsFilled\(entry\.Value\)\)/if (false)/' \
     "config upgrade: a key the file carries blank, which a mod has since filled in, goes unreported, so the value it generated is never written back and changes on every restart"
 
+mutate Pulse/ConfigUpgrade.cs \
+    's/IsBlank\(matches\[\^1\]\.Value\)/IsBlank(matches[0].Value)/' \
+    "config upgrade: the first spelling of a duplicated key decides whether it is blank, where Newtonsoft keeps the last"
+
 # Loading a config file has the same two ways to be wrong as upgrading one: an unreadable file is
 # the one this whole fix exists for, so mistaking it for a loaded or an absent one is exactly the
 # regression that would bring back the original bug (an admin's broken file getting overwritten).
