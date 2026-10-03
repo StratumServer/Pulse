@@ -7,5 +7,6 @@
   },
   "IntervalSeconds": 5,
   "IncludeRuntimeMetrics": false,
-  "ServiceName": "pulse-atlas-test"
+  "ServiceName": "pulse-atlas-test",
+  "ServiceInstanceId": "pulse-atlas-test-instance"
 }

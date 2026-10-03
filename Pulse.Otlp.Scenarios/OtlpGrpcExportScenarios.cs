@@ -1,5 +1,7 @@
 using System.Text;
+using System.Text.Json.Nodes;
 using Atlas.XUnit;
+using Pulse.Scenarios;
 using Xunit;
 
 namespace Pulse.Otlp.Scenarios;
@@ -73,6 +75,36 @@ public class OtlpGrpcExportScenarios : AtlasScenarioBase, IDisposable
         // same length-prefixed encoding inside the same protobuf message, so it is just as findable
         // in the raw bytes.
         Assert.Contains("pulse-atlas-grpc", body, StringComparison.Ordinal);
+    }
+
+    /// <summary>The id the server generated for itself is the one on the wire, and the one in its
+    /// config file. The fixture has no ServiceInstanceId, like a file 0.2.0 wrote, so the mod makes
+    /// one at startup, writes it to pulse-otlp.json and exports it: this is the half of "the same id
+    /// after a restart" that happens on the boot that generates it. The other half, that a start
+    /// which finds an id in the file exports exactly that and leaves the file alone, is
+    /// <see cref="OtlpExportScenarios.Export_Carries_TheConfiguredServiceInstanceId"/>. A scenario
+    /// cannot join them by restarting the server: Atlas boots the replacement host in a fresh
+    /// scratch directory and seeds ModConfig into it again, so the file one boot wrote never reaches
+    /// the next.</summary>
+    [AtlasScenario(TimeoutMs = 180_000)]
+    public async Task Export_Carries_TheGeneratedServiceInstanceId()
+    {
+        FakeGrpcCollector.Export export = await WaitForTicksExport();
+
+        string configPath = Path.Combine(World.Api.GetOrCreateDataPath("ModConfig"), "pulse-otlp.json");
+        string? id = (string?)JsonNode.Parse(File.ReadAllText(configPath))?["ServiceInstanceId"];
+
+        Assert.True(
+            Guid.TryParse(id, out Guid parsed) && parsed != Guid.Empty,
+            $"ServiceInstanceId is not a generated GUID: {id}");
+        Assert.True(
+            Exports.CarriesAttribute(export.Body, "service.instance.id", id!),
+            $"the export does not carry service.instance.id = {id}");
+
+        // The file did get the id, so the warning for an id that could not be saved has no business
+        // here: OtlpUnsavedInstanceIdScenarios is the one where it does.
+        string log = await ServerLog.WaitFor(World, "Pulse OTLP exporting");
+        Assert.DoesNotContain("could not save it to", log);
     }
 
     /// <summary>The first export that holds the ticks counter, which is not always the first one

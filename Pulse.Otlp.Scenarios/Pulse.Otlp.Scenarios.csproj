@@ -20,6 +20,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- The base suite's reader of the server log, shared as source rather than written out a
+         fifth time: a scenario here that checks a line a mod logged at startup needs exactly what
+         the base suite already has. Pulse.Otlp links the config upgrade the same way. -->
+    <Compile Include="..\Pulse.Scenarios\ServerLog.cs" Link="ServerLog.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Build order only, for both mods. No assembly reference on purpose: the game's ModLoader
          loads its own copy of each staged mod, and keeping the OpenTelemetry dlls out of this
          project's own output means the only copy in the process is the one the loader loaded, the

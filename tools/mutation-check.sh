@@ -309,6 +309,14 @@ mutate Pulse/ConfigUpgrade.cs \
     's/configValue is JsonObject \|\| configByKey\[key\]\.Count\(\) > 1/false/' \
     "config upgrade: a duplicated block or a dictionary's colliding keys claims a winner that does not exist"
 
+mutate Pulse/ConfigUpgrade.cs \
+    's/if \(IsBlank\(matches\[\^1\]\.Value\) && IsFilled\(entry\.Value\)\)/if (false)/' \
+    "config upgrade: a key the file carries blank, which a mod has since filled in, goes unreported, so the value it generated is never written back and changes on every restart"
+
+mutate Pulse/ConfigUpgrade.cs \
+    's/IsBlank\(matches\[\^1\]\.Value\)/IsBlank(matches[0].Value)/' \
+    "config upgrade: the first spelling of a duplicated key decides whether it is blank, where Newtonsoft keeps the last"
+
 # Loading a config file has the same two ways to be wrong as upgrading one: an unreadable file is
 # the one this whole fix exists for, so mistaking it for a loaded or an absent one is exactly the
 # regression that would bring back the original bug (an admin's broken file getting overwritten).
@@ -380,6 +388,42 @@ mutate Pulse.Otlp/OtlpOptions.cs \
     's/string\.IsNullOrWhiteSpace\(configuredName\)/!string.IsNullOrWhiteSpace(configuredName)/' \
     "otlp: a blank ServiceName exports as-is and a real one is replaced by the default"
 
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/string\.IsNullOrWhiteSpace\(configuredId\)/!string.IsNullOrWhiteSpace(configuredId)/' \
+    "otlp: a blank ServiceInstanceId exports as-is and a real one is replaced by a generated one"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/: configuredId\.Trim\(\);/: configuredId;/' \
+    "otlp: a configured ServiceInstanceId is no longer trimmed"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/Guid\.NewGuid\(\)\.ToString\(\)/Guid.Empty.ToString()/' \
+    "otlp: the generated service instance id is the same all-zero GUID on every server"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/: fromEnvironment,/: ResolveServiceInstanceId(configuredInstanceId),/' \
+    "otlp: the environment's service.instance.id no longer wins over the config key"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/string\.IsNullOrWhiteSpace\(fromEnvironment\)/fromEnvironment == null/' \
+    "otlp: an empty service.instance.id in the environment counts as set, so the resource exports an empty one"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/if \(!string\.IsNullOrWhiteSpace\(Environment\.GetEnvironmentVariable\(ServiceNameVariable\)\)\)/if (false)/' \
+    "otlp: OTEL_SERVICE_NAME no longer leaves the whole service identity to the environment"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/^            ResolveServiceName\(configuredName\),$/            configuredName!,/' \
+    "otlp: the configured service name goes out unresolved, so a blank one is an empty service.name"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/^                \? ResolveServiceInstanceId\(configuredInstanceId\)$/                ? (string.IsNullOrWhiteSpace(configuredInstanceId) ? null : ResolveServiceInstanceId(configuredInstanceId))/;s/autoGenerateServiceInstanceId: false\);/autoGenerateServiceInstanceId: true);/' \
+    "otlp: a blank service instance id is left to the SDK's own automatic one, a single GUID for the whole process"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/if \(!string\.IsNullOrWhiteSpace\(config\.ServiceInstanceId\)\)/if (false)/' \
+    "otlp: an id the admin wrote is overwritten by a generated one at every start"
+
 # The failure log turns a silent export into one rate-limited line; both of its limits exist to
 # bound the log itself, and a mutation that erases either one is exactly what would let a stuck
 # collector or a churning cause flood it.
@@ -446,6 +490,14 @@ mutate Pulse.Otlp/OtlpOptions.cs \
 mutate Pulse.Otlp/PulseOtlpModSystem.cs \
     's/failureReason = ex\.GetType\(\)\.Name;/failureReason = null;/' \
     "otlp: TryStoreDefaults stops reporting what failed when writing the default config throws"
+
+mutate Pulse.Otlp/PulseOtlpModSystem.cs \
+    's/instanceId, StringComparison\.Ordinal\);/instanceId, StringComparison.Ordinal) || true;/' \
+    "otlp: a generated service instance id counts as saved whatever the file holds, so the warning that it was not never fires"
+
+mutate Pulse.Otlp/PulseOtlpModSystem.cs \
+    's/set ServiceInstanceId in \{0\}/set it in {0}/' \
+    "otlp: the warning about an id that could not be saved stops naming the key to set"
 
 # Every mutation is reverted in the source, but the last one of each block was built before it
 # was, so the binaries on disk still carry it. Leave them matching the tree: anything running

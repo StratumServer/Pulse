@@ -18,6 +18,10 @@ public class PulseOtlpConfigTests
         Assert.Equal(60, config.IntervalSeconds);
         Assert.True(config.IncludeRuntimeMetrics);
         Assert.Equal("vintagestory", config.ServiceName);
+
+        // Blank is "generate one at startup": the generated value belongs in the file the first
+        // start writes, never in the class, or two servers would share it by default.
+        Assert.Equal(string.Empty, config.ServiceInstanceId);
     }
 
     [Theory]
