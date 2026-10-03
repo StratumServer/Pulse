@@ -351,8 +351,9 @@ Four families appear once it is on:
 
 - `pulse_mod_tick_share{modid}` (gauge): the fraction of profiled main-thread busy time that went
   to one mod over the last completed burst. The shares add up to 1 across every `modid`, including
-  the two Pulse adds: `engine` for the server's own systems and for the time no marker named, and
-  `unattributed` for work that was marked but that no loaded mod claims.
+  the two Pulse adds: `engine` for the server's own systems, for the behaviours built into the game
+  itself rather than shipped by a mod, and for the time no marker named, and `unattributed` for
+  work that was marked but that no loaded mod claims.
 - `pulse_mod_tick_seconds_total{modid}` (counter): main-thread seconds attributed to one mod.
   Sampled, not total: this is time measured inside the bursts, not time since startup. Divide by
   the tick counter below to compare two servers, or take `rate()` of it against
@@ -371,9 +372,14 @@ Four families appear once it is on:
 The engine already contains a per-mod tick attributor and simply never switches it on. With its
 frame profiler enabled, the server stamps a marker after every game tick listener, every delayed
 callback and every main-thread entity behaviour, keyed by the type that declared the handler or by
-the behaviour's registered code. Pulse turns the profiler on for a burst, reads the tree the tick
-left behind, maps each key back to a mod through the mod loader, and turns it off again. No
-Harmony, no engine patch, no bundled dependency.
+the behaviour's property name. Pulse turns the profiler on for a burst, reads the tree the tick
+left behind, maps each key back to a mod, and turns it off again. A listener's type goes back to a
+mod through the mod loader. A behaviour's name cannot go back through the class registry, because
+the name a behaviour marks with is often not the code its class was registered under (the game's
+own `despawn` and `reviveondeath` both mark as `timeddespawn`, the name tag as `displayname`), so
+at the start of each burst Pulse reads the behaviours of the entities that have loaded since the
+last one, which know both the name they mark with and the class that declares it. No Harmony, no
+engine patch, no bundled dependency.
 
 The cost is measured, not estimated from a mark count. `Pulse.Scenarios/AttributionCostScenarios.cs`
 joins a test player, spawns four thousand chickens (dense cluster and, separately, spread across
@@ -402,6 +408,13 @@ dotnet test Pulse.Scenarios --filter "Category=Cost"`; CI filters the `Cost` tra
 it is a no-op unless that variable is set, because spawning four thousand entities, three times
 over, is slow.
 
+One more cost, outside the profiled ticks: at the start of each burst Pulse reads the behaviours of
+the entities that have loaded since the last one, to learn which mod owns each behaviour name. The
+first burst reads all of them, which took about 3 to 4 ms with 1,700 entities loaded, 7 ms with
+4,000 and 23 to 40 ms with 8,000. After that a burst costs about 0.1 ms plus whatever loaded in
+between, apart from one early burst that costs about 10 ms more while the runtime compiles the
+loop that does the reading a second time.
+
 One visible side effect: the engine logs "Over 400ms tick. Skipping N physics ticks" only while its
 frame profiler is on, and Pulse is what turns it on. It does so for the first tick after every
 start, attribution enabled or not, to prime the profiler so attribution can be switched on later
@@ -424,8 +437,11 @@ across several threads, and only the main thread's slice is marked. A mod whose 
 thread-safe therefore reads low, by roughly the thread count.
 
 Mapping is by assembly. A mod that ships several dlls only has the one its `ModSystem` lives in
-claimed, so a listener registered from a side library reads as `unattributed`. So does a handler
-on a static method, which the engine marks with no identity at all.
+claimed, so a listener registered from a side library, or a behaviour declared in one, reads as
+`unattributed`. So does a handler on a static method, which the engine marks with no identity at
+all. A behaviour is marked by its name, not by its class, so two classes that share a name share a
+mark, a subclass that inherits its parent's name being the usual case. Pulse credits the name to
+the first mod whose class it meets carrying it, and keeps it there.
 
 And it is a sample. Ten ticks every ten seconds describe a steady server well and a spiky one
 badly. The share is an average over the burst, so a mod that stalls for 200 ms once a minute may
