@@ -40,6 +40,8 @@ your own computer. Pulse needs Vintage Story 1.22 or newer.
    - Linux, running the server binary yourself with no `--dataPath`: `~/.config/VintagestoryData/Mods`.
    - Windows: `%AppData%\VintagestoryData\Mods` (not `%AppData%\Vintagestory`, the install
      folder itself, a different place one word shorter).
+   - macOS: `~/Library/Application Support/VintagestoryData/Mods` (not `~/.config` as on Linux;
+     Finder hides `~/Library`, so use Go, Go to Folder and paste the path).
    - A rented panel: wherever its file manager already shows your other mods; the panel has
      usually worked this out for you already.
 3. Start (or restart) the server.
