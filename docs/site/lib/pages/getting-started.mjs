@@ -17,6 +17,7 @@ const SLUG = 'getting-started';
 
 const H2 = ['Which path is yours', 'Step 1: install the mod on the server', 'Path A: run Prometheus and Grafana yourself', 'Path B: Grafana Cloud, if you would rather host nothing', 'Troubleshooting'];
 const H3_PATH_A = ['Before you start', 'On a Linux server or PC', 'On Windows or macOS (Docker Desktop)'];
+const H3_ALERTS = 'Optional: load the alert rules';          // closes Path A for both Docker variants: it is no fold and carries no step
 // the headings that become fold buttons carry no "#" link: a link inside a button is invalid and would be read as part of its name
 const NO_ANCHOR = [H2[0], H2[1], H2[2], H2[3], H3_PATH_A[1], H3_PATH_A[2]];
 
@@ -34,9 +35,10 @@ const PLACEHOLDERS = ['user@your-server', 'https://otlp-gateway-<region>.grafana
 const CALLOUTS = ['Both Grafana and Prometheus are set to listen on `127.0.0.1` only', '`pulse-otlp.json` now holds a credential in plain text.'];
 // where a command runs, by its first words (an sh fence): [pattern, label, how many fences must match]. Path A runs on one
 // machine, the one that runs the game server. The compose commands sit on both sides of the ssh tunnel, which is opened from the
-// reader's own computer, so the clone and the compose commands each name the server's machine, in the same words.
+// reader's own computer, so the clone, the compose commands and the copy of the alert rules each name the server's machine, in
+// the same words (the fence of the copy goes on with the command that tells Prometheus to read it: it is labelled by its first line).
 const WHERE = [[/^curl /, 'run on the game server', 1], [/^git clone /, "run on the game server's machine", 1], [/^ssh -L /, 'run on your own computer', 1],
-  [/^docker compose /, "run on the game server's machine, in contrib/grafana", 4]];
+  [/^docker compose /, "run on the game server's machine, in contrib/grafana", 4], [/^cp /, "run on the game server's machine, in contrib/grafana", 1]];
 const SEE_DASHBOARD = ['linux-2', 'desktop-2', 'import-4'];   // the steps that end on the dashboard get its picture
 // "What next": four links, each with a sentence quoted from a document. The build checks that the words are still there
 // (without the final full stop, white space collapsed) and the page closes them with one.
@@ -82,7 +84,7 @@ export default function gettingStarted({ docs, slice, render, data, pageUrl, ass
   const byH2 = cut(tokens, 2);
   for (const h of H2) must(byH2[h], `the section "${h}" is gone`);
   const byH3 = cut(byH2[H2[2]], 3);
-  for (const h of H3_PATH_A) must(byH3[h], `the section "${h}" is gone from Path A`);
+  for (const h of [...H3_PATH_A, H3_ALERTS]) must(byH3[h], `the section "${h}" is gone from Path A`);
   const numbered = (name, tokensIn, what) => {
     const list = only(listsIn(tokensIn, true), `numbered list under ${what}`);
     const [count, label] = STEP_LISTS[name];
@@ -204,10 +206,10 @@ export default function gettingStarted({ docs, slice, render, data, pageUrl, ass
   // ---------------------------------------------------------------- render, part by part, in page order
   const part = (list) => render(list, { file: FILE, page: SLUG });
   const intro = part(byH2['']), choose = part(byH2[H2[0]]), step1 = part(byH2[H2[1]]);
-  const a0 = part(byH3['']), before = part(byH3[H3_PATH_A[0]]), onLinux = part(byH3[H3_PATH_A[1]]), onDesktop = part(byH3[H3_PATH_A[2]]);
+  const a0 = part(byH3['']), before = part(byH3[H3_PATH_A[0]]), onLinux = part(byH3[H3_PATH_A[1]]), onDesktop = part(byH3[H3_PATH_A[2]]), alerts = part(byH3[H3_ALERTS]);
   const b = part(byH2[H2[3]]), tr = part(byH2[H2[4]]);
   const act = (name, kicker, extra, html) => `<section class="act" data-act="${name}"${extra}>\n<p class="act__kicker" aria-hidden="true">${kicker}</p>\n${html}</section>\n`;
-  const pathA = `${a0.html}${before.html}<section data-docker="engine">\n${onLinux.html}</section>\n<section data-docker="desktop">\n${onDesktop.html}</section>\n`;
+  const pathA = `${a0.html}${before.html}<section data-docker="engine">\n${onLinux.html}</section>\n<section data-docker="desktop">\n${onDesktop.html}</section>\n${alerts.html}`;
   const whatNext = `<h2 id="what-next">${WORDS.whatNext}</h2>\n<ul class="next">\n${next.join('\n')}\n</ul>\n`;
   const html = [
     `<p class="kicker" aria-hidden="true">${WORDS.kicker}</p>`,
@@ -226,10 +228,10 @@ export default function gettingStarted({ docs, slice, render, data, pageUrl, ass
   // the search finds the page by its headings, and each step and each troubleshooting entry by itself
   const items = (list, name) => list.items.map((item, i) => ({ id: `${name}-${i + 1}`, title: `${STEP_LISTS[name][1]}, step ${i + 1}`, text: flat(textOf(item)) }));
   const search = [...intro.search, ...choose.search, ...step1.search, ...items(install, 'install'), ...a0.search, ...before.search,
-    ...onLinux.search, ...items(linux, 'linux'), ...onDesktop.search, ...items(desktop, 'desktop'), ...b.search, ...items(cloud, 'cloud'), ...items(imports, 'import'),
+    ...onLinux.search, ...items(linux, 'linux'), ...onDesktop.search, ...items(desktop, 'desktop'), ...alerts.search, ...b.search, ...items(cloud, 'cloud'), ...items(imports, 'import'),
     { id: 'what-next', title: WORDS.whatNext, text: NEXT.map((n) => n.label).join(' ') },
     ...tr.search, ...trouble.items.map((item, i) => ({ id: `trouble-${i + 1}`, title: plain(blocksOf(item)[0].tokens[0]), text: flat(textOf(item)) }))];
-  const toc = [...choose.toc, ...step1.toc, ...a0.toc, ...before.toc, ...onLinux.toc, ...onDesktop.toc, ...b.toc, { id: 'what-next', text: WORDS.whatNext, level: 2 }, ...tr.toc];
+  const toc = [...choose.toc, ...step1.toc, ...a0.toc, ...before.toc, ...onLinux.toc, ...onDesktop.toc, ...alerts.toc, ...b.toc, { id: 'what-next', text: WORDS.whatNext, level: 2 }, ...tr.toc];
   const sig = [install, linux, desktop, cloud, imports].map((l) => l.items.length).join('.');
   const description = flat(textOf(byH2[''].find((t) => t.type === 'paragraph'))).split(/(?<=\.)\s/)[0];
 

@@ -184,6 +184,44 @@ Docker Desktop is not available on Windows Server; use path B there instead. Bot
 published to `127.0.0.1` only, on purpose: Grafana's anonymous access has no password of its own,
 so nothing outside this machine should reach it.
 
+### Optional: load the alert rules
+
+Once the dashboard works, the same Prometheus can also watch for trouble. `contrib/alerts` holds a
+rules file for it, `pulse-alerts.yml`: rules such as a tick rate that stays low or a metrics
+endpoint that stops answering, most with a note on what to check first. The compose files do not
+load it unless you ask. With Prometheus still running, add these lines at the end of
+`prometheus.yml` (or `prometheus.desktop.yml`, if you started the Docker Desktop file), which name
+the rules file as the container will see it:
+
+```yaml
+rule_files:
+  - /etc/pulse/pulse-alerts.yml
+```
+
+Then, from the same `contrib/grafana` folder, copy the rules file in beside that config so the
+container can see it, and make Prometheus read its files again by sending SIGHUP to its process,
+number 1 inside the container the compose files call `pulse-prom`. Nothing is stopped: Prometheus
+keeps running, and if it cannot load something in the files it carries on with what it had:
+
+```sh
+cp ../alerts/pulse-alerts.yml .
+docker exec pulse-prom kill -HUP 1
+```
+
+Open `http://localhost:9090/alerts` (through your SSH tunnel if this is a remote server): the
+rules are listed there, and none is firing while nothing is wrong. If it lists no rules, check
+that the `rule_files` lines are saved in the config file your compose file starts Prometheus with
+(`prometheus.yml` for the Linux file, `prometheus.desktop.yml` for the Desktop one) and that the
+name after `/etc/pulse/` matches the file you copied: Prometheus does not complain about a rules
+file it cannot find. If the reload itself failed, `docker logs pulse-prom` says why; fix it before
+the next restart, which would stop on the same error.
+
+A firing alert only shows up on that page; to be told about one, point Prometheus at an
+Alertmanager, which [the alerts README](../contrib/alerts/README.md) leaves to you. After a
+`git pull`, run the two commands again to pick up newer rules; if you replaced the folder (the ZIP
+route) or the pull refused because of your edit to the config, add the `rule_files` lines again
+first.
+
 ## Path B: Grafana Cloud, if you would rather host nothing
 
 Use this path if you do not want to run Prometheus or Grafana yourself, or your host will not

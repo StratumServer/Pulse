@@ -43,6 +43,7 @@ test('the heading contract: README is exact for H1 and H2 and free for H3, the g
   assert.throws(() => altered('README.md', (t) => t.replace('## Degraded mode', '## Degraded modes')), /heading contract/);
   assert.throws(() => altered('README.md', (t) => t.replace('## License', '## Licence')), /heading contract/);
   assert.throws(() => altered('docs/getting-started.md', (t) => t.replace('### Before you start', '### Before you begin')), /heading contract/);
+  assert.throws(() => altered('docs/getting-started.md', (t) => t.replace('### Optional: load the alert rules', '### Optional: alerts')), /heading contract/);
   assert.throws(() => altered('docs/getting-started.md', (t) => t.replace('## Troubleshooting', '## Troubleshooting\n\n### A new H3')), /heading contract/);
   assert.throws(() => altered('contrib/alerts/README.md', (t) => t + '\n## One more\n'), /heading contract/);
   assert.throws(() => altered('CHANGELOG.md', (t) => t.replace('## [Unreleased]', '## Unreleased')), /CHANGELOG\.md/);

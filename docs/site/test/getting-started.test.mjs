@@ -56,14 +56,17 @@ test('the acts: four hosting situations, Step 1, one act per path, What next, th
   assert.equal(count(/data-docker="desktop"/g), 1);
   assert.match(html, /<section data-docker="engine">\n<h3 id="on-a-linux-server-or-pc">On a Linux server or PC<\/h3>/);
   assert.match(html, /<section data-docker="desktop">\n<h3 id="on-windows-or-macos-docker-desktop">On Windows or macOS \(Docker Desktop\)<\/h3>/);
+  // the alert rules close Path A for both variants: right after the second one, in no fold of their own, before Path B
+  assert.match(html, /<\/section>\n<h3 id="optional-load-the-alert-rules">Optional: load the alert rules&nbsp;<a class="anchor"/);
+  assert.ok(html.indexOf('data-docker="desktop"') < html.indexOf('id="optional-load-the-alert-rules"') && html.indexOf('id="optional-load-the-alert-rules"') < html.indexOf('data-path="b"'));
 });
 
-test('the headings that become fold buttons carry no "#" link, the two others keep theirs', () => {
+test('the headings that become fold buttons carry no "#" link, the three others keep theirs', () => {
   for (const id of ['which-path-is-yours', 'step-1-install-the-mod-on-the-server', 'path-a-run-prometheus-and-grafana-yourself', 'path-b-grafana-cloud-if-you-would-rather-host-nothing', 'on-a-linux-server-or-pc', 'on-windows-or-macos-docker-desktop', 'what-next']) {
     assert.match(html, new RegExp(`<h[23] id="${id}">[^<]+</h[23]>`), `${id} is a bare heading`);
     assert.doesNotMatch(html, new RegExp(`href="#${id}"[^>]*class="anchor"|class="anchor" href="#${id}"`), `no link to ${id} inside its heading`);
   }
-  for (const id of ['before-you-start', 'troubleshooting']) assert.match(html, new RegExp(`<h[23] id="${id}">[^<]+&nbsp;<a class="anchor" href="#${id}"`), id);
+  for (const id of ['before-you-start', 'optional-load-the-alert-rules', 'troubleshooting']) assert.match(html, new RegExp(`<h[23] id="${id}">[^<]+&nbsp;<a class="anchor" href="#${id}"`), id);
 });
 
 test('five numbered lists, 21 steps, the ids and the names the wizard announces', () => {
@@ -91,10 +94,11 @@ test('"Not working?": the nine rows, step to troubleshooting entries, in this or
 test('where a command runs, in the bar of the code block, whole', () => {
   const blocks = [...html.matchAll(/<span class="code__label">sh<\/span>(?:<span class="code__where">([^<]+)<\/span>)?<\/div><pre><code>([^\n<]*)/g)].map((m) => [m[2], m[1]]);
   const expected = (first) => (/^curl /.test(first) ? 'run on the game server' : /^git clone /.test(first) ? "run on the game server's machine" : /^ssh -L /.test(first) ? 'run on your own computer'
-    : /^docker compose /.test(first) ? "run on the game server's machine, in contrib/grafana" : undefined);
-  assert.equal(blocks.length, 7, 'seven sh fences');
+    : /^(docker compose|cp) /.test(first) ? "run on the game server's machine, in contrib/grafana" : undefined);
+  assert.equal(blocks.length, 8, 'eight sh fences');
   for (const [first, where] of blocks) assert.equal(where, expected(first), first);
-  assert.equal(count(/class="code__where"/g), 7, 'every one of them says where it runs');
+  assert.equal(count(/class="code__where"/g), 8, 'every one of them says where it runs');
+  assert.ok(blocks.some(([first]) => first === 'cp ../alerts/pulse-alerts.yml .'), 'the copy of the rules file is one of them: its fence goes on with the signal to Prometheus');
 });
 
 test('the tunnel command, the helper block, their notes and the reasons path A is off are marked once each', () => {
@@ -187,7 +191,7 @@ test('the search finds each step and each troubleshooting entry by itself, after
   assert.ok(order.indexOf('step-1-install-the-mod-on-the-server') < order.indexOf('install-1') && order.indexOf('install-5') < order.indexOf('path-a-run-prometheus-and-grafana-yourself'), 'document order');
   assert.ok(order.indexOf('what-next') < order.indexOf('troubleshooting') && order.indexOf('troubleshooting') < order.indexOf('trouble-1'));
   assert.deepEqual(page.toc.map((e) => e.id), ['which-path-is-yours', 'step-1-install-the-mod-on-the-server', 'path-a-run-prometheus-and-grafana-yourself', 'before-you-start', 'on-a-linux-server-or-pc',
-    'on-windows-or-macos-docker-desktop', 'path-b-grafana-cloud-if-you-would-rather-host-nothing', 'what-next', 'troubleshooting']);
+    'on-windows-or-macos-docker-desktop', 'optional-load-the-alert-rules', 'path-b-grafana-cloud-if-you-would-rather-host-nothing', 'what-next', 'troubleshooting']);
   const index = JSON.parse(/^window\.PULSE_SEARCH = (.*);\n$/s.exec(built.files.get('assets/search-index.js').toString())[1]);
   assert.ok(index.some((e) => e.u === 'getting-started/index.html#install-4' && e.t === 'Install the mod, step 4' && e.c === 'Getting started'));
 });
@@ -249,6 +253,7 @@ test('the path sentences, the troubleshooting entries, the labels that say where
   await failsRule(guide((t) => t.slice(0, t.indexOf('- **Nothing outside the server can reach'))), /"Troubleshooting" has 5 entries, the rules say 6/);
   await failsRule(guide(swap('3. Start (or restart) the server.\n', '3. Start (or restart) the server.\n\n   ```sh\n   curl http://example.org\n   ```\n')), /1 sh fence\(s\) should start with \/\^curl \/, found 2/);
   await failsRule(guide(swap('docker compose down\n', 'docker  compose down\n')), /4 sh fence\(s\) should start with \/\^docker compose \/, found 3/);
+  await failsRule(guide(swap('cp ../alerts/pulse-alerts.yml .\n', 'docker cp ../alerts/pulse-alerts.yml .\n')), /1 sh fence\(s\) should start with \/\^cp \/, found 0/);
   await failsRule(guide(swap('user@your-server', 'user@host')), /the placeholder user@your-server is no longer in a code block/);
   await failsRule(guide(swap('Both Grafana and Prometheus are set to listen on `127.0.0.1` only', 'Grafana and Prometheus listen on `127.0.0.1` only')), /the paragraph that starts "Both Grafana and Prometheus.*exactly once, found 0/);
 });
