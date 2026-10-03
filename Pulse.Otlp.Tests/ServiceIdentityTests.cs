@@ -48,13 +48,30 @@ public sealed class ServiceIdentityTests : IDisposable
 
     /// <summary>Never reached by StartServerSide, which has already filled a blank key and written
     /// it to the file by the time the resource is configured; what it proves is that the resource
-    /// never goes without an id, nor falls back to the SDK's own automatic one.</summary>
+    /// never goes without an id, nor falls back to the SDK's own automatic one. That one is a GUID
+    /// too, so being a GUID says nothing: it is, though, a single GUID for the whole process, where
+    /// a generated one is new each time.</summary>
     [Theory]
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    public void ABlankInstanceId_StillGivesTheResourceAGuid(string? configured)
-        => Assert.True(Guid.TryParse(InstanceId(Build("my-server", configured)), out _));
+    public void ABlankInstanceId_GetsAGeneratedGuid_NotTheSdksOwn(string? configured)
+    {
+        string? first = InstanceId(Build("my-server", configured));
+        string? second = InstanceId(Build("my-server", configured));
+
+        Assert.True(Guid.TryParse(first, out _));
+        Assert.NotEqual(first, second);
+    }
+
+    /// <summary>The name has its own fallback inside the same call: a blank one is the default
+    /// name, never an empty service.name nor the SDK's "unknown_service:...".</summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ABlankConfiguredName_ExportsTheDefaultName(string? configured)
+        => Assert.Equal(OtlpOptions.DefaultServiceName, Name(Build(configured, "config-instance")));
 
     [Fact]
     public void TheEnvironmentsInstanceId_Wins_OverTheConfigKey()

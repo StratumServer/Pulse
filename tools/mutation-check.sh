@@ -413,6 +413,14 @@ mutate Pulse.Otlp/OtlpOptions.cs \
     "otlp: OTEL_SERVICE_NAME no longer leaves the whole service identity to the environment"
 
 mutate Pulse.Otlp/OtlpOptions.cs \
+    's/^            ResolveServiceName\(configuredName\),$/            configuredName!,/' \
+    "otlp: the configured service name goes out unresolved, so a blank one is an empty service.name"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/^                \? ResolveServiceInstanceId\(configuredInstanceId\)$/                ? (string.IsNullOrWhiteSpace(configuredInstanceId) ? null : ResolveServiceInstanceId(configuredInstanceId))/;s/autoGenerateServiceInstanceId: false\);/autoGenerateServiceInstanceId: true);/' \
+    "otlp: a blank service instance id is left to the SDK's own automatic one, a single GUID for the whole process"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
     's/if \(!string\.IsNullOrWhiteSpace\(config\.ServiceInstanceId\)\)/if (false)/' \
     "otlp: an id the admin wrote is overwritten by a generated one at every start"
 
