@@ -255,30 +255,43 @@ out, instead of shipping a mod that quietly serves six families fewer.
 
 ## Runtime metrics
 
-With `RuntimeMetrics` left on, the .NET runtime's own `System.Runtime` meter is served
-alongside Pulse's, as `dotnet_*` families: GC collections and pause time, heap size and
-fragmentation by generation, working set, CPU time by mode, JIT, thread pool, lock contention,
-loaded assemblies. None of it is instrumented here. The runtime publishes the meter, and the
-writer renames each instrument the way Prometheus's otlptranslator does, the library Prometheus's
-own OTLP receiver, Mimir and Grafana Cloud use to turn an OTLP instrument into a Prometheus name:
-dots become underscores, the instrument's unit becomes a trailing word unless the name already
-contains it as a word, and a monotonic counter's name ends in `_total`, moved there rather than
-duplicated if the name already spells "total" somewhere. `dotnet.gc.collections` is served as
-`dotnet_gc_collections_total`; `dotnet.process.memory.working_set`, a gauge in bytes, is served as
+With `RuntimeMetrics` left on, the .NET runtime's own `System.Runtime` meter is served alongside
+Pulse's, as `dotnet_*` families: GC collections and pause time, bytes allocated, heap size and
+fragmentation by generation, committed memory, working set, CPU time by mode, JIT, thread pool, lock
+contention, exceptions thrown, loaded assemblies. None of it is instrumented here. The runtime
+publishes the meter, and the writer renames each instrument the way Prometheus's otlptranslator
+does, the library Prometheus's own OTLP receiver, Mimir and Grafana Cloud use to turn an OTLP
+instrument into a Prometheus name: dots become underscores, the instrument's unit becomes a trailing
+word unless the name already contains it as a word, and a monotonic counter's name ends in `_total`,
+moved there rather than duplicated if the name already spells "total" somewhere.
+`dotnet.gc.collections` is served as `dotnet_gc_collections_total`;
+`dotnet.process.memory.working_set`, a gauge in bytes, is served as
 `dotnet_process_memory_working_set_bytes`; `dotnet.gc.heap.total_allocated`, a counter also in
 bytes, is served as `dotnet_gc_heap_allocated_bytes_total` rather than the doubled
-`..._total_allocated_bytes_total`. This is the same name Grafana derives when it translates the
-OTLP export, so a dashboard or alert built against a server scraped over OTLP through Grafana
-Cloud reads Pulse's own `/metrics` without translation too.
+`..._total_allocated_bytes_total`. This is the same name Grafana derives when it translates the OTLP
+export, so a dashboard or alert built against a server scraped over OTLP through Grafana Cloud reads
+Pulse's own `/metrics` without translation too.
+
+Three of those are worth a line each, because the dashboard's Runtime row reads them and their names
+say little about what they count. `dotnet_exceptions_total` is the number of exceptions thrown in
+managed code since Pulse started, one series per exception type in an `error_type` label
+(`InvalidOperationException`, say). It counts throws, not failures: an exception that is thrown and
+caught is in it too. `dotnet_gc_heap_allocated_bytes_total` is the approximate number of bytes
+allocated on the managed GC heap since the process started, native allocations not included, so its
+`rate()` is the allocation rate. `dotnet_gc_last_collection_memory_committed_size_bytes` is a gauge
+in bytes: the committed virtual memory in use by the GC, as observed during its latest collection,
+so it moves in steps, one per collection. It can sit above the heap size, because it covers memory
+the GC keeps ready for objects not yet allocated as well as the objects that exist.
 
 Nine of these families moved to this spelling in 0.2, to line up with that translation; see the
 changelog for the full old to new list if you have a dashboard or alert built against the earlier
 names. `pulse_*` families are unaffected.
 
 Pulse renders the shape each instrument declares, including where that is arguable.
-`dotnet_thread_pool_thread_count_total` is typed as a counter because the runtime publishes it
-as an ObservableCounter, even though the number goes down as often as up. Second-guessing the
-framework here would only make the series harder to correlate with any other .NET exporter.
+`dotnet_thread_pool_thread_count_total` and `dotnet_thread_pool_queue_length_total` are typed as
+counters because the runtime publishes both as ObservableCounters, even though the numbers go down
+as often as up. Second-guessing the framework here would only make the series harder to correlate
+with any other .NET exporter.
 
 ## Attribution
 
