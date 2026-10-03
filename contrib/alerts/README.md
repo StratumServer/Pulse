@@ -20,6 +20,11 @@ scrape_configs:
       - targets: ["127.0.0.1:9464"]
 ```
 
+If you started the kit with Docker Compose, as the getting-started guide does, follow its
+["Optional: load the alert rules"](../../docs/getting-started.md#optional-load-the-alert-rules)
+section instead of the recipe below: that `docker run` command would collide with the kit's own
+`pulse-prom` container.
+
 If you're running the container from `contrib/grafana`, mount this directory alongside it and
 point `rule_files` at the mounted path:
 
