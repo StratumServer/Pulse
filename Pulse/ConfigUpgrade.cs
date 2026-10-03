@@ -18,13 +18,15 @@ internal readonly record struct ConfigDiff(
 /// referencing Pulse.dll, because the two mods deliberately share no assembly.</remarks>
 internal static class ConfigUpgrade
 {
+    /// <summary>"Wrote", not "added", and no "defaults": a key the file held empty and the mod
+    /// filled in was not added, and what the OTLP mod fills a blank service instance id with is a
+    /// generated value, which is no default. The line only says what ended up in the file.</summary>
     private const string AddedKeys =
-        "{0} added these keys to {1} with their defaults: {2}. Everything already in the file was "
-        + "kept as it was.";
+        "{0} wrote these keys into {1}: {2}. Everything else in the file was kept as it was.";
 
     private const string AddedKeysDroppedDuplicates =
-        "{0} added these keys to {1} with their defaults: {2}. The same rewrite also dropped the "
-        + "duplicate keys below to one spelling each.";
+        "{0} wrote these keys into {1}: {2}. The same rewrite also dropped the duplicate keys "
+        + "below to one spelling each.";
 
     private const string DroppedKeys =
         "{0} does not know these keys in {1}, and rewriting the file has just dropped them: {2}. "
@@ -50,7 +52,7 @@ internal static class ConfigUpgrade
     private static readonly JsonDocumentOptions Lenient =
         new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
 
-    /// <summary>Which added-keys line is true: the plain one, or the one admitting that the same
+    /// <summary>Which written-keys line is true: the plain one, or the one admitting that the same
     /// rewrite also collapsed a duplicate spelling, when <see cref="Compare"/> found one alongside
     /// the missing keys that triggered the rewrite. Returns the template, not a line with the
     /// missing keys already substituted into it: those names come straight off the admin's own

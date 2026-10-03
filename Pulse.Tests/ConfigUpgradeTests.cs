@@ -368,6 +368,26 @@ public class ConfigUpgradeTests
         Assert.Empty(diff.Unknown);
     }
 
+    /// <summary>The line is written for a key the file held empty, which the mod filled in rather
+    /// than added, and for a value that is no default (the OTLP mod's generated service instance
+    /// id): it names what was written, and calls neither an addition nor a default.</summary>
+    [Fact]
+    public void AddedKeysTemplates_DoNotCallAWrittenKeyAnAddedOne_OrItsValueADefault()
+    {
+        foreach (ConfigDiff diff in new ConfigDiff[]
+        {
+            new(Missing: ["ServiceInstanceId"], Unknown: [], Duplicated: []),
+            new(Missing: ["ServiceInstanceId"], Unknown: [], Duplicated: ["Port: \"port\" wins over \"Port\""]),
+        })
+        {
+            string template = ConfigUpgrade.AddedKeysTemplate(diff);
+
+            Assert.Contains("wrote these keys into {1}: {2}.", template);
+            Assert.DoesNotContain("added", template);
+            Assert.DoesNotContain("default", template);
+        }
+    }
+
     /// <summary>The release review's still-false variant of the added-keys line: the plain "kept
     /// as it was" claim is only true when the rewrite that added a missing key did not also have
     /// to collapse a duplicate spelling.</summary>

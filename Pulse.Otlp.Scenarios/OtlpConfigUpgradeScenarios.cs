@@ -45,8 +45,8 @@ public class OtlpConfigUpgradeScenarios : AtlasScenarioBase
             $"ServiceInstanceId is not a generated GUID: {config["ServiceInstanceId"]}");
 
         // Reported the way any key an upgrade adds is, as the changelog says.
-        string log = await ServerLog.WaitFor(World, "added these keys");
+        string log = await ServerLog.WaitFor(World, "wrote these keys");
         Assert.Contains(
-            "Pulse OTLP added these keys to pulse-otlp.json with their defaults: ServiceName, ServiceInstanceId.", log);
+            "Pulse OTLP wrote these keys into pulse-otlp.json: ServiceName, ServiceInstanceId.", log);
     }
 }
