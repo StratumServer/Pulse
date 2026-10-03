@@ -117,6 +117,7 @@ The OTLP mod has no reload command: every key below needs a restart to take effe
 | `IntervalSeconds` | `60` | Seconds between two exports. Floored at 5, capped at 86400 (24 hours). | Restart |
 | `IncludeRuntimeMetrics` | `true` | Adds the `System.Runtime` meter to what gets pushed. Independent of the base mod's `RuntimeMetrics`. | Restart |
 | `ServiceName` | `"vintagestory"` | Sets the `service.name` resource attribute. A blank value falls back to `vintagestory`; `OTEL_SERVICE_NAME`, if set, overrides this key. | Restart |
+| `ServiceInstanceId` | `""` | Sets the `service.instance.id` resource attribute, which backends show as the `instance` label. Left blank, Pulse generates an id on startup and writes it back here, so it stays the same across restarts; any other value is used as written, trimmed. `service.instance.id` in `OTEL_RESOURCE_ATTRIBUTES`, if set, overrides this key, and `OTEL_SERVICE_NAME` leaves it unused. | Restart |
 
 ## Scraping it
 
@@ -448,7 +449,8 @@ The two mods share no code. `Pulse.Otlp.dll` has no reference to `Pulse.dll`; it
 the meter named `Pulse.Server`, which is all `System.Diagnostics.Metrics` needs, and
 `modinfo.json` declares the dependency so the loader guarantees the base mod is there first.
 
-On first boot it writes `ModConfig/pulse-otlp.json`:
+On first boot it writes `ModConfig/pulse-otlp.json`, with a freshly generated id in
+`ServiceInstanceId` where the block below shows an empty string:
 
 ```json
 {
@@ -458,7 +460,8 @@ On first boot it writes `ModConfig/pulse-otlp.json`:
   "Headers": {},
   "IntervalSeconds": 60,
   "IncludeRuntimeMetrics": true,
-  "ServiceName": "vintagestory"
+  "ServiceName": "vintagestory",
+  "ServiceInstanceId": ""
 }
 ```
 
@@ -473,11 +476,27 @@ other way round.
 
 `ServiceName` sets the `service.name` resource attribute, which is how a backend receiving
 metrics from more than one server tells them apart: grouping, filtering and dashboard variables
-are usually keyed off it. The `OTEL_SERVICE_NAME` environment variable, the ecosystem's standard
-override, takes precedence over this key when it is set. For a stable `instance` label, pair
-`OTEL_SERVICE_NAME` (not this key) with `OTEL_RESOURCE_ATTRIBUTES=service.instance.id=<id>`:
-without `OTEL_SERVICE_NAME`, a freshly generated id silently overrides that variable on every
-restart.
+are usually keyed off it. `ServiceInstanceId` sets `service.instance.id`, which Prometheus, Mimir
+and Grafana Cloud turn into the `instance` label and file a server's series under, so it has to be
+the same on every start: an id that changes at each restart begins a second set of series beside
+the first. Left blank, or missing from a file an older version wrote, the key is filled with a
+generated GUID at startup, written into `pulse-otlp.json`, and found there on every start after
+that. To use a readable id instead, put it in the key: any text works, such as `survival-eu-1`, and
+is used as written, trimmed. Clearing the key asks for a new generated one at the next start.
+
+Each server needs an id of its own. Two servers with the same `ServiceName` and the same id are
+one server to a backend, so a `pulse-otlp.json` copied to a second server has to have
+`ServiceInstanceId` cleared or changed first. A server whose `ModConfig` folder does not survive a
+restart cannot keep a generated id either: put one in the file the folder is created from.
+
+The environment keeps the last word, for the id as for the name. When `OTEL_SERVICE_NAME` is set,
+it takes precedence over `ServiceName` and takes `ServiceInstanceId` with it: Pulse then leaves the
+whole identity to the environment, and the resource carries an instance id only if
+`OTEL_RESOURCE_ATTRIBUTES` has a `service.instance.id`. When it is not set, a `service.instance.id`
+in `OTEL_RESOURCE_ATTRIBUTES` takes precedence over `ServiceInstanceId`, while `ServiceName` is
+still the name, even if that variable carries a `service.name`. The startup line in the server log
+names the service and the id the backend will see, whichever of the file and the environment
+decided them: `Pulse OTLP exporting ... as service 'vintagestory', instance '<id>'`.
 
 `IntervalSeconds` is floored at 5 and capped at 86400 (24 hours), the cap there so a config typo
 several digits too long cannot overflow the millisecond count it is converted to. Sixty is the
@@ -637,7 +656,7 @@ them needs a server. `Pulse.Otlp.Tests` covers the config translation, which is 
 mod's only non-obvious logic lives. CI also runs both unit suites on Windows. The scenarios stay
 on Linux, since they boot a server build made for it.
 
-Mutation testing runs at two depths. `tools/mutation-check.sh` applies ninety-one representative
+Mutation testing runs at two depths. `tools/mutation-check.sh` applies ninety-eight representative
 mutations one at a time and requires the suite to fail on every one; CI runs it on every code
 change, deterministic and done in about six minutes. `.github/workflows/mutation.yml` runs
 dotnet-stryker incrementally on pull requests into `dev` touching `Pulse/`: it mutates only the

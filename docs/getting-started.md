@@ -275,8 +275,9 @@ have one already.
    }
    ```
 
-   Leave every other key as the mod wrote it. `Endpoint` is the base address only, Pulse adds
-   the rest of the path itself.
+   Leave every other key as the mod wrote it, `ServiceInstanceId` included: the mod generated that
+   id when it first started, and it keeps this server's numbers together in Grafana across
+   restarts. `Endpoint` is the base address only, Pulse adds the rest of the path itself.
 5. Start the server again. Look for a log line containing `[pulseotlp] Pulse OTLP exporting`, which
    confirms it is pushing on a timer; by default that timer is 60 seconds, so give it a minute.
 6. Confirm it arrived: in Grafana Cloud, open **Explore**, pick your Prometheus data source, and

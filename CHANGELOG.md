@@ -21,6 +21,34 @@ first.
   severity to be followed straight by Pulse's own words needs the mod's tag between the two.
   `pulse_log_entries_total` and `pulse_engine_warnings_total` are unchanged: they count what the
   server's own logger receives, and every mod's logger passes its entries on to it.
+- **The `instance` label of a Pulse OTLP server's series now stays the same across restarts, and
+  changes once, when the server first starts on this version.** 0.2.0 exported a
+  `service.instance.id` that the OpenTelemetry SDK generated at random on every start (unless
+  `OTEL_SERVICE_NAME` was set), which Prometheus, Mimir and Grafana Cloud show as the `instance`
+  label: every restart began a new set of series next to the old one, and a dashboard or an alert
+  keyed on `instance` saw a different server each time. The id now lives in a new
+  `ServiceInstanceId` key of `pulse-otlp.json`. Left blank, or missing from a file an older version
+  wrote, it is filled with a generated GUID at startup and written into the file, and every start
+  after that finds it there. On an upgrade the log says `Pulse OTLP added these keys to
+  pulse-otlp.json with their defaults: ServiceInstanceId.`, as for any key an upgrade adds.
+  That GUID is not the one the last 0.2.0 start exported, which is the one change of label; after
+  it, the label stays. Any other value is used as written, trimmed, so a readable id such as
+  `survival-eu-1` can go in the key instead, and clearing the key asks for a new generated one.
+  Each server needs an id of its own: a `pulse-otlp.json` copied to a second server carries the
+  first one's id along, and two servers with the same `ServiceName` and the same id are one server
+  to a backend, so clear or change the key in the copy. A server whose `ModConfig` folder does not
+  survive a restart still gets a new id on every start.
+
+  The environment keeps the last word, as it already did for the name. A `service.instance.id` in
+  `OTEL_RESOURCE_ATTRIBUTES` takes precedence over the key, and survives: 0.2.0 replaced it with a
+  random one on every start unless `OTEL_SERVICE_NAME` was set too. `OTEL_SERVICE_NAME`, when set,
+  still leaves the whole identity to the environment, so neither `ServiceName` nor
+  `ServiceInstanceId` is used and the resource carries an instance id only if
+  `OTEL_RESOURCE_ATTRIBUTES` has one; pairing the two variables, as the 0.2.0 notes advise, still
+  works and is no longer needed. `service.name` is unchanged: without `OTEL_SERVICE_NAME`,
+  `ServiceName` still wins over a `service.name` in `OTEL_RESOURCE_ATTRIBUTES`. The startup line
+  `Pulse OTLP exporting ... as service 'vintagestory'` now ends with `, instance '<id>'` when the
+  export carries one, naming what the backend will see.
 
 ## [0.2.0] - 2026-09-29
 
