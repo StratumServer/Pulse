@@ -1205,6 +1205,15 @@ public class MetricsHttpServerTests
             using HttpResponseMessage response = await client.GetAsync($"http://127.0.0.1:{port}/metrics");
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
+            // Serve resets the backoff on the accept thread right after handing the connection to
+            // its handler thread, so the response can reach this test before the reset runs: wait
+            // for it, briefly, instead of reading the value the instant the response is in.
+            Stopwatch watch = Stopwatch.StartNew();
+            while (backoff.CurrentMs != MetricsHttpServer.AcceptBackoff.InitialMs && watch.Elapsed < TimeSpan.FromSeconds(2))
+            {
+                await Task.Delay(10);
+            }
+
             Assert.Equal(MetricsHttpServer.AcceptBackoff.InitialMs, backoff.CurrentMs);
         }
         finally
