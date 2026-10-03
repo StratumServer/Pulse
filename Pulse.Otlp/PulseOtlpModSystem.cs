@@ -54,6 +54,14 @@ public sealed class PulseOtlpModSystem : ModSystem
         ConfigLoadResult<PulseOtlpConfig> loaded = ConfigLoad.Resolve(
             () => api.LoadModConfig<PulseOtlpConfig>(ConfigFile), () => new PulseOtlpConfig());
         PulseOtlpConfig config = loaded.Config;
+
+        // Before the file is stored or brought up to date below, so that what gets written is the
+        // id this session exports: a blank ServiceInstanceId (never set, or missing from a file an
+        // older version wrote) is replaced by a fresh GUID here, the store or the upgrade below puts
+        // it in the file, and the next start finds it there instead of generating another one.
+        // A random id per start is what made every restart a new series in the backend.
+        config.ServiceInstanceId = OtlpOptions.ResolveServiceInstanceId(config.ServiceInstanceId);
+
         switch (loaded.Status)
         {
             case ConfigLoadStatus.Absent:
@@ -145,24 +153,6 @@ public sealed class PulseOtlpModSystem : ModSystem
                 ? [PulseMeterName, RuntimeMeterName]
                 : [PulseMeterName];
 
-            // OTEL_SERVICE_NAME, the ecosystem's standard override, must win over the config key
-            // when it is set. That is not automatic: ResourceBuilder.CreateDefault() (the seed
-            // ConfigureResource lazily creates) already ends with the detector that reads this
-            // variable, but ConfigureResource's own AddService call is appended after it, and
-            // ResourceBuilder.Build() merges every detector's Resource left to right with the
-            // later one winning on a collision (Resource.Merge: "In case of a collision the other
-            // Resource takes precedence"). An unconditional AddService would therefore always beat
-            // the environment variable. Checked against MeterProviderBuilderSdk.ConfigureResource,
-            // ResourceBuilder.CreateDefault/Build and Resource.Merge in OpenTelemetry .NET 1.19.1
-            // (github.com/open-telemetry/opentelemetry-dotnet, tag core-1.19.1). Skipping the call
-            // when the variable is set leaves the SDK's own default resource pipeline, which
-            // already reads it, untouched.
-            string? serviceNameFromEnvironment = Environment.GetEnvironmentVariable("OTEL_SERVICE_NAME");
-            bool serviceNameSetByEnvironment = !string.IsNullOrWhiteSpace(serviceNameFromEnvironment);
-            string serviceName = serviceNameSetByEnvironment
-                ? serviceNameFromEnvironment!
-                : OtlpOptions.ResolveServiceName(config.ServiceName);
-
             // Nothing past the Build() below can take the server down. Every export runs on the
             // SDK's own background thread ("OpenTelemetry-PeriodicExportingMetricReader-..."), and
             // MetricReader.Collect wraps the collect-and-send in a catch that only writes to the
@@ -180,13 +170,8 @@ public sealed class PulseOtlpModSystem : ModSystem
 
             provider = Sdk.CreateMeterProviderBuilder()
                 .AddMeter(meters)
-                .ConfigureResource(r =>
-                {
-                    if (!serviceNameSetByEnvironment)
-                    {
-                        r.AddService(serviceName);
-                    }
-                })
+                .ConfigureResource(r => OtlpOptions.ConfigureServiceIdentity(
+                    r, config.ServiceName, config.ServiceInstanceId))
                 .AddOtlpExporter((exporter, reader) =>
                 {
                     exporter.Endpoint = endpoint;
@@ -202,15 +187,25 @@ public sealed class PulseOtlpModSystem : ModSystem
             exportFailureLogListenerId = api.Event.RegisterGameTickListener(
                 OnDrainExportFailures, OnDrainExportFailuresError, ExportFailureDrainIntervalMs);
 
+            // The identity is read back from the provider rather than worked out a second time
+            // here: the environment can decide either value (see
+            // OtlpOptions.ConfigureServiceIdentity), and the line is only any use to an admin if it
+            // names what the backend will actually see. No instance clause when the resource has
+            // none, which is what an OTEL_SERVICE_NAME set without an id in
+            // OTEL_RESOURCE_ATTRIBUTES gives.
+            Resource exported = provider.GetResource();
+            string? instanceId = OtlpOptions.ResourceAttribute(exported, OtlpOptions.ServiceInstanceIdKey);
+
             // Scheme, host, port and path only, the same components the exporter's own
             // diagnostics ever carry: userinfo or a query string in the configured endpoint (a
             // backend that authenticates through a signed URL, say) has no business in a log line
             // at any level.
             Mod.Logger.Notification(
-                "Pulse OTLP exporting {0} to {1} over {2} every {3}s as service '{4}'",
+                "Pulse OTLP exporting {0} to {1} over {2} every {3}s as service '{4}'{5}",
                 string.Join(", ", meters), OtlpOptions.LoggableEndpoint(endpoint),
                 protocol == OtlpExportProtocol.Grpc ? "grpc" : "http/protobuf", intervalMs / 1000,
-                serviceName);
+                OtlpOptions.ResourceAttribute(exported, OtlpOptions.ServiceNameKey),
+                instanceId is null ? string.Empty : $", instance '{instanceId}'");
         }
         catch (Exception ex)
         {

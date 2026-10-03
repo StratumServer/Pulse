@@ -92,6 +92,31 @@ public class OtlpOptionsTests
     public void ResolveServiceName_Falls_BackToTheDefault_OnBlank(string? configured)
         => Assert.Equal(OtlpOptions.DefaultServiceName, OtlpOptions.ResolveServiceName(configured));
 
+    [Theory]
+    [InlineData("pulse-atlas-test-instance", "pulse-atlas-test-instance")]
+    [InlineData("  my-server  ", "my-server")]
+    [InlineData("3f2a8c1e-0b7d-4e55-9a31-6c0d2f4b7e19", "3f2a8c1e-0b7d-4e55-9a31-6c0d2f4b7e19")]
+    public void ResolveServiceInstanceId_Keeps_AConfiguredId_AsWrittenButTrimmed(string configured, string expected)
+        => Assert.Equal(expected, OtlpOptions.ResolveServiceInstanceId(configured));
+
+    /// <summary>Blank is "generate one", whichever way it is blank: the key missing from an older
+    /// file (Newtonsoft leaves the class default, an empty string), null in the file, an empty
+    /// string, or whitespace. The generated value is a GUID, and a different one each time, so two
+    /// servers that both left the key blank never share an id.</summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void ResolveServiceInstanceId_Generates_AGuid_OnBlank(string? configured)
+    {
+        string first = OtlpOptions.ResolveServiceInstanceId(configured);
+        string second = OtlpOptions.ResolveServiceInstanceId(configured);
+
+        Assert.True(Guid.TryParse(first, out Guid parsed));
+        Assert.NotEqual(Guid.Empty, parsed);
+        Assert.NotEqual(first, second);
+    }
+
     [Fact]
     public void RenderHeaders_Writes_Nothing_ForNoHeaders()
     {

@@ -309,6 +309,10 @@ mutate Pulse/ConfigUpgrade.cs \
     's/configValue is JsonObject \|\| configByKey\[key\]\.Count\(\) > 1/false/' \
     "config upgrade: a duplicated block or a dictionary's colliding keys claims a winner that does not exist"
 
+mutate Pulse/ConfigUpgrade.cs \
+    's/if \(IsBlank\(matches\[\^1\]\.Value\) && IsFilled\(entry\.Value\)\)/if (false)/' \
+    "config upgrade: a key the file carries blank, which a mod has since filled in, goes unreported, so the value it generated is never written back and changes on every restart"
+
 # Loading a config file has the same two ways to be wrong as upgrading one: an unreadable file is
 # the one this whole fix exists for, so mistaking it for a loaded or an absent one is exactly the
 # regression that would bring back the original bug (an admin's broken file getting overwritten).
@@ -379,6 +383,30 @@ mutate Pulse.Otlp/OtlpOptions.cs \
 mutate Pulse.Otlp/OtlpOptions.cs \
     's/string\.IsNullOrWhiteSpace\(configuredName\)/!string.IsNullOrWhiteSpace(configuredName)/' \
     "otlp: a blank ServiceName exports as-is and a real one is replaced by the default"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/string\.IsNullOrWhiteSpace\(configuredId\)/!string.IsNullOrWhiteSpace(configuredId)/' \
+    "otlp: a blank ServiceInstanceId exports as-is and a real one is replaced by a generated one"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/: configuredId\.Trim\(\);/: configuredId;/' \
+    "otlp: a configured ServiceInstanceId is no longer trimmed"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/Guid\.NewGuid\(\)\.ToString\(\)/Guid.Empty.ToString()/' \
+    "otlp: the generated service instance id is the same all-zero GUID on every server"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/: fromEnvironment,/: ResolveServiceInstanceId(configuredInstanceId),/' \
+    "otlp: the environment's service.instance.id no longer wins over the config key"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/string\.IsNullOrWhiteSpace\(fromEnvironment\)/fromEnvironment == null/' \
+    "otlp: an empty service.instance.id in the environment counts as set, so the resource exports an empty one"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/if \(!string\.IsNullOrWhiteSpace\(Environment\.GetEnvironmentVariable\(ServiceNameVariable\)\)\)/if (false)/' \
+    "otlp: OTEL_SERVICE_NAME no longer leaves the whole service identity to the environment"
 
 # The failure log turns a silent export into one rate-limited line; both of its limits exist to
 # bound the log itself, and a mutation that erases either one is exactly what would let a stuck
