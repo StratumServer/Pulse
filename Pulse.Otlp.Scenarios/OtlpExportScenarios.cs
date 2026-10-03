@@ -1,6 +1,7 @@
 using System.Text;
 using Atlas.Api;
 using Atlas.XUnit;
+using Pulse.Scenarios;
 using Vintagestory.API.MathTools;
 using Xunit;
 
@@ -21,6 +22,12 @@ public class OtlpExportScenarios : AtlasScenarioBase, IDisposable
     /// <summary>Seeded IntervalSeconds, so the first export is at most this far away plus the
     /// startup the reader does before its first wait.</summary>
     private static readonly TimeSpan ExportInterval = TimeSpan.FromSeconds(5);
+
+    // Assembly.Location, not AppContext.BaseDirectory: Atlas repoints the latter at the embedded
+    // server's own data path once it boots, which is not where this test assembly (and the
+    // fixture AtlasDataFiles copied from) lives.
+    private static readonly string TestAssemblyDirectory =
+        Path.GetDirectoryName(typeof(OtlpExportScenarios).Assembly.Location)!;
 
     private readonly FakeCollector collector;
 
@@ -61,6 +68,36 @@ public class OtlpExportScenarios : AtlasScenarioBase, IDisposable
 
         // The configured header arrived with it: this is how a hosted backend authenticates.
         Assert.Equal("atlas", export.OrgId);
+    }
+
+    /// <summary>The service.instance.id the config file sets is the one on the wire, under its own
+    /// key, and the file is left exactly as the admin wrote it: the key was set, so nothing is
+    /// generated and nothing rewritten. Both attributes are matched whole, key and value together
+    /// (see <see cref="Exports.CarriesAttribute"/>).</summary>
+    [AtlasScenario(TimeoutMs = 180_000)]
+    public async Task Export_Carries_TheConfiguredServiceInstanceId()
+    {
+        FakeCollector.Export export = await WaitForExport();
+
+        Assert.True(
+            Exports.CarriesAttribute(export.Body, "service.instance.id", "pulse-atlas-test-instance"),
+            "the export does not carry service.instance.id = pulse-atlas-test-instance");
+        Assert.True(
+            Exports.CarriesAttribute(export.Body, "service.name", "pulse-atlas-test"),
+            "the export does not carry service.name = pulse-atlas-test");
+
+        // The match is exact, not a search for the two strings: the service name is in the payload,
+        // and is the start of the id, and neither makes it the id.
+        Assert.False(Exports.CarriesAttribute(export.Body, "service.instance.id", "pulse-atlas-test"));
+
+        string seedPath = Path.Combine(TestAssemblyDirectory, "data", "otlp", "pulse-otlp.json");
+        string configPath = Path.Combine(World.Api.GetOrCreateDataPath("ModConfig"), "pulse-otlp.json");
+        Assert.Equal(File.ReadAllBytes(seedPath), File.ReadAllBytes(configPath));
+
+        // The line the README and the changelog promise: the identity the backend will see, at the
+        // end of the startup line.
+        string log = await ServerLog.WaitFor(World, "Pulse OTLP exporting");
+        Assert.Contains("as service 'pulse-atlas-test', instance 'pulse-atlas-test-instance'", log);
     }
 
     [AtlasScenario(TimeoutMs = 180_000)]
