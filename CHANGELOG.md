@@ -29,15 +29,26 @@ first.
   keyed on `instance` saw a different server each time. The id now lives in a new
   `ServiceInstanceId` key of `pulse-otlp.json`. Left blank, or missing from a file an older version
   wrote, it is filled with a generated GUID at startup and written into the file, and every start
-  after that finds it there. On an upgrade the log says `Pulse OTLP added these keys to
-  pulse-otlp.json with their defaults: ServiceInstanceId.`, as for any key an upgrade adds.
-  That GUID is not the one the last 0.2.0 start exported, which is the one change of label; after
-  it, the label stays. Any other value is used as written, trimmed, so a readable id such as
-  `survival-eu-1` can go in the key instead, and clearing the key asks for a new generated one.
-  Each server needs an id of its own: a `pulse-otlp.json` copied to a second server carries the
-  first one's id along, and two servers with the same `ServiceName` and the same id are one server
-  to a backend, so clear or change the key in the copy. A server whose `ModConfig` folder does not
-  survive a restart still gets a new id on every start.
+  after that finds it there. That GUID is not the one the last 0.2.0 start exported, which is the
+  one change of label; after it, the label stays. Any other value is used as written, trimmed, so a
+  readable id such as `survival-eu-1` can go in the key instead, and clearing the key asks for a
+  new generated one. For a server coming from 0.2.0 that first start is also the first rewrite of
+  its complete `pulse-otlp.json`, which drops any comments in it without a word and any key Pulse
+  does not know with a warning. The line that reports the write, `Pulse OTLP wrote these keys into
+  pulse-otlp.json: ServiceInstanceId. Everything else in the file was kept as it was.`, reads that
+  way in both mods now: it said `added these keys to <file> with their defaults`, which was not
+  true of a key the file held empty or of a generated value.
+
+  Pulse OTLP cannot save the id it generated when `ModConfig` is mounted read-only, or when the
+  file is one it cannot rewrite (written with single quotes, say). It then logs a warning that
+  names the id and says the next start will export a different one. On a read-only `ModConfig`, put
+  `ServiceInstanceId` in the file yourself, or set `OTEL_RESOURCE_ATTRIBUTES=service.instance.id=<id>`
+  in the server's environment. A folder that does not survive a restart loses the id the same way,
+  with no warning, since the write itself worked. Each server needs an id of its own: a
+  `pulse-otlp.json` copied to a second server, or a template that several servers' `ModConfig`
+  folders are built from, carries one id to all of them, and two servers with the same
+  `ServiceName` and the same id are one server to a backend. Clear the key in the copy, or give each
+  server a different `ServiceInstanceId` or `OTEL_RESOURCE_ATTRIBUTES=service.instance.id=<id>`.
 
   The environment keeps the last word, as it already did for the name. A `service.instance.id` in
   `OTEL_RESOURCE_ATTRIBUTES` takes precedence over the key, and survives: 0.2.0 replaced it with a
