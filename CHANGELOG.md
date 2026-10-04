@@ -61,6 +61,22 @@ first.
   `Pulse OTLP exporting ... as service 'vintagestory'` now ends with `, instance '<id>'` when the
   export carries one, naming what the backend will see.
 
+### Fixed
+
+- Per-mod attribution no longer reports the time of many of the game's own entity behaviours as
+  `unattributed`. The engine marks a behaviour with the name its `PropertyName()` returns, and Pulse
+  looked that name up by the code its class was registered under, which differs for 18 of the 59
+  behaviour classes the game's own mods register in 1.22.7: `despawn` marks as `timeddespawn`,
+  `nametag` as `displayname`, `entitystatetags` as `entityStateTags`. Twelve names found no class,
+  so their time was filed under `unattributed`, which the README defines as work that no loaded mod
+  claims, when it belonged to `game` (the game's own Essentials mod), to `survival` or, for the
+  passive physics, to `engine`. Pulse now credits each name to the mod that ships the class
+  declaring it, learned from the loaded entities: a behaviour from a third-party mod is billed to
+  that mod whatever its name, and a subclass that inherits its parent's name to the parent's mod. On
+  a test server with 1,691 entities loaded, `unattributed` went from about 2.5% of the sampled tick
+  time to under 0.1%, and the difference went to `game`. What the read costs is in the README's
+  cost section.
+
 ## [0.2.0] - 2026-09-29
 
 The first stable release of the 0.2 line, carrying everything from v0.2.0-indev.1 through
