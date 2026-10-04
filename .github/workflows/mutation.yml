@@ -170,6 +170,14 @@ jobs:
       - name: Restore dotnet tools
         run: dotnet tool restore
 
+      # The full run's duration varies several times over on identical work, from one shared
+      # runner to the next. The machine it got is the first thing to know when a run is slow.
+      - name: Describe the runner
+        run: |
+          nproc
+          lscpu | grep -E '^(Model name|CPU\(s\)|Thread\(s\) per core|CPU max MHz)' || true
+          free -m
+
       # --since scopes this run to mutants in files that changed relative to the pull request's
       # base branch; --break-at 0 keeps a small, noisy sample from failing the build (the real
       # threshold lives on the full run below). Stryker exits 0 when since finds nothing to
@@ -181,16 +189,20 @@ jobs:
           BASE_REF: ${{ github.base_ref }}
         run: |
           dotnet dotnet-stryker -f stryker/${{ matrix.project }}.json --skip-version-check \
-            --since:"origin/$BASE_REF" --break-at 0 \
+            --since:"origin/$BASE_REF" --break-at 0 --concurrency 2 --log-to-file \
             --output StrykerOutput/${{ matrix.project }}
 
       # The full run, at the thresholds in stryker/Pulse.json and stryker/Pulse.Otlp.json. Each
       # mutant run restarts a test host, and that startup cost dominates on a shared runner: the
       # timeout above is generous because the score itself is the fast part, the fixed
-      # per-mutant overhead is what takes the wall clock past local.
+      # per-mutant overhead is what takes the wall clock past local. --concurrency 2 is the
+      # default on this runner (half its cores), written out so the log says it; --log-to-file
+      # keeps Stryker's trace log, which shows each test session and any retry.
       - name: Mutation test ${{ matrix.project }} (full)
         if: github.event_name != 'pull_request'
-        run: dotnet dotnet-stryker -f stryker/${{ matrix.project }}.json --skip-version-check --output StrykerOutput/${{ matrix.project }}
+        run: |
+          dotnet dotnet-stryker -f stryker/${{ matrix.project }}.json --skip-version-check \
+            --concurrency 2 --log-to-file --output StrykerOutput/${{ matrix.project }}
 
       # The surviving mutants are the finding; without the report a red job only says a number
       # moved.
@@ -201,3 +213,13 @@ jobs:
           name: mutation-report-${{ matrix.project }}
           path: StrykerOutput/${{ matrix.project }}/reports/mutation-report.json
           if-no-files-found: warn
+
+      # Stryker's trace log: where the time of a slow run went.
+      - name: Upload Stryker log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stryker-log-${{ matrix.project }}
+          path: StrykerOutput/${{ matrix.project }}/logs/
+          if-no-files-found: warn
+          retention-days: 14
