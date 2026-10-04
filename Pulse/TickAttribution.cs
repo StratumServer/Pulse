@@ -8,12 +8,12 @@ using OwnerLookup = System.Func<string, string?>;
 
 namespace Pulse;
 
-/// <summary>The duty cycle and the arithmetic behind per-mod tick attribution: when the engine's
-/// frame profiler should be running, and how one profiled tick's mark tree becomes seconds per
-/// mod.</summary>
+/// <summary>The arithmetic behind per-mod tick attribution, on the schedule of a
+/// <see cref="DutyCycle"/>: when the engine's frame profiler should be running, and how one
+/// profiled tick's mark tree becomes seconds per mod.</summary>
 /// <remarks>Knows nothing about meters, the server or the profiler flag itself. It is handed the
 /// previous tick's completed tree and says whether the profiler should be on when the current tick
-/// ends, which is what makes the whole duty cycle drivable from a unit test.</remarks>
+/// ends.</remarks>
 internal sealed class TickAttribution
 {
     /// <summary>Everything the engine spends on itself: its own server systems, the time between
@@ -30,14 +30,6 @@ internal sealed class TickAttribution
     /// <c>PropertyName()</c>.</summary>
     public const string BehaviorPrefix = "done-behavior-";
 
-    /// <summary>Shortest interval between bursts. The duty cycle is the whole reason this is
-    /// affordable, so it stays a duty cycle.</summary>
-    public const int MinimumIntervalSeconds = 1;
-
-    /// <summary>Longest burst. Ten seconds of profiling at the default tick rate, which is already
-    /// far more than tick composition varies over.</summary>
-    public const int MaximumBurstTicks = 300;
-
     /// <summary>The engine's bucket for the throttle sleep, charged in <c>ServerMain.Process</c>
     /// (1.22.7:1553). It is the one root mark that is not work, so it is what busy time is measured
     /// against rather than attributed.</summary>
@@ -50,31 +42,31 @@ internal sealed class TickAttribution
     /// other mark in the tree is the engine's own.</summary>
     private static readonly string[] OwnedPrefixes = ["gmle", "gmlb", "dce", "dcb", "sdcb", BehaviorPrefix];
 
+    private readonly DutyCycle cycle;
+
     private readonly Dictionary<string, long> ticksByMod = [];
 
     /// <summary>Every mod that has appeared in any burst so far, so one that goes quiet publishes a
     /// zero instead of freezing its gauge at the share it had when it stopped.</summary>
     private readonly HashSet<string> seenMods = [];
 
-    private double idleSeconds;
-    private int burstTicksElapsed;
     private int sampled;
     private long busyTicks;
     private long dropped;
-    private bool warm;
 
     public TickAttribution(int burstTicks, int intervalSeconds, bool enabled = true)
-        => Apply(enabled, burstTicks, intervalSeconds);
+        => cycle = new DutyCycle(burstTicks, intervalSeconds, enabled);
 
     /// <summary>Whether the duty cycle runs at all.</summary>
-    public bool Enabled { get; private set; }
+    public bool Enabled => cycle.Enabled;
 
-    public int BurstTicks { get; private set; }
+    public int BurstTicks => cycle.BurstTicks;
 
-    public int IntervalSeconds { get; private set; }
+    public int IntervalSeconds => cycle.IntervalSeconds;
 
-    /// <summary>Whether the engine's frame profiler has to be enabled when the current tick ends.</summary>
-    public bool Profiling { get; private set; }
+    /// <summary>Whether the engine's frame profiler has to be enabled when the current tick ends:
+    /// exactly while the duty cycle is inside a burst.</summary>
+    public bool Profiling => cycle.InBurst;
 
     /// <summary>Ticks folded into a completed burst since the server booted, which is the number
     /// <c>pulse_attribution_ticks_total</c> reports.</summary>
@@ -86,10 +78,8 @@ internal sealed class TickAttribution
     /// back off on the next tick, and a later switch-on begins from a clean burst.</remarks>
     public void Apply(bool enabled, int burstTicks, int intervalSeconds)
     {
-        Enabled = enabled;
-        BurstTicks = Math.Clamp(burstTicks, 1, MaximumBurstTicks);
-        IntervalSeconds = Math.Max(MinimumIntervalSeconds, intervalSeconds);
-        Restart();
+        cycle.Apply(enabled, burstTicks, intervalSeconds);
+        ClearBurst();
     }
 
     /// <summary>Advances the duty cycle by one tick, folding <paramref name="previousTick"/> when
@@ -97,48 +87,25 @@ internal sealed class TickAttribution
     /// one.</summary>
     public AttributionBurst? OnTick(double elapsedSeconds, ProfileEntryRange? previousTick, OwnerLookup owner)
     {
-        if (!Enabled)
+        DutyStep step = cycle.OnTick(elapsedSeconds);
+
+        // Idle, the start and the warm-up carry nothing to fold. On the warm-up, the previous tick
+        // is the one the profiler was switched on part-way through: it never got its Begin(), and
+        // the tree it ended with is whatever the last burst left in the profiler. One stale sample
+        // per burst, discarded here rather than folded.
+        if (step is not (DutyStep.Sample or DutyStep.LastSample))
         {
             return null;
         }
 
-        if (!Profiling)
-        {
-            idleSeconds += elapsedSeconds;
-            if (idleSeconds < IntervalSeconds)
-            {
-                return null;
-            }
-
-            idleSeconds = 0;
-            burstTicksElapsed = 0;
-            warm = false;
-            Profiling = true;
-            return null;
-        }
-
-        // The profiler was switched on part-way through the previous tick, so that tick never got
-        // its Begin() and the tree it ended with is whatever the last burst left in the profiler.
-        // One stale sample per burst, discarded here rather than folded.
-        if (!warm)
-        {
-            warm = true;
-            return null;
-        }
-
+        // The cycle counted this sample whether or not there was a tree to read, so a burst always
+        // ends and the profiler always goes back off.
         if (previousTick != null)
         {
             Fold(previousTick, owner);
         }
 
-        // Counted whether or not there was a tree to read, so a burst always ends and the profiler
-        // always goes back off.
-        if (++burstTicksElapsed < BurstTicks)
-        {
-            return null;
-        }
-
-        return Take();
+        return step == DutyStep.LastSample ? Take() : null;
     }
 
     /// <summary>Folds one completed tick's tree into the burst.</summary>
@@ -228,7 +195,8 @@ internal sealed class TickAttribution
         ticksByMod[modid] = accumulated + ticks;
     }
 
-    /// <summary>Closes the burst and starts the next one empty.</summary>
+    /// <summary>Closes the burst and starts the next one empty. The duty cycle has already gone
+    /// back to idle by the time this runs, so the profiler is off from the next tick.</summary>
     private AttributionBurst Take()
     {
         double frequency = Stopwatch.Frequency;
@@ -241,20 +209,16 @@ internal sealed class TickAttribution
 
         AttributionBurst burst = new(seconds, busyTicks / frequency, sampled, dropped);
         TicksProfiled += sampled;
-        Restart();
+        ClearBurst();
         return burst;
     }
 
-    /// <summary>Back to idle with nothing accumulated, and the profiler off from the next tick.</summary>
-    /// <remarks>Everything a burst gathers is dropped here, but <c>seenMods</c> is not: a mod that
-    /// has been measured once keeps publishing a zero rather than freezing its gauge, whether the
-    /// burst ended on its own or an operator cut it short.</remarks>
-    private void Restart()
+    /// <summary>Nothing accumulated: what a burst gathers so far is dropped.</summary>
+    /// <remarks>Not <c>seenMods</c>: a mod that has been measured once keeps publishing a zero
+    /// rather than freezing its gauge, whether the burst ended on its own or an operator cut it
+    /// short.</remarks>
+    private void ClearBurst()
     {
-        Profiling = false;
-        idleSeconds = 0;
-        burstTicksElapsed = 0;
-        warm = false;
         ticksByMod.Clear();
         busyTicks = 0;
         sampled = 0;
