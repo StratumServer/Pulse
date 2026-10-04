@@ -52,7 +52,7 @@ mutate() { # <file> <sed -E expression> <label>
     git checkout -- "$file"
 }
 
-MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse/EngineSample.cs Pulse/PingSummary.cs Pulse/EntityBreakdown.cs Pulse/SuspendBookkeeper.cs Pulse/TickAttribution.cs Pulse/ModOwners.cs Pulse/ConfigUpgrade.cs Pulse/ConfigLoad.cs Pulse/PulseCommands.cs Pulse/AttributionMetrics.cs Pulse.Otlp/OtlpOptions.cs Pulse.Otlp/ExportFailureLog.cs Pulse.Otlp/PulseOtlpModSystem.cs"
+MUTATED="Pulse/PrometheusText.cs Pulse/MetricsAggregator.cs Pulse/LogClassifier.cs Pulse/MetricsHttpServer.cs Pulse/TickBookkeeper.cs Pulse/EngineSample.cs Pulse/PingSummary.cs Pulse/EntityBreakdown.cs Pulse/SuspendBookkeeper.cs Pulse/DutyCycle.cs Pulse/TickAttribution.cs Pulse/ModOwners.cs Pulse/ConfigUpgrade.cs Pulse/ConfigLoad.cs Pulse/PulseCommands.cs Pulse/AttributionMetrics.cs Pulse.Otlp/OtlpOptions.cs Pulse.Otlp/ExportFailureLog.cs Pulse.Otlp/PulseOtlpModSystem.cs"
 
 if ! git diff --quiet -- $MUTATED; then
     echo "One of $MUTATED has uncommitted changes; refusing to mutate over them."
@@ -267,9 +267,9 @@ mutate Pulse/TickAttribution.cs \
     's/if \(entry\.ElapsedTicks < 0\)/if (entry.ElapsedTicks <= 0)/' \
     "attribution: the wrap clamp fires on a mark that legitimately took no time"
 
-mutate Pulse/TickAttribution.cs \
+mutate Pulse/DutyCycle.cs \
     's/if \(!warm\)/if (false)/' \
-    "attribution: the stale sample from the tick the profiler came on is folded instead of discarded"
+    "duty cycle: the tick after a burst starts is taken for a sample, so the stale one is folded instead of discarded"
 
 mutate Pulse/TickAttribution.cs \
     's/if \(mark\.Key == SleepMark\)/if (false)/' \
@@ -393,9 +393,9 @@ mutate Pulse/ConfigLoad.cs \
 # Switching attribution from a command is a promise about a live server: that a server which never
 # asked for it is not paying for it, that a reload names only what it could not apply, and that a
 # ten minute look does not quietly become permanent. All three fail silently when they are wrong.
-mutate Pulse/TickAttribution.cs \
+mutate Pulse/DutyCycle.cs \
     's/if \(!Enabled\)/if (false)/' \
-    "attribution: the duty cycle runs on a server that never switched it on"
+    "duty cycle: it runs on a server that never switched it on"
 
 mutate Pulse/AttributionMetrics.cs \
     's/\+\+unprimedTicks > UnprimedTickLimit/++unprimedTicks >= UnprimedTickLimit/' \

@@ -6,6 +6,9 @@ using OwnerLookup = System.Func<string, string?>;
 
 namespace Pulse.Tests;
 
+/// <summary>Attribution's own arithmetic, and what it does with each step of its duty cycle: which
+/// tick's tree it folds, when it publishes, what it drops when the cycle is restarted. The schedule
+/// alone is <c>DutyCycleTests</c>'s.</summary>
 public class TickAttributionTests
 {
     /// <summary>One profiled tick as the engine leaves it: a thousand ticks of wall time, four
@@ -60,19 +63,8 @@ public class TickAttributionTests
     private static double Share(AttributionBurst burst, string modid)
         => burst.Seconds.Single(entry => entry.Key == modid).Value / burst.BusySeconds;
 
-    [Fact]
-    public void Constructor_Floors_TheIntervalAndTheBurstLength()
-    {
-        TickAttribution attribution = new(0, 0);
-
-        Assert.Equal(1, attribution.BurstTicks);
-        Assert.Equal(TickAttribution.MinimumIntervalSeconds, attribution.IntervalSeconds);
-    }
-
-    [Fact]
-    public void Constructor_Caps_TheBurstLength()
-        => Assert.Equal(TickAttribution.MaximumBurstTicks, new TickAttribution(100000, 10).BurstTicks);
-
+    /// <summary>The cycle's own clamping is <c>DutyCycleTests</c>'s. What this checks is that the two
+    /// numbers reach the cycle the right way round, and come back out of it.</summary>
     [Fact]
     public void Constructor_Keeps_AConfiguredDutyCycle()
     {
@@ -80,21 +72,6 @@ public class TickAttributionTests
 
         Assert.Equal(30, attribution.BurstTicks);
         Assert.Equal(10, attribution.IntervalSeconds);
-    }
-
-    [Fact]
-    public void OnTick_LeavesTheProfilerOff_UntilTheIntervalHasPassed()
-    {
-        TickAttribution attribution = new(5, 10);
-
-        for (int tick = 0; tick < 9; tick++)
-        {
-            Assert.Null(attribution.OnTick(1.0, Tick(), Owners));
-            Assert.False(attribution.Profiling);
-        }
-
-        Assert.Null(attribution.OnTick(1.0, Tick(), Owners));
-        Assert.True(attribution.Profiling);
     }
 
     /// <summary>The tick that turns the profiler on never got its Begin(), so the tree it ends with
@@ -288,17 +265,6 @@ public class TickAttributionTests
         AttributionBurst burst = attribution.OnTick(1.0, Tick(), Owners)!;
 
         Assert.Equal(1, burst.Ticks);
-    }
-
-    [Fact]
-    public void Apply_Takes_ANewDutyCycle_AndClampsItTheSameWay()
-    {
-        TickAttribution attribution = new(30, 10);
-
-        attribution.Apply(true, 100000, 0);
-
-        Assert.Equal(TickAttribution.MaximumBurstTicks, attribution.BurstTicks);
-        Assert.Equal(TickAttribution.MinimumIntervalSeconds, attribution.IntervalSeconds);
     }
 
     /// <summary>What <c>/pulse attribution status</c> reports, and it has to match the tick counter
