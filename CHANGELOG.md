@@ -63,31 +63,19 @@ first.
 
 ### Fixed
 
-- Per-mod attribution no longer reports the work of many of the game's own entity behaviours as
+- Per-mod attribution no longer reports the time of many of the game's own entity behaviours as
   `unattributed`. The engine marks a behaviour with the name its `PropertyName()` returns, and Pulse
-  looked that name up in the class registry, which is keyed by the code a class was registered
-  under. In 1.22.7, 18 of the 59 behaviour classes the game's own mods register, and the engine's
-  own passive physics, report another name: `controlledphysics` and `playerphysics` both mark as
-  `entitycontrolledphysics`, `despawn` and `reviveondeath` as `timeddespawn`, `nametag` as
-  `displayname`, `entitystatetags` as `entityStateTags` (the registry is case sensitive),
-  `extraskinnable` as `skinnableplayer`. Twelve of those names match no registration code, so their
-  time was filed under `unattributed`, which the README defines as work that no loaded mod claims,
-  when it belonged to `game` (the game's own Essentials mod) or `survival`. A third-party behaviour
-  whose name differs from its registration code, even by a capital letter, was misfiled the same
-  way. Pulse now learns what each behaviour marks with, and which mod ships its class, from the
-  behaviours of the loaded entities, and credits the time accordingly; a behaviour the game's own API
-  assembly declares goes to `engine`. What an admin sees: `unattributed` shrinks to what nothing
-  loaded claims (a listener or a behaviour declared in a mod's side library, a handler on a static
-  method), and the time it held moves to `game` and `survival`. On a test server with 1,691
-  entities loaded (a player, 1,500 chickens, 40 other creatures and 150 dropped items),
-  `unattributed` took 2.3% to 2.5% of the sampled tick time in four runs before the change and
-  0.015% in two runs after, while `game` went from about 21.6% to about 23.5%; with 4,001 entities
-  (a player and 4,000 chickens) it went from 2.2% to 2.4% down to 0.006%. The behaviours are read at
-  the start of a burst, never per mark, and an entity is read once: the first burst after a server
-  has loaded its entities costs about 3 to 4 ms at 1,700 entities, 7 ms at 4,000 and 23 to 40 ms at
-  8,000, and each later burst about 0.1 ms plus the entities that loaded since, bar one early burst
-  that costs about 10 ms more while the runtime compiles the reading loop again. A server that
-  keeps attribution off does none of this.
+  looked that name up by the code its class was registered under, which differs for 18 of the 59
+  behaviour classes the game's own mods register in 1.22.7: `despawn` marks as `timeddespawn`,
+  `nametag` as `displayname`, `entitystatetags` as `entityStateTags`. Twelve names found no class,
+  so their time was filed under `unattributed`, which the README defines as work that no loaded mod
+  claims, when it belonged to `game` (the game's own Essentials mod), to `survival` or, for the
+  passive physics, to `engine`. Pulse now credits each name to the mod that ships the class
+  declaring it, learned from the loaded entities: a behaviour from a third-party mod is billed to
+  that mod whatever its name, and a subclass that inherits its parent's name to the parent's mod. On
+  a test server with 1,691 entities loaded, `unattributed` went from about 2.5% of the sampled tick
+  time to under 0.1%, and the difference went to `game`. What the read costs is in the README's
+  cost section.
 
 ## [0.2.0] - 2026-09-29
 
