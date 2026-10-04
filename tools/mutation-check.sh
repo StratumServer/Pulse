@@ -59,6 +59,14 @@ if ! git diff --quiet -- $MUTATED; then
     exit 2
 fi
 
+# The files the Stratum timings block mutates, guarded the same way. A list of their own keeps that
+# block from sharing a line with the one above.
+STRATUM_MUTATED="Pulse/StratumTimingsSource.cs Pulse/StratumKeyParser.cs Pulse/StratumFold.cs"
+if ! git diff --quiet -- $STRATUM_MUTATED; then
+    echo "One of $STRATUM_MUTATED has uncommitted changes; refusing to mutate over them."
+    exit 2
+fi
+
 for TEST_PROJECT in Pulse.Tests/Pulse.Tests.csproj Pulse.Otlp.Tests/Pulse.Otlp.Tests.csproj; do
     if ! run_tests; then
         echo "$TEST_PROJECT is red before any mutation; fix that first."
@@ -485,6 +493,242 @@ mutate Pulse/ConfigLoad.cs \
 mutate Pulse/ConfigLoad.cs \
     's/ConfigLoadStatus\.Unreadable, e\.Message\)/ConfigLoadStatus.Absent, e.Message)/' \
     "config load: an unreadable file is treated as absent, so the caller would overwrite it"
+
+# Stratum's entity timings reach Pulse through three pure pieces, and each one fails silently when it
+# is wrong: a binder that accepts a shape it should refuse calls into a Stratum it does not
+# understand, a parser that guesses serves a series under a name nobody asked for, and a fold that
+# miscounts serves a counter that is wrong or runs backwards, which no scrape would ever say.
+#
+# The binder: every check that stands between a Stratum Pulse does not know and a call into it.
+mutate Pulse/StratumTimingsSource.cs \
+    's/if \(type == null\)/if (type == null \&\& (reason = "absent") != null)/' \
+    "stratum binder: a server with no Stratum is reported as a failure, so vanilla would log a warning at every boot"
+
+mutate Pulse/StratumTimingsSource.cs \
+    's/is not \{ IsLiteral: true \} field/is not { } field/' \
+    "stratum binder: a static field is read like a literal, which runs Stratum's type initializer before anything is known about it"
+
+mutate Pulse/StratumTimingsSource.cs \
+    's/field\.GetRawConstantValue\(\) is not int version/!int.TryParse(field.GetRawConstantValue()?.ToString(), out int version)/' \
+    "stratum binder: a ContractVersion that is a long is read as an int instead of refused"
+
+mutate Pulse/StratumTimingsSource.cs \
+    's/if \(version != ContractVersion\)/if (version < ContractVersion)/' \
+    "stratum binder: a contract newer than this Pulse reads is bound as if it were version 1"
+
+mutate Pulse/StratumTimingsSource.cs \
+    's/if \(version != ContractVersion\)/if (version > ContractVersion)/' \
+    "stratum binder: a contract older than this Pulse reads is bound as if it were version 1"
+
+mutate Pulse/StratumTimingsSource.cs \
+    's/Stratum \{MinimumStratumVersion\} or later is needed/a newer Stratum is needed/' \
+    "stratum binder: the warning for a Stratum without the contract stops naming the version that has it"
+
+mutate Pulse/StratumTimingsSource.cs \
+    's/request\?\.ReturnType != typeof\(IDisposable\)/request == null/' \
+    "stratum binder: a request that returns something other than a lease is bound anyway"
+
+mutate Pulse/StratumTimingsSource.cs \
+    's/\|\| snapshot\?\.ReturnType != typeof\(void\)/|| snapshot == null/' \
+    "stratum binder: a snapshot that returns a value is bound anyway"
+
+mutate Pulse/StratumTimingsSource.cs \
+    's/\|\| snapshot\.GetParameters\(\)\[0\]\.ParameterType != SnapshotInto\)/)/' \
+    "stratum binder: a snapshot that takes a base of the list is bound, so Pulse would pass its list to a contract it was not promised"
+
+mutate Pulse/StratumTimingsSource.cs \
+    's/BindingFlags\.Public \| BindingFlags\.Static, (Type\.EmptyTypes|\[SnapshotInto\])/BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static, \1/' \
+    "stratum binder: internal members are bound, which the contract never promises to keep"
+
+mutate Pulse/StratumTimingsSource.cs \
+    's/BindingFlags\.Public \| BindingFlags\.Static, (Type\.EmptyTypes|\[SnapshotInto\])/BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static, \1/' \
+    "stratum binder: an instance method is bound as if it were static"
+
+mutate Pulse/StratumTimingsSource.cs \
+    's/GetField\("ContractVersion", BindingFlags\.Public \| BindingFlags\.Static\)/GetField("ContractVersion", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)/' \
+    "stratum binder: an internal ContractVersion is read as the contract's"
+
+mutate Pulse/StratumTimingsSource.cs \
+    's/public IDisposable Request\(\) => request\(\);/public IDisposable Request() { request(); return request(); }/' \
+    "stratum binder: a request takes two leases and releases one, so Stratum records for the rest of the run"
+
+mutate Pulse/StratumTimingsSource.cs \
+    's/=> snapshot\(into\);/=> snapshot([]);/' \
+    "stratum binder: a snapshot is read into a list nobody sees"
+
+mutate Pulse/StratumTimingsSource.cs \
+    's/StratumEntityBehaviorTimings";/StratumEntityBehaviorTiming";/' \
+    "stratum binder: the type name drifts from the one Stratum declares, so no Stratum is ever found"
+
+mutate Pulse/StratumTimingsSource.cs \
+    's/ContractVersion = 1;/ContractVersion = 2;/' \
+    "stratum binder: Pulse reads a contract version no Stratum has"
+
+# The parser: which keys are read, and which name and thread each one gives.
+mutate Pulse/StratumKeyParser.cs \
+    's/memo\[key\] = parsed = Read\(key\);/parsed = Read(key);/' \
+    "stratum parser: a key is read again at every burst, allocating its label strings again"
+
+mutate Pulse/StratumKeyParser.cs \
+    's/if \(key\.StartsWith\(ThreadSafeBehavior, StringComparison\.Ordinal\)\)/if (false)/' \
+    "stratum parser: a thread-safe key is read as a main-thread one, with threadsafe as its category"
+
+mutate Pulse/StratumKeyParser.cs \
+    's/threadSafe: true\)/threadSafe: false)/' \
+    "stratum parser: a thread-safe behavior is reported as running on the main thread"
+
+mutate Pulse/StratumKeyParser.cs \
+    's/threadSafe \&\& name\.StartsWith\(TickAttribution\.BehaviorPrefix, StringComparison\.Ordinal\)/false/' \
+    "stratum parser: a thread-safe behavior keeps the engine's done-behavior prefix, so it never meets its main-thread namesake"
+
+mutate Pulse/StratumKeyParser.cs \
+    's/threadSafe \&\& name\.StartsWith/name.StartsWith/' \
+    "stratum parser: the prefix is stripped from a main-thread name too, where it is part of the name"
+
+mutate Pulse/StratumKeyParser.cs \
+    's/name\[TickAttribution\.BehaviorPrefix\.Length\.\.\]/name[(TickAttribution.BehaviorPrefix.Length - 1)..]/' \
+    "stratum parser: the prefix strip leaves its last dash on the name"
+
+mutate Pulse/StratumKeyParser.cs \
+    's/if \(dot <= categoryStart\)/if (dot < categoryStart)/' \
+    "stratum parser: a behavior key with an empty category is read"
+
+mutate Pulse/StratumKeyParser.cs \
+    's/return name\.Length == 0$/return false/' \
+    "stratum parser: a behavior key with no name is read, so a series is published with an empty label"
+
+mutate Pulse/StratumKeyParser.cs \
+    's/!key\.AsSpan\(dot \+ 1\)\.StartsWith\(AiTask, StringComparison\.Ordinal\) \|\| //' \
+    "stratum parser: the AI phase keys that nest inside each other are read as tasks"
+
+mutate Pulse/StratumKeyParser.cs \
+    's/ \|\| nameStart >= key\.Length\)/)/' \
+    "stratum parser: a task key with no code is read"
+
+mutate Pulse/StratumKeyParser.cs \
+    "s/key\.IndexOf\('-', EntityType\.Length\)/key.LastIndexOf('-')/" \
+    "stratum parser: an entity type is cut at the last dash, not the first"
+
+mutate Pulse/StratumKeyParser.cs \
+    's/\(dash < 0 \? key\.Length : dash\)/key.Length/' \
+    "stratum parser: an entity type is the whole code path, so every variant is a series of its own"
+
+mutate Pulse/StratumKeyParser.cs \
+    's/return type\.Length == 0 \? null : new StratumKey/return new StratumKey/' \
+    "stratum parser: an entity path that starts with a dash is read as a type with an empty name"
+
+mutate Pulse/StratumKeyParser.cs \
+    's/key\.StartsWith\(EntityType, StringComparison\.Ordinal\) \? ReadEntity\(key\) : null/ReadEntity(key)/' \
+    "stratum parser: a key of a shape nobody knows is guessed to be an entity"
+
+# The fold: what a burst added, and which series it is told to.
+mutate Pulse/StratumFold.cs \
+    's#ticks / \(double\)Stopwatch\.Frequency#ticks * (double)Stopwatch.Frequency#' \
+    "stratum fold: stopwatch ticks are multiplied by the frequency instead of divided"
+
+mutate Pulse/StratumFold.cs \
+    's/after >= before \? after - before : after/after/' \
+    "stratum fold: a burst reports the totals the accumulator ended on instead of what it added"
+
+mutate Pulse/StratumFold.cs \
+    's/after >= before \? after - before : after/after - before/' \
+    "stratum fold: a total that went down is not read as a reset, so the burst adds nothing"
+
+mutate Pulse/StratumFold.cs \
+    's/after >= before \?/after > before ?/' \
+    "stratum fold: a total that did not move is read as a reset, so the burst adds all of it again"
+
+mutate Pulse/StratumFold.cs \
+    's/Math\.Max\(0, after >= before \? after - before : after\)/(after >= before ? after - before : after)/' \
+    "stratum fold: a negative total runs a counter backwards"
+
+mutate Pulse/StratumFold.cs \
+    's/startTotals\.Clear\(\);//' \
+    "stratum fold: the first snapshot of the last burst is subtracted from this one's"
+
+mutate Pulse/StratumFold.cs \
+    's/startTotals\.TryGetValue\(key, out Total before\);/if (!startTotals.TryGetValue(key, out Total before)) { continue; }/' \
+    "stratum fold: a key that appeared during the burst is dropped, which is every key of the usual burst"
+
+mutate Pulse/StratumFold.cs \
+    's/deltas\[series\] = deltas\.GetValueOrDefault\(series\) \+ added;/deltas[series] = added;/' \
+    "stratum fold: the codes that share a type replace each other instead of adding up"
+
+mutate Pulse/StratumFold.cs \
+    's/if \(added != default\)/if (true)/' \
+    "stratum fold: a key the burst added nothing to takes a place under the cap"
+
+mutate Pulse/StratumFold.cs \
+    's/if \(room\.Count < cap\)/if (room.Count <= cap)/' \
+    "stratum fold: a family keeps one series more than its cap"
+
+mutate Pulse/StratumFold.cs \
+    's/List<KeyValuePair<StratumKey, Total>> kept = \[\];/List<KeyValuePair<StratumKey, Total>> kept = []; foreach (HashSet<StratumKey> places in admitted.Values) { places.Clear(); }/' \
+    "stratum fold: the places are handed out again every burst, so a heavy newcomer takes one from a series that had it"
+
+mutate Pulse/StratumFold.cs \
+    's/if \(admitted\[entry\.Key\.Family\]\.Contains\(entry\.Key\)\)/if (false)/' \
+    "stratum fold: a series that has its place is counted against the cap again, and spills once the family is full"
+
+mutate Pulse/StratumFold.cs \
+    's/\.OrderByDescending\(candidate => candidate\.Value\.Ticks\)/.OrderBy(candidate => candidate.Value.Ticks)/' \
+    "stratum fold: the lightest new series are admitted first, so the cap lumps together the ones worth reading"
+
+mutate Pulse/StratumFold.cs \
+    's/\.ThenBy\(candidate => candidate\.Key\.Category, StringComparer\.Ordinal\)//' \
+    "stratum fold: two equally heavy new series are admitted in whatever order the accumulator listed them, by category"
+
+mutate Pulse/StratumFold.cs \
+    's/\.ThenBy\(candidate => candidate\.Key\.Name, StringComparer\.Ordinal\)//' \
+    "stratum fold: two equally heavy new series are admitted in whatever order the accumulator listed them, by name"
+
+mutate Pulse/StratumFold.cs \
+    's/\.ThenBy\(candidate => candidate\.Key\.ThreadSafe\)//' \
+    "stratum fold: two equally heavy new series are admitted in whatever order the accumulator listed them, by thread"
+
+mutate Pulse/StratumFold.cs \
+    's/spill\[entry\.Key\.Family\] = spill\.GetValueOrDefault\(entry\.Key\.Family\) \+ entry\.Value;/spill[entry.Key.Family] = entry.Value;/' \
+    "stratum fold: what spills over replaces what spilled before it in the burst instead of adding to it"
+
+mutate Pulse/StratumFold.cs \
+    's/admitted\[entry\.Key\.Family\]/admitted[StratumFamily.Entity]/' \
+    "stratum fold: the families share one set of places, so a full family spills the others"
+
+mutate Pulse/StratumFold.cs \
+    's/new BehaviorDelta\(Other, Other, Other, Other, seconds\)/new BehaviorDelta(Other, Other, "false", TickAttribution.Unattributed, seconds)/' \
+    "stratum fold: the behavior overflow series keeps a thread and an owner, so it is not the one series it is meant to be"
+
+mutate Pulse/StratumFold.cs \
+    's/new TaskDelta\(Other, Other, seconds\)/new TaskDelta("creatures", Other, seconds)/' \
+    "stratum fold: the task overflow series keeps a category, so it is not the one series it is meant to be"
+
+mutate Pulse/StratumFold.cs \
+    's/if \(overflowed\.Add\(family\)\)/if (true)/' \
+    "stratum fold: a family is reported as spilling for the first time at every burst it spills in"
+
+mutate Pulse/StratumFold.cs \
+    's/key\.ThreadSafe \? "true" : "false"/key.ThreadSafe ? "True" : "False"/' \
+    "stratum fold: the thread label is spelled the way a bool prints, not the way the families promise"
+
+mutate Pulse/StratumFold.cs \
+    's/owner\(key\.Name\) \?\? TickAttribution\.Unattributed/owner(key.Name) ?? TickAttribution.Engine/' \
+    "stratum fold: a behavior no mod claims is credited to the engine"
+
+mutate Pulse/StratumFold.cs \
+    's/owner\(key\.Name\)/owner(TickAttribution.BehaviorPrefix + key.Name)/' \
+    "stratum fold: the owner lookup is asked for the profiler mark, which the table does not know a behavior by"
+
+mutate Pulse/StratumFold.cs \
+    's/new EntityDelta\(key\.Name, seconds, total\.Calls\)/new EntityDelta(key.Name, seconds, total.Ticks)/' \
+    "stratum fold: the entity ticks run are the stopwatch ticks spent"
+
+mutate Pulse/StratumFold.cs \
+    's/new\(a\.Ticks \+ b\.Ticks, a\.Calls \+ b\.Calls\)/new(a.Ticks + b.Ticks, a.Calls)/' \
+    "stratum fold: the codes that share a type add up their seconds but not their ticks run"
+
+mutate Pulse/StratumFold.cs \
+    's/SeriesCap = 100;/SeriesCap = 10;/' \
+    "stratum fold: the default cap is ten series per family, not a hundred"
 
 # Switching attribution from a command is a promise about a live server: that a server which never
 # asked for it is not paying for it, that a reload names only what it could not apply, and that a
