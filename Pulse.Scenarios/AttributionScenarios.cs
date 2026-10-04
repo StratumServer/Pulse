@@ -153,12 +153,13 @@ public class AttributionScenarios : AtlasScenarioBase
         Assert.InRange(profiled / ticked, 0, 0.5);
     }
 
-    /// <summary>A behavior is marked with its property name, and for a good third of the game's own
-    /// classes that is not the code the class is registered under (the despawn behavior marks as
-    /// <c>timeddespawn</c>, the player's name tag as <c>displayname</c>), so the class registry
-    /// cannot turn the mark back into a type. Those marks used to land in <c>unattributed</c> even
-    /// though the game's own mods own them. Pulse reads the behaviors of the loaded entities, which
-    /// know both ends, before a burst folds anything, so even the first burst credits them.</summary>
+    /// <summary>A behavior is marked with its property name, and for about 30% of the game's own
+    /// classes (18 of 59) that is not the code the class is registered under (the despawn behavior
+    /// marks as <c>timeddespawn</c>, the player's name tag as <c>displayname</c>), so the class
+    /// registry cannot turn the mark back into a type. Those marks used to land in
+    /// <c>unattributed</c> even though the game's own mods own them. Pulse reads the behaviors of
+    /// the loaded entities, which know both ends, before a burst folds anything, so even the first
+    /// burst credits them.</summary>
     [AtlasScenario(FreshWorld = true)]
     public async Task Attribution_Credits_AGameBehaviorWithADifferentName_ToTheModThatShipsIt()
     {

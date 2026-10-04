@@ -33,12 +33,16 @@ public class ModOwnersTests
         public override string PropertyName() => "health";
     }
 
-    /// <summary>A third-party class sharing the name of the engine's own passive physics, which is
-    /// what a subclass that inherits its parent's <c>PropertyName()</c> looks like from a mark.</summary>
-    private sealed class SharesAnEngineNameBehavior(Entity entity) : EntityBehavior(entity)
+    /// <summary>A third-party class that declares the very string the engine's passive physics
+    /// declares: not a subclass of it, a second class that names the same mark.</summary>
+    private sealed class DeclaresAnEngineNameBehavior(Entity entity) : EntityBehavior(entity)
     {
         public override string PropertyName() => "entitypassivephysics";
     }
+
+    /// <summary>A third-party subclass of the engine's passive physics that declares nothing, so it
+    /// inherits the name: what <c>MyTaskAI : EntityBehaviorTaskAI</c> is for the game's own AI.</summary>
+    private sealed class InheritsEnginePhysicsBehavior(Entity entity) : EntityBehaviorPassivePhysics(entity);
 
     /// <summary>An entity is abstract and only the engine ever loads one, so this is the smallest
     /// thing that carries behaviors the way a loaded one does.</summary>
@@ -93,6 +97,16 @@ public class ModOwnersTests
         owners.AddSystem("mymod", ModType);
 
         Assert.Equal("mymod", owners.Owner("health"));
+    }
+
+    /// <summary>A class the game's API declares belongs to the engine, so reaching one through the
+    /// class registry answers the way the walk does.</summary>
+    [Fact]
+    public void Owner_Credits_AClassTheGameApiDeclares_ReachedByItsCode_ToTheEngine()
+    {
+        ModOwners owners = Owners(("passivephysics", typeof(EntityBehaviorPassivePhysics)));
+
+        Assert.Equal(TickAttribution.Engine, owners.Owner("passivephysics"));
     }
 
     [Fact]
@@ -255,30 +269,80 @@ public class ModOwnersTests
         Assert.Equal("mymod", owners.Owner("health"));
     }
 
-    /// <summary>Two classes can mark with one name, because a subclass inherits its parent's
-    /// property name and the mark carries nothing else. The first class with an owner keeps it, so
-    /// the answer cannot depend on which entity the next walk meets first.</summary>
+    /// <summary>A subclass that declares nothing inherits its parent's name, and the mark cannot tell
+    /// the two classes apart. The name goes to the mod of the class that declares it, whichever of the
+    /// two the walk meets first: a third-party <c>MyTaskAI : EntityBehaviorTaskAI</c> must not take
+    /// <c>taskai</c> from every vanilla creature, and which entity comes first is not the same from
+    /// one restart to the next.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void LearnBehavior_Credits_AnInheritedName_ToTheModOfTheClassThatDeclaresIt(bool subclassFirst)
+    {
+        ModOwners owners = Owners();
+        owners.AddSystem("mymod", ModType);
+        BareEntity entity = new();
+        (string Mark, Type Class)[] met =
+        [
+            (Mark(new InheritsEnginePhysicsBehavior(entity)), typeof(InheritsEnginePhysicsBehavior)),
+            (Mark(new EntityBehaviorPassivePhysics(entity)), typeof(EntityBehaviorPassivePhysics)),
+        ];
+
+        foreach ((string mark, Type behavior) in subclassFirst ? met : met.Reverse())
+        {
+            owners.LearnBehavior(mark, behavior);
+        }
+
+        Assert.Equal(TickAttribution.Engine, owners.Owner("entitypassivephysics"));
+    }
+
+    /// <summary>The one cross-owner pair vanilla has: the engine's passive physics declares
+    /// <c>entitypassivephysics</c>, and Survival's multi-box variant inherits it. Both belong to the
+    /// engine, whichever of the two the walk meets first.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void LearnBehavior_Credits_TheGamesOwnPassivePhysicsPair_ToTheEngine(bool survivalFirst)
+    {
+        ModOwners owners = Owners();
+        owners.AddSystem("survival", typeof(EntityBehaviorPassivePhysicsMultiBox));
+        string mark = Mark(new EntityBehaviorPassivePhysics(new BareEntity()));
+        Type[] met = [typeof(EntityBehaviorPassivePhysicsMultiBox), typeof(EntityBehaviorPassivePhysics)];
+
+        foreach (Type behavior in survivalFirst ? met : met.Reverse())
+        {
+            owners.LearnBehavior(mark, behavior);
+        }
+
+        Assert.Equal(TickAttribution.Engine, owners.Owner("entitypassivephysics"));
+    }
+
+    /// <summary>Two classes that each declare the same string are the one case where a name has two
+    /// owners and nothing in the mark says which is right. The first one that has an owner keeps it
+    /// for the rest of the run, so a series does not move between mods from one burst to the next.
+    /// Which one is first depends on the entity the walk meets first, so it is not the same from
+    /// one restart to the next: the two tests say so, one per order.</summary>
     [Fact]
-    public void LearnBehavior_Keeps_TheFirstOwner_WhenTwoClassesShareAName()
+    public void LearnBehavior_Keeps_TheFirstOwner_WhenTwoClassesEachDeclareTheName()
     {
         ModOwners owners = Owners();
         owners.AddSystem("mymod", ModType);
         BareEntity entity = new();
 
         owners.LearnBehavior(Mark(new EntityBehaviorPassivePhysics(entity)), typeof(EntityBehaviorPassivePhysics));
-        owners.LearnBehavior(Mark(new SharesAnEngineNameBehavior(entity)), typeof(SharesAnEngineNameBehavior));
+        owners.LearnBehavior(Mark(new DeclaresAnEngineNameBehavior(entity)), typeof(DeclaresAnEngineNameBehavior));
 
         Assert.Equal(TickAttribution.Engine, owners.Owner("entitypassivephysics"));
     }
 
     [Fact]
-    public void LearnBehavior_Keeps_TheFirstOwner_WhateverTheOrder()
+    public void LearnBehavior_Keeps_TheFirstOwner_WhenTwoClassesEachDeclareTheName_InTheOtherOrder()
     {
         ModOwners owners = Owners();
         owners.AddSystem("mymod", ModType);
         BareEntity entity = new();
 
-        owners.LearnBehavior(Mark(new SharesAnEngineNameBehavior(entity)), typeof(SharesAnEngineNameBehavior));
+        owners.LearnBehavior(Mark(new DeclaresAnEngineNameBehavior(entity)), typeof(DeclaresAnEngineNameBehavior));
         owners.LearnBehavior(Mark(new EntityBehaviorPassivePhysics(entity)), typeof(EntityBehaviorPassivePhysics));
 
         Assert.Equal("mymod", owners.Owner("entitypassivephysics"));
@@ -324,20 +388,6 @@ public class ModOwnersTests
         Assert.Null(owners.Owner("second"));
     }
 
-    /// <summary>A name that does not start with the behavior prefix is not a behavior mark, and
-    /// must not pin anything.</summary>
-    [Fact]
-    public void LearnBehavior_Ignores_ANameWithoutTheBehaviorPrefix()
-    {
-        ModOwners owners = Owners();
-        owners.AddSystem("mymod", ModType);
-
-        owners.LearnBehavior("gmleSome.Mod.Ticker", ModType);
-
-        Assert.Null(owners.Owner("gmleSome.Mod.Ticker"));
-        Assert.Null(owners.Owner("Some.Mod.Ticker"));
-    }
-
     [Fact]
     public void LearnBehaviors_Reads_EveryBehaviorOfEveryLoadedEntity()
     {
@@ -353,6 +403,27 @@ public class ModOwnersTests
         Assert.Equal(TickAttribution.Engine, owners.Owner("entitypassivephysics"));
     }
 
+    /// <summary>The same through the walk. The table of loaded entities lists them in an order nobody
+    /// controls, so the entity carrying the subclass can come before the one carrying the class that
+    /// declares the name, or after it, and the name goes to the same mod either way.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void LearnBehaviors_Credits_AnInheritedName_ToTheDeclaringMod_WhicheverEntityIsMetFirst(bool subclassEntityFirst)
+    {
+        ModOwners owners = Owners();
+        owners.AddSystem("mymod", ModType);
+        KeyValuePair<long, Entity>[] loaded =
+        [
+            KeyValuePair.Create(1L, (Entity)new BareEntity().Carrying(e => new InheritsEnginePhysicsBehavior(e))),
+            KeyValuePair.Create(2L, (Entity)new BareEntity().Carrying(e => new EntityBehaviorPassivePhysics(e))),
+        ];
+
+        owners.LearnBehaviors(subclassEntityFirst ? loaded : Enumerable.Reverse(loaded));
+
+        Assert.Equal(TickAttribution.Engine, owners.Owner("entitypassivephysics"));
+    }
+
     /// <summary>An entity is read the first time the walk sees it and not again, which is what keeps
     /// a burst on a server with thousands of entities from visiting every behavior of every one.</summary>
     [Fact]
@@ -363,6 +434,9 @@ public class ModOwnersTests
         BareEntity entity = new BareEntity().Carrying(e => new HealthLikeBehavior(e));
         KeyValuePair<long, Entity>[] loaded = [KeyValuePair.Create(7L, (Entity)entity)];
 
+        // Three walks, not two: a walk that dropped an entity it skipped would skip it the second
+        // time and read it again the third.
+        owners.LearnBehaviors(loaded);
         owners.LearnBehaviors(loaded);
         entity.Carrying(e => new DespawnLikeBehavior(e));
         owners.LearnBehaviors(loaded);

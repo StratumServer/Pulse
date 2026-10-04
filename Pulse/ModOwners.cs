@@ -16,11 +16,15 @@ namespace Pulse;
 /// player physics both report <c>entitycontrolledphysics</c>, the name tag <c>displayname</c>, the
 /// despawn and revive-on-death pair <c>timeddespawn</c>), and a third-party class is free to do the
 /// same. The class registry is keyed by code, so it can only turn back the names that happen to
-/// match. What knows both ends is a live instance, which carries the mark it stamps and the type
-/// that declares it, so <see cref="LearnBehaviors"/> reads them off the loaded entities and the
+/// match. What knows both ends is a live instance, which carries the mark it stamps and the class
+/// it is an instance of, so <see cref="LearnBehaviors"/> reads them off the loaded entities and the
 /// registry stays as the fallback for a name no entity has shown yet. A behavior class declared in
 /// the game's own API assembly (the passive physics, which the engine registers itself) belongs to
-/// the engine, like the listeners the engine registers.</para></remarks>
+/// the engine, like the listeners the engine registers.</para>
+/// <para>The mod credited with a name is the one that ships the class declaring the
+/// <c>PropertyName()</c> that returns it, not the class of whichever instance the walk meets: a
+/// subclass inherits its parent's name, the mark cannot tell the two apart, and the parent is the
+/// class that gave the name.</para></remarks>
 internal sealed class ModOwners(Func<string, Type?> behaviorClass)
 {
     /// <summary>The assembly the game's own entity behaviors are declared in, when they are not a
@@ -90,33 +94,36 @@ internal sealed class ModOwners(Func<string, Type?> behaviorClass)
             List<EntityBehavior>? behaviors = entry.Value?.Properties?.Server?.Behaviors;
             for (int i = 0; i < behaviors?.Count; i++)
             {
-                if (behaviors[i] is { } behavior)
-                {
-                    LearnBehavior(behavior.ProfilerName, behavior.GetType());
-                }
+                EntityBehavior behavior = behaviors[i];
+                LearnBehavior(behavior.ProfilerName, behavior.GetType());
             }
         }
 
         (readEntities, stillLoaded) = (stillLoaded, readEntities);
     }
 
-    /// <summary>Teaches the table what one live behavior marks with and which mod ships its
-    /// class.</summary>
-    /// <remarks>Two classes can share one name, since a subclass inherits its parent's property
-    /// name and the mark carries nothing else, so the table cannot tell them apart. The first class
-    /// that has an owner keeps the name for good: otherwise the answer would depend on which entity
-    /// the next walk happens to meet first, and a series would flap between two mods from one burst
-    /// to the next. A class nothing owns never takes a name from one that has an owner.</remarks>
+    /// <summary>Teaches the table what one live behavior marks with and which mod ships the class
+    /// that gives it that name.</summary>
+    /// <remarks>The owner is the mod that ships the class declaring the <c>PropertyName()</c> the
+    /// behavior answers with: its own class, or the nearest ancestor that overrides it. A subclass
+    /// that inherits its parent's name marks with exactly the same string, so crediting the
+    /// instance's class would give the name to whichever of the two the walk met first, and a
+    /// third-party <c>MyTaskAI : EntityBehaviorTaskAI</c> could take <c>taskai</c> from every
+    /// vanilla creature. Crediting the declarer gives it to the parent's mod whatever the order.
+    /// Only two classes that each declare the same string still leave a choice. The first one that
+    /// has an owner keeps the name for the rest of the run, so a series does not move between mods
+    /// from one burst to the next; which one that is depends on the entity the walk meets first, so
+    /// it can differ from one restart to the next. A class nothing owns never takes a name from one
+    /// that has an owner.</remarks>
     public void LearnBehavior(string profilerName, Type behavior)
     {
-        if (!seenBehaviorClasses.Add(behavior)
-            || !profilerName.StartsWith(TickAttribution.BehaviorPrefix, StringComparison.Ordinal))
+        if (!seenBehaviorClasses.Add(behavior))
         {
             return;
         }
 
         string name = profilerName[TickAttribution.BehaviorPrefix.Length..];
-        string? modid = OwnerOfClass(behavior);
+        string? modid = OwnerOfClass(NameDeclarer(behavior));
         if (learnedBehaviors.Add(name) || (byName[name] == null && modid != null))
         {
             byName[name] = modid;
@@ -144,4 +151,9 @@ internal sealed class ModOwners(Func<string, Type?> behaviorClass)
 
     private string? OwnerOfClass(Type behavior)
         => OfAssembly(behavior.Assembly) ?? (behavior.Assembly == EngineApi ? TickAttribution.Engine : null);
+
+    /// <summary>The class that declares the <c>PropertyName()</c> <paramref name="behavior"/> answers
+    /// with. A type with no such method is its own declarer.</summary>
+    private static Type NameDeclarer(Type behavior)
+        => behavior.GetMethod(nameof(EntityBehavior.PropertyName), Type.EmptyTypes)?.DeclaringType ?? behavior;
 }

@@ -290,19 +290,24 @@ mutate Pulse/ModOwners.cs \
 # A behavior's mark carries its property name, not the code its class was registered under, so a
 # live instance is the only thing that can say whose a renamed behavior is. Each of these is a way
 # the walk that reads them can quietly go wrong: a name that never matches a mark, a class that is
-# no longer read once, a name that changes hands between two bursts, and an engine behavior left to
-# report as nobody's.
+# no longer read once, a name credited to the class of the instance instead of the class that
+# declares it, a name that changes hands between two bursts, an engine behavior left to report as
+# nobody's, and an entity that is read again every burst.
 mutate Pulse/ModOwners.cs \
     's/profilerName\[TickAttribution\.BehaviorPrefix\.Length\.\.\]/profilerName/' \
     "mod owners: a learned behavior name keeps its prefix, so no mark ever finds it"
 
 mutate Pulse/ModOwners.cs \
-    's/if \(!seenBehaviorClasses\.Add\(behavior\)$/if (false/' \
+    's/if \(!seenBehaviorClasses\.Add\(behavior\)\)/if (false)/' \
     "mod owners: every instance of a class is read again, so the walk costs the instance count"
 
 mutate Pulse/ModOwners.cs \
+    's/OwnerOfClass\(NameDeclarer\(behavior\)\)/OwnerOfClass(behavior)/' \
+    "mod owners: a subclass that inherits its parent's name is credited to its own mod, so the owner of the name depends on which entity the walk meets first"
+
+mutate Pulse/ModOwners.cs \
     's/learnedBehaviors\.Add\(name\) \|\| \(byName\[name\] == null && modid != null\)/learnedBehaviors.Add(name) || modid != null/' \
-    "mod owners: a later class with an owner takes a shared name from the first, so it flaps between bursts"
+    "mod owners: a later class that declares the same name takes it from the first, so it flaps between bursts"
 
 mutate Pulse/ModOwners.cs \
     's/learnedBehaviors\.Add\(name\) \|\| \(byName\[name\] == null && modid != null\)/learnedBehaviors.Add(name)/' \
@@ -321,12 +326,20 @@ mutate Pulse/ModOwners.cs \
     "mod owners: every entity is read again on every burst, so the walk costs the loaded entity count times their behaviors"
 
 mutate Pulse/ModOwners.cs \
+    's/^( +)stillLoaded\.Add\(entry\.Key\);$/\1if (!readEntities.Contains(entry.Key)) { stillLoaded.Add(entry.Key); }/' \
+    "mod owners: an entity already read is left out of the set the next walk keeps, so it is read again every other burst"
+
+mutate Pulse/ModOwners.cs \
     's/\(readEntities, stillLoaded\) = \(stillLoaded, readEntities\);//' \
     "mod owners: the walk never remembers what it has read, so each burst reads every entity again"
 
 mutate Pulse/ModOwners.cs \
     's/stillLoaded\.Clear\(\);//' \
     "mod owners: an entity that has unloaded is never forgotten, so the ids pile up for the life of the server"
+
+mutate Pulse/ModOwners.cs \
+    's/behavior == null \? null : OwnerOfClass\(behavior\)/behavior == null ? null : OfAssembly(behavior.Assembly)/' \
+    "mod owners: a class the game's API declares, reached through the class registry, reports as unattributed instead of engine"
 
 mutate Pulse/AttributionMetrics.cs \
     's/walkBehaviors\(owners!\);//' \
