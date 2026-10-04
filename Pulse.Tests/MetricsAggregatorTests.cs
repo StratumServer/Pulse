@@ -563,6 +563,13 @@ public class MetricsAggregatorTests
             .Distinct()
             .Count();
         Assert.True(distinct > 990, $"{distinct} different hashes for 1,000 tag sets");
+
+        // Untagged series, the ones recorded every tick, differ by their instrument alone.
+        int untagged = Enumerable.Range(0, 100)
+            .Select(i => new MetricsAggregator.SeriesKey(meter.CreateCounter<long>($"u{i}_total"), []).GetHashCode())
+            .Distinct()
+            .Count();
+        Assert.True(untagged > 95, $"{untagged} different hashes for 100 untagged instruments");
     }
 
     /// <summary>A tag set an observable instrument stops reporting is retired. One it reports
@@ -594,7 +601,9 @@ public class MetricsAggregatorTests
     /// <summary>The exposition text of a fixed run of measurements, word for word. How a series is
     /// found must never change what is served or in which order, so this holds the whole text of a
     /// run that interleaves its families (a family's series do not arrive together), records one
-    /// tag set in both key orders, and measures a histogram with and without tags.</summary>
+    /// tag set in both key orders, and measures a histogram with and without tags. The order after
+    /// a series is retired is held by ObservableGauge_ServesATagSet_ThatReturnsAfterBeingRetired_LastInItsFamily,
+    /// which this text cannot see.</summary>
     [Fact]
     public void TheServedText_ForAFixedRunOfMeasurements_IsPinned()
     {

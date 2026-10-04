@@ -111,6 +111,10 @@ mutate Pulse/MetricsAggregator.cs \
     "aggregator: the lookup hash ignores the tag values, so a family's tag sets all share one bucket and the index is a linear scan again"
 
 mutate Pulse/MetricsAggregator.cs \
+    's/hash\.Add\(RuntimeHelpers\.GetHashCode\(Instrument\)\);//' \
+    "aggregator: the lookup hash ignores the instrument, so every untagged series shares one bucket and the per-tick records scan them"
+
+mutate Pulse/MetricsAggregator.cs \
     's/index\.Remove\(s\.Key\);//' \
     "aggregator: a retired series stays in the index, so its tag set comes back into a series nobody serves"
 
