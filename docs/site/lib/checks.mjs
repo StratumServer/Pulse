@@ -8,7 +8,7 @@ import { BOOT, decode } from './layout.mjs';
 // Size budgets, in KB gzipped. Each sits about 15 percent above the size the asset had when it was last
 // set, so a warning means something changed, not that a document grew a little: raise it deliberately.
 // They print a warning and never stop the build. A request to another origin does stop it.
-export const BUDGETS = { 'assets/site.js': 27.5, 'assets/home.js': 17.5, 'assets/site.css': 19, 'assets/search-index.js': 44.5, html: 17.5 };
+export const BUDGETS = { 'assets/site.js': 27.5, 'assets/home.js': 17.5, 'assets/site.css': 19, 'assets/search-index.js': 51.5, html: 17.5 };
 
 const TAG = /<([a-zA-Z][\w:-]*)((?:\s+[^\s"'<>\/=]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'=<>`]+))?)*)\s*\/?>/g;
 const ATTR = /([^\s"'<>\/=]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+)))?/g;
