@@ -91,9 +91,32 @@ mutate Pulse/MetricsAggregator.cs \
     's/s\.Absolute \? value : s\.Value \+ value/s.Value + value/' \
     "aggregator: an observable counter accumulates the totals it reports"
 
+# The index finds a series through a dictionary, which only asks whether two keys are equal once
+# their hashes already are. A part of the key left out of the equality alone changes nothing the
+# aggregator can show, so the first two mutations below leave it out of the hash as well.
 mutate Pulse/MetricsAggregator.cs \
-    's/ && SameLabels\(s\.Labels, labels\)//' \
+    's/ && SameLabels\(Labels, other\.Labels\)//;s/return hash\.ToHashCode\(\);/return RuntimeHelpers.GetHashCode(Instrument);/' \
     "aggregator: series lookup ignores the tag set"
+
+mutate Pulse/MetricsAggregator.cs \
+    's/ReferenceEquals\(Instrument, other\.Instrument\) && //;s/hash\.Add\(RuntimeHelpers\.GetHashCode\(Instrument\)\);//' \
+    "aggregator: series lookup ignores the instrument, so two instruments recording the same tags share a series"
+
+mutate Pulse/MetricsAggregator.cs \
+    's/hash\.Add\(label\.Key\);/hash.Add(Labels);/' \
+    "aggregator: the lookup hashes the tag array's identity, not its content, so a tag set seen again opens a second series"
+
+mutate Pulse/MetricsAggregator.cs \
+    's/hash\.Add\(label\.Value\);//' \
+    "aggregator: the lookup hash ignores the tag values, so a family's tag sets all share one bucket and the index is a linear scan again"
+
+mutate Pulse/MetricsAggregator.cs \
+    's/hash\.Add\(RuntimeHelpers\.GetHashCode\(Instrument\)\);//' \
+    "aggregator: the lookup hash ignores the instrument, so every untagged series shares one bucket and the per-tick records scan them"
+
+mutate Pulse/MetricsAggregator.cs \
+    's/index\.Remove\(s\.Key\);//' \
+    "aggregator: a retired series stays in the index, so its tag set comes back into a series nobody serves"
 
 mutate Pulse/PrometheusText.cs \
     's/Escape\(label\.Value\)/label.Value/' \
@@ -116,7 +139,7 @@ mutate Pulse/MetricsAggregator.cs \
     "aggregator: a synchronous series is retired between scrapes as if it were observable"
 
 mutate Pulse/MetricsAggregator.cs \
-    's/series\.RemoveAll\(s => s\.Instrument\.IsObservable && s\.Generation != generation\);//' \
+    's/bool retired = s\.Instrument\.IsObservable && s\.Generation != generation;/bool retired = false;/' \
     "aggregator: an observable series is never retired, freezing it at whatever it last measured"
 
 mutate Pulse/LogClassifier.cs \

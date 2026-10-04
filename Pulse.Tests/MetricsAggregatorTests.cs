@@ -18,6 +18,8 @@ public class MetricsAggregatorTests
     private static MetricSample Sample(IReadOnlyList<MetricSample> samples, string name)
         => samples.Single(s => s.Name == name);
 
+    private static KeyValuePair<string, object?> Tag(string key, string value) => new(key, value);
+
     [Fact]
     public void Counter_Accumulates_AcrossAdds()
     {
@@ -455,5 +457,274 @@ public class MetricsAggregatorTests
         instrument.Emit(5.0);
 
         Assert.Empty(aggregator.Collect());
+    }
+
+    /// <summary>A series belongs to the instrument that measured it, not to a tag set alone: two
+    /// counters recording the very same tags keep a series each.</summary>
+    [Fact]
+    public void TheSameTagSet_OnTwoInstruments_IsTwoSeries()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        Counter<long> first = meter.CreateCounter<long>("first_total", "{x}", "First.");
+        Counter<long> second = meter.CreateCounter<long>("second_total", "{x}", "Second.");
+
+        first.Add(1, Tag("k", "v"));
+        second.Add(10, Tag("k", "v"));
+        first.Add(1, Tag("k", "v"));
+
+        IReadOnlyList<MetricSample> samples = aggregator.Collect();
+        Assert.Equal(2, samples.Count);
+        Assert.Equal(2, Sample(samples, "first_total").Value);
+        Assert.Equal(10, Sample(samples, "second_total").Value);
+    }
+
+    /// <summary>One key or one value is enough to make another series, and a tag set that only
+    /// starts like another, or spells the same characters with the split between key and value
+    /// somewhere else, is not that other one either.</summary>
+    [Fact]
+    public void TagSets_ThatDifferInOneKeyOrOneValue_StayApart()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        Counter<long> counter = meter.CreateCounter<long>("c_total", "{x}", "C.");
+
+        counter.Add(1, Tag("a", "1"), Tag("b", "2"), Tag("c", "3"));
+        counter.Add(2, Tag("a", "1"), Tag("b", "2"), Tag("c", "4"));    // the last value differs
+        counter.Add(4, Tag("a", "1"), Tag("b", "2"), Tag("d", "3"));    // the last key differs
+        counter.Add(8, Tag("a", "1"), Tag("b", "2"));                   // the first without its last tag
+        counter.Add(16, Tag("ab", "c"));
+        counter.Add(32, Tag("a", "bc"));                                // the same characters, split elsewhere
+        counter.Add(64, Tag("c", "3"), Tag("b", "2"), Tag("a", "1"));   // the first again, keys the other way round
+
+        Assert.Equal([65, 2, 4, 8, 16, 32], aggregator.Collect().Select(s => s.Value));
+    }
+
+    /// <summary>A thousand tag sets of two keys each, recorded in an order unrelated to their
+    /// names and once in each key order: every one is served as a series of its own, holding
+    /// only its own measurements, in the order the tag sets first appeared.</summary>
+    [Fact]
+    public void ManyTagSets_AreAllServed_EachWithItsOwnValue_InTheOrderTheyFirstAppeared()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        Counter<long> counter = meter.CreateCounter<long>("c_total", "{x}", "C.");
+        const int tagSets = 1_000;
+
+        // 7 shares no factor with 1,000, so the stride visits every id exactly once per round.
+        List<int> order = Enumerable.Range(0, tagSets).Select(i => i * 7 % tagSets).ToList();
+        foreach (int id in order)
+        {
+            counter.Add(id + 1, Tag("id", $"{id}"), Tag("group", $"{id % 10}"));
+        }
+
+        foreach (int id in order)
+        {
+            counter.Add(id + 1, Tag("group", $"{id % 10}"), Tag("id", $"{id}"));
+        }
+
+        // Labels come sorted by key: group, then id.
+        IReadOnlyList<MetricSample> samples = aggregator.Collect();
+        Assert.Equal(tagSets, samples.Count);
+        Assert.Equal(order, samples.Select(s => int.Parse(s.Labels[1].Value)));
+        Assert.All(samples, s => Assert.Equal(2 * (int.Parse(s.Labels[1].Value) + 1), s.Value));
+        Assert.All(samples, s => Assert.Equal(int.Parse(s.Labels[1].Value) % 10, int.Parse(s.Labels[0].Value)));
+    }
+
+    /// <summary>The index is only as good as its key. Equal tag sets held in two arrays have to
+    /// hash alike, since the dictionary finds a series by that, and a thousand different ones must
+    /// not pile into a few buckets: a hash that collapsed would still serve every value right, only
+    /// as slowly as the scan it replaced, which no other test could tell.</summary>
+    [Fact]
+    public void TheSeriesKey_Compares_ByInstrumentAndTagSetContent_AndSpreadsTagSetsInItsHash()
+    {
+        using Meter meter = new(UniqueMeterName());
+        Counter<long> counter = meter.CreateCounter<long>("c_total", "{x}", "C.");
+        Counter<long> other = meter.CreateCounter<long>("other_total", "{x}", "Other.");
+        static KeyValuePair<string, string>[] Labels(int id) => [new("group", $"{id % 10}"), new("id", $"{id}")];
+
+        MetricsAggregator.SeriesKey seven = new(counter, Labels(7));
+        MetricsAggregator.SeriesKey sevenAgain = new(counter, Labels(7));
+        Assert.Equal(seven, sevenAgain);
+        Assert.Equal(seven.GetHashCode(), sevenAgain.GetHashCode());
+
+        // The dictionary only asks whether two keys are equal once their hashes are, so each part
+        // of the equality is pinned here, on its own, and not only through the aggregator.
+        Assert.NotEqual(seven, new MetricsAggregator.SeriesKey(counter, Labels(8)));
+        Assert.NotEqual(seven, new MetricsAggregator.SeriesKey(other, Labels(7)));
+
+        // Hash codes are 32 bits, so a few of the thousand may meet by chance; a hash that ignores
+        // what tells these tag sets apart is nowhere near that.
+        int distinct = Enumerable.Range(0, 1_000)
+            .Select(id => new MetricsAggregator.SeriesKey(counter, Labels(id)).GetHashCode())
+            .Distinct()
+            .Count();
+        Assert.True(distinct > 990, $"{distinct} different hashes for 1,000 tag sets");
+
+        // Untagged series, the ones recorded every tick, differ by their instrument alone.
+        int untagged = Enumerable.Range(0, 100)
+            .Select(i => new MetricsAggregator.SeriesKey(meter.CreateCounter<long>($"u{i}_total"), []).GetHashCode())
+            .Distinct()
+            .Count();
+        Assert.True(untagged > 95, $"{untagged} different hashes for 100 untagged instruments");
+    }
+
+    /// <summary>A tag set an observable instrument stops reporting is retired. One it reports
+    /// again later is a series like any new one: served again, after the others of its family,
+    /// and not recorded into the series that was retired.</summary>
+    [Fact]
+    public void ObservableGauge_ServesATagSet_ThatReturnsAfterBeingRetired_LastInItsFamily()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        string[] reported = ["a", "b", "c"];
+        double reading = 1;
+        meter.CreateObservableGauge(
+            "g_share", () => reported.Select(modid => new Measurement<double>(reading, Tag("modid", modid))).ToList());
+
+        Assert.Equal(["a", "b", "c"], aggregator.Collect().Select(s => s.Labels[0].Value));
+
+        reported = ["b", "c"];
+        Assert.Equal(["b", "c"], aggregator.Collect().Select(s => s.Labels[0].Value));
+
+        reported = ["a", "b", "c"];
+        reading = 2;
+        IReadOnlyList<MetricSample> back = aggregator.Collect();
+        Assert.Equal(["b", "c", "a"], back.Select(s => s.Labels[0].Value));
+        Assert.All(back, s => Assert.Equal(2, s.Value));
+    }
+
+    /// <summary>The exposition text of a fixed run of measurements, word for word. How a series is
+    /// found must never change what is served or in which order, so this holds the whole text of a
+    /// run that interleaves its families (a family's series do not arrive together), records one
+    /// tag set in both key orders, and measures a histogram with and without tags. The order after
+    /// a series is retired is held by ObservableGauge_ServesATagSet_ThatReturnsAfterBeingRetired_LastInItsFamily,
+    /// which this text cannot see.</summary>
+    [Fact]
+    public void TheServedText_ForAFixedRunOfMeasurements_IsPinned()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        Counter<long> entries = meter.CreateCounter<long>("pin_entries_total", "{entry}", "Entries by level and source.");
+        Counter<long> bare = meter.CreateCounter<long>("pin_bare_total", "{x}", "No tags.");
+        Histogram<double> latency = CreateHistogram(meter, "pin_latency_seconds", "Latency by route.");
+        UpDownCounter<long> depth = meter.CreateUpDownCounter<long>("pin_queue_depth", "{item}", "Depth by queue.");
+        meter.CreateObservableGauge(
+            "pin_share",
+            () => new[]
+            {
+                new Measurement<double>(0.25, Tag("modid", "engine")),
+                new Measurement<double>(0.75, Tag("modid", "game")),
+            },
+            description: "Share by mod.");
+
+        entries.Add(1, Tag("level", "warning"), Tag("source", "a"));
+        bare.Add(5);
+        latency.Record(0.03, Tag("route", "/a"));
+        entries.Add(2, Tag("level", "error"), Tag("source", "a"));
+        depth.Add(3, Tag("queue", "x"));
+        entries.Add(4, Tag("source", "a"), Tag("level", "warning"));    // the first tag set, keys the other way round
+        latency.Record(0.2, Tag("route", "/b"));
+        latency.Record(0.01, Tag("route", "/a"));
+        entries.Add(8, Tag("level", "warning"), Tag("source", "b"));    // one value away from the first
+        depth.Add(-1, Tag("queue", "x"));
+        depth.Add(2, Tag("queue", "y"));
+        bare.Add(1);
+        latency.Record(0.07);                                           // the same histogram, no tags
+
+        Assert.Equal(
+            "# HELP pin_entries_total Entries by level and source.\n" +
+            "# TYPE pin_entries_total counter\n" +
+            "pin_entries_total{level=\"warning\",source=\"a\"} 5\n" +
+            "pin_entries_total{level=\"error\",source=\"a\"} 2\n" +
+            "pin_entries_total{level=\"warning\",source=\"b\"} 8\n" +
+            "# HELP pin_bare_total No tags.\n" +
+            "# TYPE pin_bare_total counter\n" +
+            "pin_bare_total 6\n" +
+            "# HELP pin_latency_seconds Latency by route.\n" +
+            "# TYPE pin_latency_seconds histogram\n" +
+            "pin_latency_seconds_bucket{route=\"/a\",le=\"0.025\"} 1\n" +
+            "pin_latency_seconds_bucket{route=\"/a\",le=\"0.05\"} 2\n" +
+            "pin_latency_seconds_bucket{route=\"/a\",le=\"0.1\"} 2\n" +
+            "pin_latency_seconds_bucket{route=\"/a\",le=\"+Inf\"} 2\n" +
+            "pin_latency_seconds_sum{route=\"/a\"} 0.04\n" +
+            "pin_latency_seconds_count{route=\"/a\"} 2\n" +
+            "pin_latency_seconds_bucket{route=\"/b\",le=\"0.025\"} 0\n" +
+            "pin_latency_seconds_bucket{route=\"/b\",le=\"0.05\"} 0\n" +
+            "pin_latency_seconds_bucket{route=\"/b\",le=\"0.1\"} 0\n" +
+            "pin_latency_seconds_bucket{route=\"/b\",le=\"+Inf\"} 1\n" +
+            "pin_latency_seconds_sum{route=\"/b\"} 0.2\n" +
+            "pin_latency_seconds_count{route=\"/b\"} 1\n" +
+            "pin_latency_seconds_bucket{le=\"0.025\"} 0\n" +
+            "pin_latency_seconds_bucket{le=\"0.05\"} 0\n" +
+            "pin_latency_seconds_bucket{le=\"0.1\"} 1\n" +
+            "pin_latency_seconds_bucket{le=\"+Inf\"} 1\n" +
+            "pin_latency_seconds_sum 0.07\n" +
+            "pin_latency_seconds_count 1\n" +
+            "# HELP pin_queue_depth Depth by queue.\n" +
+            "# TYPE pin_queue_depth gauge\n" +
+            "pin_queue_depth{queue=\"x\"} 2\n" +
+            "pin_queue_depth{queue=\"y\"} 2\n" +
+            "# HELP pin_share Share by mod.\n" +
+            "# TYPE pin_share gauge\n" +
+            "pin_share{modid=\"engine\"} 0.25\n" +
+            "pin_share{modid=\"game\"} 0.75\n",
+            PrometheusText.Render(aggregator.Collect()));
+    }
+
+    /// <summary>The same shape as the untagged concurrency test above, with series being opened:
+    /// several recorders each open tag sets of their own and all keep adding to one they share,
+    /// while scrapes keep running. Nothing may be lost, doubled or thrown.</summary>
+    [Fact]
+    public void TaggedRecords_And_Scrapes_CanRunConcurrently()
+    {
+        string meterName = UniqueMeterName();
+        using Meter meter = new(meterName);
+        using MetricsAggregator aggregator = new(meterName);
+        Counter<long> counter = meter.CreateCounter<long>("c_total", "{tick}", "C.");
+        const int recorders = 4;
+        const int tagSets = 100;
+        const int rounds = 100;
+
+        Thread[] threads = Enumerable.Range(0, recorders).Select(recorder => new Thread(() =>
+        {
+            for (int round = 0; round < rounds; round++)
+            {
+                for (int id = 0; id < tagSets; id++)
+                {
+                    counter.Add(1, Tag("recorder", $"{recorder}"), Tag("id", $"{id}"));
+                    counter.Add(1, Tag("recorder", "all"));
+                }
+            }
+        })).ToArray();
+
+        foreach (Thread thread in threads)
+        {
+            thread.Start();
+        }
+
+        // A pause between scrapes: Collect holds the lock for its whole copy, and a scrape that
+        // came straight back would leave the recorders waiting for it most of the time.
+        do
+        {
+            aggregator.Collect();
+            Thread.Sleep(1);
+        }
+        while (threads.Any(thread => thread.IsAlive));
+
+        foreach (Thread thread in threads)
+        {
+            thread.Join();
+        }
+
+        IReadOnlyList<MetricSample> samples = aggregator.Collect();
+        Assert.Equal((recorders * tagSets) + 1, samples.Count);
+        Assert.Equal(recorders * tagSets * rounds, samples.Single(s => s.Labels.Length == 1).Value);
+        Assert.All(samples.Where(s => s.Labels.Length == 2), s => Assert.Equal(rounds, s.Value));
     }
 }
