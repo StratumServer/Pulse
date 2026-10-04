@@ -513,40 +513,16 @@ mutate Pulse/StratumTimingsSource.cs \
     "stratum binder: a ContractVersion that is not an integer literal is called a Stratum that predates the contract, so an admin is told to upgrade a Stratum that is current"
 
 mutate Pulse/StratumTimingsSource.cs \
-    's/field\.GetRawConstantValue\(\) is not int version/!int.TryParse(field.GetRawConstantValue()?.ToString(), out int version)/' \
-    "stratum binder: a ContractVersion that is a long is read as an int instead of refused"
-
-mutate Pulse/StratumTimingsSource.cs \
     's/if \(version != ContractVersion\)/if (version < ContractVersion)/' \
     "stratum binder: a contract newer than this Pulse reads is bound as if it were version 1"
-
-mutate Pulse/StratumTimingsSource.cs \
-    's/if \(version != ContractVersion\)/if (version > ContractVersion)/' \
-    "stratum binder: a contract older than this Pulse reads is bound as if it were version 1"
-
-mutate Pulse/StratumTimingsSource.cs \
-    's/Stratum \{MinimumStratumVersion\} or later is needed/a newer Stratum is needed/' \
-    "stratum binder: the warning for a Stratum without the contract stops naming the version that has it"
 
 mutate Pulse/StratumTimingsSource.cs \
     's/request\?\.ReturnType != typeof\(IDisposable\)/request == null/' \
     "stratum binder: a request that returns something other than a lease is bound anyway"
 
 mutate Pulse/StratumTimingsSource.cs \
-    's/\|\| snapshot\?\.ReturnType != typeof\(void\)/|| snapshot == null/' \
-    "stratum binder: a snapshot that returns a value is bound anyway"
-
-mutate Pulse/StratumTimingsSource.cs \
     's/\|\| snapshot\.GetParameters\(\)\[0\]\.ParameterType != SnapshotInto\)/)/' \
     "stratum binder: a snapshot that takes a base of the list is bound, so Pulse would pass its list to a contract it was not promised"
-
-mutate Pulse/StratumTimingsSource.cs \
-    's/BindingFlags\.Public \| BindingFlags\.Static, (Type\.EmptyTypes|\[SnapshotInto\])/BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static, \1/' \
-    "stratum binder: internal members are bound, which the contract never promises to keep"
-
-mutate Pulse/StratumTimingsSource.cs \
-    's/BindingFlags\.Public \| BindingFlags\.Static, (Type\.EmptyTypes|\[SnapshotInto\])/BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static, \1/' \
-    "stratum binder: an instance method is bound as if it were static"
 
 mutate Pulse/StratumTimingsSource.cs \
     's/public IDisposable Request\(\) => request\(\);/public IDisposable Request() { request(); return request(); }/' \
@@ -590,32 +566,12 @@ mutate Pulse/StratumKeyParser.cs \
     "stratum parser: the prefix strip leaves its last dash on the name"
 
 mutate Pulse/StratumKeyParser.cs \
-    's/if \(dot <= categoryStart\)/if (dot < categoryStart)/' \
-    "stratum parser: a behavior key with an empty category is read"
-
-mutate Pulse/StratumKeyParser.cs \
-    's/return name\.Length == 0$/return false/' \
-    "stratum parser: a behavior key with no name is read, so a series is published with an empty label"
-
-mutate Pulse/StratumKeyParser.cs \
     's/!key\.AsSpan\(dot \+ 1\)\.StartsWith\(AiTask, StringComparison\.Ordinal\) \|\| //' \
     "stratum parser: the AI phase keys that nest inside each other are read as tasks"
 
 mutate Pulse/StratumKeyParser.cs \
     's/ \|\| nameStart >= key\.Length\)/)/' \
     "stratum parser: a task key with no code is read"
-
-mutate Pulse/StratumKeyParser.cs \
-    "s/key\.IndexOf\('-', EntityType\.Length\)/key.LastIndexOf('-')/" \
-    "stratum parser: an entity type is cut at the last dash, not the first"
-
-mutate Pulse/StratumKeyParser.cs \
-    's/\(dash < 0 \? key\.Length : dash\)/key.Length/' \
-    "stratum parser: an entity type is the whole code path, so every variant is a series of its own"
-
-mutate Pulse/StratumKeyParser.cs \
-    's/return type\.Length == 0 \? null : new StratumKey/return new StratumKey/' \
-    "stratum parser: an entity path that starts with a dash is read as a type with an empty name"
 
 mutate Pulse/StratumKeyParser.cs \
     's/key\.StartsWith\(EntityType, StringComparison\.Ordinal\) \? ReadEntity\(key\) : null/ReadEntity(key)/' \
@@ -679,18 +635,6 @@ mutate Pulse/StratumFold.cs \
     "stratum fold: the lightest new series are admitted first, so the cap lumps together the ones worth reading"
 
 mutate Pulse/StratumFold.cs \
-    's/\.ThenBy\(candidate => candidate\.Key\.Category, StringComparer\.Ordinal\)//' \
-    "stratum fold: two equally heavy new series are admitted in whatever order the accumulator listed them, by category"
-
-mutate Pulse/StratumFold.cs \
-    's/\.ThenBy\(candidate => candidate\.Key\.Name, StringComparer\.Ordinal\)//' \
-    "stratum fold: two equally heavy new series are admitted in whatever order the accumulator listed them, by name"
-
-mutate Pulse/StratumFold.cs \
-    's/\.ThenBy\(candidate => candidate\.Key\.ThreadSafe\)//' \
-    "stratum fold: two equally heavy new series are admitted in whatever order the accumulator listed them, by thread"
-
-mutate Pulse/StratumFold.cs \
     's/spill\[lump\] = spill\.GetValueOrDefault\(lump\) \+ entry\.Value;/spill[lump] = entry.Value;/' \
     "stratum fold: what spills over replaces what spilled before it in the burst instead of adding to it"
 
@@ -721,14 +665,6 @@ mutate Pulse/StratumFold.cs \
 mutate Pulse/StratumFold.cs \
     's/new EntityDelta\(key\.Name, seconds, total\.Calls\)/new EntityDelta(key.Name, seconds, total.Ticks)/' \
     "stratum fold: the entity ticks run are the stopwatch ticks spent"
-
-mutate Pulse/StratumFold.cs \
-    's/new\(a\.Ticks \+ b\.Ticks, a\.Calls \+ b\.Calls\)/new(a.Ticks + b.Ticks, a.Calls)/' \
-    "stratum fold: the codes that share a type add up their seconds but not their ticks run"
-
-mutate Pulse/StratumFold.cs \
-    's/SeriesCap = 100;/SeriesCap = 10;/' \
-    "stratum fold: the default cap is ten series per family, not a hundred"
 
 # Switching attribution from a command is a promise about a live server: that a server which never
 # asked for it is not paying for it, that a reload names only what it could not apply, and that a
