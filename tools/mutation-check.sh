@@ -267,10 +267,6 @@ mutate Pulse/TickAttribution.cs \
     's/if \(entry\.ElapsedTicks < 0\)/if (entry.ElapsedTicks <= 0)/' \
     "attribution: the wrap clamp fires on a mark that legitimately took no time"
 
-mutate Pulse/DutyCycle.cs \
-    's/if \(!warm\)/if (false)/' \
-    "duty cycle: the tick after a burst starts is taken for a sample, so the stale one is folded instead of discarded"
-
 mutate Pulse/TickAttribution.cs \
     's/if \(mark\.Key == SleepMark\)/if (false)/' \
     "attribution: the throttle sleep is attributed as if it were work"
@@ -285,12 +281,10 @@ mutate Pulse/TickAttribution.cs \
 
 # The duty cycle is the schedule every burst of every measurement runs on, so each way it can drift
 # is a measurement that quietly runs too often, too long, or on a tick it should have discarded.
-# Its warm-up and its enabled check are mutated elsewhere in this file, the two patterns that
-# pointed at TickAttribution before the schedule moved out of it; these are the rest of its
-# branches. That the idle phase is entered at all, that it counts seconds and starts exactly on the
-# interval, that a burst is exactly its length and then ends, that applying a cycle drops the burst
-# in progress and the idle time already counted, and the clamps every configured value goes
-# through.
+mutate Pulse/DutyCycle.cs \
+    's/if \(!warm\)/if (false)/' \
+    "duty cycle: the tick after a burst starts is taken for a sample, so the stale one is folded instead of discarded"
+
 mutate Pulse/DutyCycle.cs \
     's/if \(!InBurst\)/if (false)/' \
     "duty cycle: the idle phase never runs, so nothing waits out the interval and a burst never starts"
@@ -320,6 +314,18 @@ mutate Pulse/DutyCycle.cs \
     "duty cycle: a reload keeps the idle time the old interval had already counted"
 
 mutate Pulse/DutyCycle.cs \
+    '/private void Restart/,/^    }/s/burstTicksElapsed = 0;//' \
+    "duty cycle: the sample count carries over between bursts, so every burst after the first ends on its first sample"
+
+mutate Pulse/DutyCycle.cs \
+    '/private void Restart/,/^    }/s/warm = false;//' \
+    "duty cycle: the next burst skips its warm-up and folds the tree from the tick the profiler came on"
+
+mutate Pulse/DutyCycle.cs \
+    's/MaximumBurstTicks = 300;/MaximumBurstTicks = 299;/' \
+    "duty cycle: the burst cap the README documents moves"
+
+mutate Pulse/DutyCycle.cs \
     's/Math\.Clamp\(burstTicks, 1, MaximumBurstTicks\)/Math.Max(1, burstTicks)/' \
     "duty cycle: the burst length cap is gone, so a configured burst of any length runs"
 
@@ -345,6 +351,10 @@ mutate Pulse/TickAttribution.cs \
 mutate Pulse/TickAttribution.cs \
     '/public void Apply/,/^    }/s/ClearBurst\(\);//' \
     "attribution: a reload mid-burst keeps the half-folded sample, so the next burst publishes the ticks that were dropped too"
+
+mutate Pulse/TickAttribution.cs \
+    '/private AttributionBurst Take/,/^    }/s/ClearBurst\(\);//' \
+    "attribution: a published burst is not cleared, so the next one adds its ticks to the last one's"
 
 mutate Pulse/ModOwners.cs \
     's/byName\[name\] = resolved;//' \

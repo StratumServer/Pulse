@@ -25,12 +25,12 @@ public class DutyCycleTests
         DutyCycle cycle = new(0, 0);
 
         Assert.Equal(1, cycle.BurstTicks);
-        Assert.Equal(DutyCycle.MinimumIntervalSeconds, cycle.IntervalSeconds);
+        Assert.Equal(1, cycle.IntervalSeconds);
     }
 
     [Fact]
     public void Constructor_Caps_TheBurstLength()
-        => Assert.Equal(DutyCycle.MaximumBurstTicks, new DutyCycle(100000, 10).BurstTicks);
+        => Assert.Equal(300, new DutyCycle(100000, 10).BurstTicks);
 
     [Fact]
     public void Constructor_Keeps_AConfiguredDutyCycle()
@@ -193,7 +193,7 @@ public class DutyCycleTests
 
         cycle.Apply(true, 100000, 0);
 
-        Assert.Equal(DutyCycle.MaximumBurstTicks, cycle.BurstTicks);
-        Assert.Equal(DutyCycle.MinimumIntervalSeconds, cycle.IntervalSeconds);
+        Assert.Equal(300, cycle.BurstTicks);
+        Assert.Equal(1, cycle.IntervalSeconds);
     }
 }

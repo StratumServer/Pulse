@@ -73,9 +73,6 @@ internal sealed class DutyCycle
                 return DutyStep.Idle;
             }
 
-            idleSeconds = 0;
-            burstTicksElapsed = 0;
-            warm = false;
             InBurst = true;
             return DutyStep.Start;
         }

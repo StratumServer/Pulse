@@ -13,7 +13,7 @@ namespace Pulse;
 /// profiled tick's mark tree becomes seconds per mod.</summary>
 /// <remarks>Knows nothing about meters, the server or the profiler flag itself. It is handed the
 /// previous tick's completed tree and says whether the profiler should be on when the current tick
-/// ends, which is what makes the whole duty cycle drivable from a unit test.</remarks>
+/// ends.</remarks>
 internal sealed class TickAttribution
 {
     /// <summary>Everything the engine spends on itself: its own server systems, the time between
@@ -214,9 +214,9 @@ internal sealed class TickAttribution
     }
 
     /// <summary>Nothing accumulated: what a burst gathers so far is dropped.</summary>
-    /// <remarks>Everything a burst gathers is dropped here, but <c>seenMods</c> is not: a mod that
-    /// has been measured once keeps publishing a zero rather than freezing its gauge, whether the
-    /// burst ended on its own or an operator cut it short.</remarks>
+    /// <remarks>Not <c>seenMods</c>: a mod that has been measured once keeps publishing a zero
+    /// rather than freezing its gauge, whether the burst ended on its own or an operator cut it
+    /// short.</remarks>
     private void ClearBurst()
     {
         ticksByMod.Clear();
