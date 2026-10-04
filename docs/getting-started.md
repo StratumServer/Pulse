@@ -36,7 +36,8 @@ your own computer. Pulse needs Vintage Story 1.22 or newer.
    [GitHub releases](https://github.com/StratumServer/Pulse/releases).
 2. Drop the zip, unopened, into the server's `Mods/` folder, the same place every other mod
    goes. By default that is:
-   - Linux, the official server install script: `/home/vintagestory/data/Mods`.
+   - Linux, the `server.sh` that ships with the server: `/var/vintagestory/data/Mods` (its
+     `DATAPATH`, unless you changed it).
    - Linux, running the server binary yourself with no `--dataPath`: `~/.config/VintagestoryData/Mods`.
    - Windows: `%AppData%\VintagestoryData\Mods` (not `%AppData%\Vintagestory`, the install
      folder itself, a different place one word shorter).
