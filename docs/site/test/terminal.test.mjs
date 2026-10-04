@@ -167,7 +167,9 @@ test('Home holds its blocks, in order, with one h1', () => {
   assert.match(home, /<h1 class="hero__wordmark" data-glitch>PULSE<\/h1>/);
   assert.equal(home.match(/class="band"/g).length, 2, 'a band before the pills and one at the end');
   assert.match(home, /<span class="sr-only">Choose your pill<\/span><span aria-hidden="true">&gt; choose_your_pill<\/span>/, 'the plain words for assistive technology, the prompt for the eye');
-  assert.match(home, /<li><a class="badge" href="changelog\/index\.html#020---2026-09-29">v0\.2\.0<\/a><\/li><li class="badge">VS 1\.22\+<\/li>/);
+  // The released version and the id of its changelog heading, read from the same data the site is built from.
+  const release = `changelog/index\\.html#${data.version.replaceAll('.', '')}---${data.released}">v${data.version.replaceAll('.', '\\.')}`;
+  assert.match(home, new RegExp(`<li><a class="badge" href="${release}</a></li><li class="badge">VS 1\\.22\\+</li>`));
   assert.match(home, /class="stats"><div><dt><a href="metrics\/index\.html">metric families<\/a><\/dt><dd>28<\/dd>/);
 });
 

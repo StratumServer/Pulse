@@ -8,6 +8,12 @@ first.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-04
+
+Everything from v0.2.1-indev.1, unchanged: each mod's id in its log lines, an OTLP `instance`
+label that survives restarts, and per-mod attribution that credits the game's own entity
+behaviours to the mod that ships them.
+
 ### Changed
 
 - Both mods now write to the server log through the logger the game gives each mod, so every entry
