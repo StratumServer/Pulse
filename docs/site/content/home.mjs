@@ -61,7 +61,7 @@ export const smith = (alerts) => `The bundled <a href="${alerts}">alert rules</a
 export const ATTRIBUTION_SHOT = {
   src: 'assets/img/dashboard-attribution.png', width: 1880, height: 751,
   alt: 'Grafana attribution row: tick share by mod over time, current share as a bar gauge, attributed tick time, and profiling health, from a plain dedicated server running only the vanilla modules, Pulse and Pulse OTLP, with attribution turned on and about 8,000 entities loaded',
-  caption: "A plain dedicated server running only the vanilla modules, Pulse and Pulse OTLP, attribution switched on with <code>/pulse attribution on</code> at the console and about 8,000 entities loaded. Pulse's own share stays near zero, 0.12% here; the engine, the game and survival take most of the rest.",
+  caption: "A plain dedicated server running only the vanilla modules, Pulse and Pulse OTLP, attribution switched on with <code>/pulse attribution on</code> at the console and about 8,000 entities loaded. Pulse's own share stays near zero, 0.10% here; the engine, the game and survival take most of the rest.",
 };
 
 // The listing says "Vintage Story 1.22.x"; here it is "1.22 or newer", which is what modinfo.json states.
