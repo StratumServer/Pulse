@@ -283,6 +283,69 @@ mutate Pulse/TickAttribution.cs \
     's/foreach \(string modid in seenMods\.Order\(StringComparer\.Ordinal\)\)/foreach (string modid in ticksByMod.Keys.Order(StringComparer.Ordinal))/' \
     "attribution: a mod that goes quiet is dropped, freezing its share gauge at whatever it last read"
 
+# The duty cycle is the schedule every burst of every measurement runs on, so each way it can drift
+# is a measurement that quietly runs too often, too long, or on a tick it should have discarded.
+# Its warm-up and its enabled check are mutated elsewhere in this file, the two patterns that
+# pointed at TickAttribution before the schedule moved out of it; these are the rest of its
+# branches. That the idle phase is entered at all, that it counts seconds and starts exactly on the
+# interval, that a burst is exactly its length and then ends, that applying a cycle drops the burst
+# in progress and the idle time already counted, and the clamps every configured value goes
+# through.
+mutate Pulse/DutyCycle.cs \
+    's/if \(!InBurst\)/if (false)/' \
+    "duty cycle: the idle phase never runs, so nothing waits out the interval and a burst never starts"
+
+mutate Pulse/DutyCycle.cs \
+    's/idleSeconds \+= elapsedSeconds;/idleSeconds++;/' \
+    "duty cycle: the interval counts ticks instead of the seconds they took"
+
+mutate Pulse/DutyCycle.cs \
+    's/if \(idleSeconds < IntervalSeconds\)/if (idleSeconds <= IntervalSeconds)/' \
+    "duty cycle: the interval boundary is inclusive, so a burst due exactly on it waits one more tick"
+
+mutate Pulse/DutyCycle.cs \
+    's/if \(\+\+burstTicksElapsed < BurstTicks\)/if (++burstTicksElapsed <= BurstTicks)/' \
+    "duty cycle: a burst takes one sample more than its length"
+
+mutate Pulse/DutyCycle.cs \
+    '/public DutyStep OnTick/,/^    }/s/Restart\(\);//' \
+    "duty cycle: the last sample leaves the burst running, so it never ends and the interval is never waited again"
+
+mutate Pulse/DutyCycle.cs \
+    '/public void Apply/,/^    }/s/Restart\(\);//' \
+    "duty cycle: applying a cycle leaves the burst in progress running instead of dropping it"
+
+mutate Pulse/DutyCycle.cs \
+    '/private void Restart/,/^    }/s/idleSeconds = 0;//' \
+    "duty cycle: a reload keeps the idle time the old interval had already counted"
+
+mutate Pulse/DutyCycle.cs \
+    's/Math\.Clamp\(burstTicks, 1, MaximumBurstTicks\)/Math.Max(1, burstTicks)/' \
+    "duty cycle: the burst length cap is gone, so a configured burst of any length runs"
+
+mutate Pulse/DutyCycle.cs \
+    's/Math\.Clamp\(burstTicks, 1, MaximumBurstTicks\)/Math.Min(burstTicks, MaximumBurstTicks)/' \
+    "duty cycle: the burst length floor is gone, so a burst of no ticks is accepted"
+
+mutate Pulse/DutyCycle.cs \
+    's/Math\.Max\(MinimumIntervalSeconds, intervalSeconds\)/intervalSeconds/' \
+    "duty cycle: the interval floor is gone, so a zero interval starts a burst on every tick"
+
+# What attribution does with each step is its own: reading the warm-up as a sample counts a tree
+# that is not this burst's, never closing on the last sample publishes nothing at all, and a cycle
+# restarted mid-burst has to take what the burst had folded with it.
+mutate Pulse/TickAttribution.cs \
+    's/if \(step is not \(DutyStep\.Sample or DutyStep\.LastSample\)\)/if (step == DutyStep.Idle)/' \
+    "attribution: a start or a warm-up is read as a sample too, so the stale tree from the tick the profiler came on is folded"
+
+mutate Pulse/TickAttribution.cs \
+    's/return step == DutyStep\.LastSample \? Take\(\) : null;/return null;/' \
+    "attribution: the last sample never closes the burst, so nothing is ever published"
+
+mutate Pulse/TickAttribution.cs \
+    '/public void Apply/,/^    }/s/ClearBurst\(\);//' \
+    "attribution: a reload mid-burst keeps the half-folded sample, so the next burst publishes the ticks that were dropped too"
+
 mutate Pulse/ModOwners.cs \
     's/byName\[name\] = resolved;//' \
     "mod owners: a class registry miss is asked again on every profiled tick"

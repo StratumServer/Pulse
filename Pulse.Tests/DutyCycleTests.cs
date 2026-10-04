@@ -57,6 +57,14 @@ public class DutyCycleTests
         Assert.True(cycle.InBurst);
     }
 
+    /// <summary>The interval is seconds, not ticks: half-second ticks take twice as many to cross it,
+    /// and the burst starts on the one that lands exactly on it.</summary>
+    [Fact]
+    public void OnTick_CountsTheInterval_InSeconds()
+        => Assert.Equal(
+            [DutyStep.Idle, DutyStep.Idle, DutyStep.Idle, DutyStep.Start],
+            Run(new DutyCycle(5, 2), 4, 0.5));
+
     /// <summary>Whatever the caller switches on at the start is switched on part-way through that
     /// tick, so what it reads on the next one describes a tick only partly covered. That one is the
     /// warm-up, and it is not a sample.</summary>
@@ -133,6 +141,35 @@ public class DutyCycleTests
         Assert.False(cycle.InBurst);
         Assert.All(Run(cycle, 100), step => Assert.Equal(DutyStep.Idle, step));
         Assert.False(cycle.InBurst);
+    }
+
+    /// <summary>A reload that leaves the cycle on drops the burst in progress the same way, and the
+    /// burst length it brings is the one the next burst runs.</summary>
+    [Fact]
+    public void Apply_Drops_ABurstInProgress_WhenItIsReapplied()
+    {
+        DutyCycle cycle = new(30, 1);
+        Run(cycle, 5);
+        Assert.True(cycle.InBurst);
+
+        cycle.Apply(true, 2, 1);
+
+        Assert.False(cycle.InBurst);
+        Assert.Equal([DutyStep.Start, DutyStep.WarmUp, DutyStep.Sample, DutyStep.LastSample], Run(cycle, 4));
+    }
+
+    /// <summary>A new interval is counted from the reload, not from whatever the old one had already
+    /// waited.</summary>
+    [Fact]
+    public void Apply_Restarts_TheInterval_OfARunningCycle()
+    {
+        DutyCycle cycle = new(5, 10);
+        Run(cycle, 6);
+
+        cycle.Apply(true, 5, 10);
+
+        Assert.All(Run(cycle, 9), step => Assert.Equal(DutyStep.Idle, step));
+        Assert.Equal(DutyStep.Start, cycle.OnTick(1.0));
     }
 
     /// <summary>Switching back on starts a fresh cycle, so the burst begins with its warm-up again

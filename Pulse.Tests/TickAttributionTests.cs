@@ -250,6 +250,29 @@ public class TickAttributionTests
         Assert.False(attribution.Profiling);
     }
 
+    /// <summary>What a burst had folded when it was cut short, by a reload or by switching attribution
+    /// off and on, is thrown away with it: the next burst publishes its own samples and nothing of the
+    /// ones that were dropped.</summary>
+    [Fact]
+    public void Apply_Clears_WhatTheBurstInProgressHadFolded()
+    {
+        TickAttribution attribution = new(3, 1);
+
+        // The start, the warm-up and two of the three samples: cut short just before the last.
+        for (int tick = 0; tick < 4; tick++)
+        {
+            Assert.Null(attribution.OnTick(1.0, Tick(), Owners));
+        }
+
+        attribution.Apply(true, 3, 1);
+        AttributionBurst burst = Cycle(attribution, Tick(), Owners);
+        AttributionBurst fresh = Cycle(new TickAttribution(3, 1), Tick(), Owners);
+
+        Assert.Equal(fresh.Ticks, burst.Ticks);
+        Assert.Equal(fresh.BusySeconds, burst.BusySeconds, 12);
+        Assert.Equal(fresh.Seconds, burst.Seconds);
+    }
+
     /// <summary>Re-enabling starts a fresh cycle, so the stale tree the profiler left behind while
     /// it was off is discarded rather than folded into the first burst.</summary>
     [Fact]
