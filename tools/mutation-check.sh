@@ -505,8 +505,12 @@ mutate Pulse/StratumTimingsSource.cs \
     "stratum binder: a server with no Stratum is reported as a failure, so vanilla would log a warning at every boot"
 
 mutate Pulse/StratumTimingsSource.cs \
-    's/is not \{ IsLiteral: true \} field/is not { } field/' \
+    's/declared is not \[FieldInfo \{ IsLiteral: true \} field\]/declared is not [FieldInfo field]/' \
     "stratum binder: a static field is read like a literal, which runs Stratum's type initializer before anything is known about it"
+
+mutate Pulse/StratumTimingsSource.cs \
+    's/if \(declared\.Length == 0\)/if (declared.Length == 0 || declared is not [FieldInfo { IsLiteral: true }])/' \
+    "stratum binder: a ContractVersion that is not an integer literal is called a Stratum that predates the contract, so an admin is told to upgrade a Stratum that is current"
 
 mutate Pulse/StratumTimingsSource.cs \
     's/field\.GetRawConstantValue\(\) is not int version/!int.TryParse(field.GetRawConstantValue()?.ToString(), out int version)/' \
@@ -543,10 +547,6 @@ mutate Pulse/StratumTimingsSource.cs \
 mutate Pulse/StratumTimingsSource.cs \
     's/BindingFlags\.Public \| BindingFlags\.Static, (Type\.EmptyTypes|\[SnapshotInto\])/BindingFlags.Public | BindingFlags.Instance | BindingFlags.Static, \1/' \
     "stratum binder: an instance method is bound as if it were static"
-
-mutate Pulse/StratumTimingsSource.cs \
-    's/GetField\("ContractVersion", BindingFlags\.Public \| BindingFlags\.Static\)/GetField("ContractVersion", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)/' \
-    "stratum binder: an internal ContractVersion is read as the contract's"
 
 mutate Pulse/StratumTimingsSource.cs \
     's/public IDisposable Request\(\) => request\(\);/public IDisposable Request() { request(); return request(); }/' \
@@ -627,20 +627,24 @@ mutate Pulse/StratumFold.cs \
     "stratum fold: stopwatch ticks are multiplied by the frequency instead of divided"
 
 mutate Pulse/StratumFold.cs \
-    's/after >= before \? after - before : after/after/' \
+    's/new Total\(after\.Ticks - before\.Ticks, after\.Calls - before\.Calls\)/new Total(after.Ticks, after.Calls)/' \
     "stratum fold: a burst reports the totals the accumulator ended on instead of what it added"
 
 mutate Pulse/StratumFold.cs \
-    's/after >= before \? after - before : after/after - before/' \
-    "stratum fold: a total that went down is not read as a reset, so the burst adds nothing"
+    's/after\.Ticks >= before\.Ticks \&\& after\.Calls >= before\.Calls/true/' \
+    "stratum fold: a total that went down is not read as a reset, so the series is told to go backwards"
 
 mutate Pulse/StratumFold.cs \
-    's/after >= before \?/after > before ?/' \
+    's/after\.Ticks >= before\.Ticks \&\&/after.Ticks > before.Ticks \&\&/' \
     "stratum fold: a total that did not move is read as a reset, so the burst adds all of it again"
 
 mutate Pulse/StratumFold.cs \
-    's/Math\.Max\(0, after >= before \? after - before : after\)/(after >= before ? after - before : after)/' \
+    's/Math\.Max\(0, after\.Ticks\)/after.Ticks/' \
     "stratum fold: a negative total runs a counter backwards"
+
+mutate Pulse/StratumFold.cs \
+    's/ \&\& after\.Calls >= before\.Calls//' \
+    "stratum fold: a key is reset when its ticks went down and not when its calls did, so a count that went down is paired with a delta"
 
 mutate Pulse/StratumFold.cs \
     's/startTotals\.Clear\(\);//' \
@@ -648,7 +652,7 @@ mutate Pulse/StratumFold.cs \
 
 mutate Pulse/StratumFold.cs \
     's/startTotals\.TryGetValue\(key, out Total before\);/if (!startTotals.TryGetValue(key, out Total before)) { continue; }/' \
-    "stratum fold: a key that appeared during the burst is dropped, which is every key of the usual burst"
+    "stratum fold: a key that appeared during the burst is dropped, so a type that did not run in the warm-up tick never gets a series"
 
 mutate Pulse/StratumFold.cs \
     's/deltas\[series\] = deltas\.GetValueOrDefault\(series\) \+ added;/deltas[series] = added;/' \
@@ -687,27 +691,23 @@ mutate Pulse/StratumFold.cs \
     "stratum fold: two equally heavy new series are admitted in whatever order the accumulator listed them, by thread"
 
 mutate Pulse/StratumFold.cs \
-    's/spill\[entry\.Key\.Family\] = spill\.GetValueOrDefault\(entry\.Key\.Family\) \+ entry\.Value;/spill[entry.Key.Family] = entry.Value;/' \
+    's/spill\[lump\] = spill\.GetValueOrDefault\(lump\) \+ entry\.Value;/spill[lump] = entry.Value;/' \
     "stratum fold: what spills over replaces what spilled before it in the burst instead of adding to it"
+
+mutate Pulse/StratumFold.cs \
+    's/entry\.Key with \{ Name = Other \}/entry.Key/' \
+    "stratum fold: the overflow series keeps the name of the key that spilled, so the cap bounds nothing"
 
 mutate Pulse/StratumFold.cs \
     's/admitted\[entry\.Key\.Family\]/admitted[StratumFamily.Entity]/' \
     "stratum fold: the families share one set of places, so a full family spills the others"
 
 mutate Pulse/StratumFold.cs \
-    's/new BehaviorDelta\(Other, Other, Other, Other, seconds\)/new BehaviorDelta(Other, Other, "false", TickAttribution.Unattributed, seconds)/' \
-    "stratum fold: the behavior overflow series keeps a thread and an owner, so it is not the one series it is meant to be"
-
-mutate Pulse/StratumFold.cs \
-    's/new TaskDelta\(Other, Other, seconds\)/new TaskDelta("creatures", Other, seconds)/' \
-    "stratum fold: the task overflow series keeps a category, so it is not the one series it is meant to be"
-
-mutate Pulse/StratumFold.cs \
-    's/if \(overflowed\.Add\(family\)\)/if (true)/' \
+    's/if \(overflowed\.Add\(lump\.Family\)\)/if (true)/' \
     "stratum fold: a family is reported as spilling for the first time at every burst it spills in"
 
 mutate Pulse/StratumFold.cs \
-    's/key\.ThreadSafe \? "true" : "false"/key.ThreadSafe ? "True" : "False"/' \
+    's/threadSafe \? "true" : "false"/threadSafe ? "True" : "False"/' \
     "stratum fold: the thread label is spelled the way a bool prints, not the way the families promise"
 
 mutate Pulse/StratumFold.cs \

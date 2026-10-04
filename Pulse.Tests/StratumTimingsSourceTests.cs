@@ -59,21 +59,34 @@ public class StratumTimingsSourceTests
     public void ContractVersion_Is_TheOneTheFakeDeclares()
         => Assert.Equal(StratumEntityBehaviorTimings.ContractVersion, StratumTimingsSource.ContractVersion);
 
-    /// <summary>Every row of the failure table that has to be settled before anything is wired: the
-    /// type is there, and there is no <c>ContractVersion</c> that is an integer literal. A Stratum
-    /// that has not released the contract looks like the first; the others are shapes that cannot be
-    /// read without running Stratum's code or that are not the contract's.</summary>
+    /// <summary>Every row of the failure table that has to be settled before anything is wired. The
+    /// type is there and has no public <c>ContractVersion</c>: a Stratum that has not released the
+    /// contract looks like that, and the reason names the release that has one. One that is not
+    /// public is as absent from the contract's surface as one that is missing.</summary>
     [Theory]
     [InlineData(nameof(NoContractVersion))]
-    [InlineData(nameof(ReadonlyContractVersion))]
-    [InlineData(nameof(LongContractVersion))]
     [InlineData(nameof(NonPublicContractVersion))]
-    [InlineData(nameof(PropertyContractVersion))]
-    public void TryBind_Refuses_AStratumWithoutAnIntegerLiteralContractVersion_AndNamesTheVersionItNeeds(string fake)
+    public void TryBind_Refuses_AStratumWithoutAPublicContractVersion_AndNamesTheVersionItNeeds(string fake)
     {
         Assert.Null(StratumTimingsSource.TryBind(Fake(fake), out string? reason));
 
         Assert.Equal(Predates + StratumTimingsSource.MinimumStratumVersion + " or later is needed", reason);
+    }
+
+    /// <summary>A <c>ContractVersion</c> that is there but is not an integer literal (a static field,
+    /// which Stratum's initializer would have to run to read, a long, a property) is not a Stratum
+    /// that predates the contract, and must not be told to upgrade a Stratum that is current: it has
+    /// the name and not the shape.</summary>
+    [Theory]
+    [InlineData(nameof(ReadonlyContractVersion))]
+    [InlineData(nameof(LongContractVersion))]
+    [InlineData(nameof(PropertyContractVersion))]
+    public void TryBind_Refuses_AContractVersionThatIsNotAnIntegerLiteral_AsTheWrongShape_NotAsAnOldStratum(string fake)
+    {
+        Assert.Null(StratumTimingsSource.TryBind(Fake(fake), out string? reason));
+
+        Assert.Equal(MissingMembers, reason);
+        Assert.DoesNotContain("predates", reason);
     }
 
     /// <summary>The version a Stratum reports is compared for equality, not for order: an older
@@ -142,8 +155,9 @@ public class StratumTimingsSourceTests
 
     /// <summary>The three delegate calls a burst makes, end to end: a lease, a snapshot at each end,
     /// the totals moving in between, and the fold turning the two snapshots into what the burst
-    /// added. The accumulator starts the burst empty, which is how a real one does when the last
-    /// reader had let go, so every key appears during it.</summary>
+    /// added. The baseline is taken on the warm-up tick, once recording is on, so it already holds
+    /// the keys that ran in that tick; a key that did not run until the burst is only in the second
+    /// snapshot. Whole seconds, which come out exact whatever the stopwatch's frequency is.</summary>
     [Fact]
     public void ABurst_ReadThroughTheBinder_FoldsIntoWhatItAdded()
     {
@@ -154,24 +168,29 @@ public class StratumTimingsSourceTests
 
         using (source.Request())
         {
+            // The warm-up tick.
+            StratumEntityBehaviorTimings.Totals["entity.type.wolf-eurasian-adult-male"] = (Stopwatch.Frequency, 5);
+            StratumEntityBehaviorTimings.Totals["entity.type.wolf-eurasian-adult-female"] = (Stopwatch.Frequency, 2);
             source.Snapshot(start);
-            StratumEntityBehaviorTimings.Totals["entity.type.wolf-eurasian-adult-male"] = (Stopwatch.Frequency / 2, 5);
-            StratumEntityBehaviorTimings.Totals["entity.type.wolf-eurasian-adult-female"] = (Stopwatch.Frequency / 2, 3);
-            StratumEntityBehaviorTimings.Totals["entity.ai.creatures.task.idle"] = (Stopwatch.Frequency / 4, 8);
+
+            // The measured ticks.
+            StratumEntityBehaviorTimings.Totals["entity.type.wolf-eurasian-adult-male"] = (Stopwatch.Frequency * 3, 9);
+            StratumEntityBehaviorTimings.Totals["entity.type.wolf-eurasian-adult-female"] = (Stopwatch.Frequency * 2, 3);
+            StratumEntityBehaviorTimings.Totals["entity.ai.creatures.task.idle"] = (Stopwatch.Frequency, 8);
             source.Snapshot(end);
         }
 
         StratumBurst burst = fold.Fold(start, end);
 
-        Assert.Empty(start);
+        Assert.Equal(2, start.Count);
         Assert.Equal(1, StratumEntityBehaviorTimings.LeasesRequested);
         Assert.Equal(1, StratumEntityBehaviorTimings.LeasesReleased);
         EntityDelta wolf = Assert.Single(burst.Entities);
         Assert.Equal("wolf", wolf.Type);
-        Assert.Equal(1.0, wolf.Seconds, 9);
-        Assert.Equal(8, wolf.Calls);
+        Assert.Equal(3.0, wolf.Seconds);
+        Assert.Equal(5, wolf.Calls);
         TaskDelta idle = Assert.Single(burst.Tasks);
-        Assert.Equal(0.25, idle.Seconds, 9);
+        Assert.Equal(1.0, idle.Seconds);
     }
 
     // The contract's members, in the shapes the fakes below break one at a time. Nothing here is
@@ -201,6 +220,7 @@ public class StratumTimingsSourceTests
         }
     }
 
+    // A literal, but not an int.
     private static class LongContractVersion
     {
         public const long ContractVersion = 1;
@@ -212,6 +232,7 @@ public class StratumTimingsSourceTests
         }
     }
 
+    // Not part of the public surface the contract is read from.
     private static class NonPublicContractVersion
     {
         internal const int ContractVersion = 1;
@@ -223,6 +244,7 @@ public class StratumTimingsSourceTests
         }
     }
 
+    // Not a field at all.
     private static class PropertyContractVersion
     {
         public static int ContractVersion => 1;

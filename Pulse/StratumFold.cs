@@ -31,18 +31,27 @@ internal sealed record StratumBurst(
 /// without a server or a Stratum. The accumulator's totals are cumulative, which is why a burst is
 /// a difference of two snapshots and never a read of one.
 /// <para>A key that is not in the first snapshot appeared during the burst, and everything it
-/// holds was added in it: Stratum empties its accumulator when the last reader lets go, so a burst
-/// usually opens on nothing and this is every key. A key that is not in the second says nothing. A total that went down was reset
-/// in between, so what it holds now is what the burst added. A key the burst added nothing to is not
-/// a series yet: it takes none of the places the cap hands out, and an instrument nothing has
-/// recorded into is not served.</para>
+/// holds was added in it. Stratum empties its accumulator when the last reader lets go, so the first
+/// snapshot is meant to be taken on the burst's warm-up tick, once recording is on: it then holds
+/// nearly every key, and what is missing from it is a type or a task that did not run in that tick.
+/// A key that is not in the second snapshot says nothing. A key with a total that went down, ticks
+/// or calls, was reset in between, and is taken as the second snapshot holds it, both totals, so
+/// that what it holds now is what the burst added. A key the burst added nothing to is not a series
+/// yet: it takes none of the places the cap hands out, and an instrument nothing has recorded into
+/// is not served.</para>
 /// <para>The labels are bounded by registries rather than by load, but a pathological mod list can
 /// still push them out, so each family keeps at most <c>cap</c> series. The first label sets to
-/// appear get their own and keep it for the life of the server; everything after is added to one
-/// series per family whose labels all read <c>other</c>. Nothing is ever evicted or re-ranked: a
-/// series that moved in and out of <c>other</c> would make <c>other</c> go down, which Prometheus
-/// reads as a counter reset. When a burst brings several new label sets at once, as the first one
-/// does, the heaviest are admitted first, so what ends up lumped together is the cheap tail.</para>
+/// appear get their own and keep it for the life of the server; the rest are added to an overflow
+/// series whose name label (<c>behavior</c>, <c>task</c> or <c>type</c>, and the <c>modid</c> that
+/// goes with a behavior's name) reads <c>other</c>. The category and the thread stay on it: the
+/// thread separates CPU time summed across the physics threads from main-thread time, and a panel
+/// that filters on it must not lose what overflowed. So a family has one overflow series for each
+/// category and thread it spilled in, which with Stratum's three categories is at most four for
+/// behaviors (main-thread behaviors are timed for players only), three for tasks and one for entity
+/// types. Nothing is ever evicted or re-ranked: a series that moved in and out of <c>other</c>
+/// would make <c>other</c> go down, which Prometheus reads as a counter reset. When a burst brings
+/// several new label sets at once, as the first one does, the heaviest are admitted first, so what
+/// ends up lumped together is the cheap tail.</para>
 /// <para>The <c>modid</c> of a behavior is looked up through the same table attribution uses,
 /// every burst: it is a function of the behavior name, but a name only that table learns late
 /// (from an entity spawned mid-burst) changes owner once, from <c>unattributed</c> to its mod, and
@@ -57,7 +66,7 @@ internal sealed class StratumFold(Func<string, string?> owner, int cap = Stratum
     /// <summary>How many series of each family get a label set of their own.</summary>
     internal const int SeriesCap = 100;
 
-    /// <summary>The value of every label of a family's overflow series: the word the entity gauge
+    /// <summary>The value of the name label of an overflow series: the word the entity gauge
     /// already uses for its own remainder.</summary>
     private const string Other = EntityBreakdown.OtherCode;
 
@@ -81,7 +90,7 @@ internal sealed class StratumFold(Func<string, string?> owner, int cap = Stratum
         IReadOnlyList<(string Key, long Ticks, long Calls)> start,
         IReadOnlyList<(string Key, long Ticks, long Calls)> end)
     {
-        (List<KeyValuePair<StratumKey, Total>> kept, Dictionary<StratumFamily, Total> spill) = Admit(Deltas(start, end));
+        (List<KeyValuePair<StratumKey, Total>> kept, Dictionary<StratumKey, Total> spill) = Admit(Deltas(start, end));
 
         List<BehaviorDelta> behaviors = [];
         List<TaskDelta> tasks = [];
@@ -95,7 +104,7 @@ internal sealed class StratumFold(Func<string, string?> owner, int cap = Stratum
                     behaviors.Add(new BehaviorDelta(
                         key.Category,
                         key.Name,
-                        key.ThreadSafe ? "true" : "false",
+                        ThreadLabel(key.ThreadSafe),
                         owner(key.Name) ?? TickAttribution.Unattributed,
                         seconds));
                     break;
@@ -109,25 +118,28 @@ internal sealed class StratumFold(Func<string, string?> owner, int cap = Stratum
         }
 
         List<StratumFamily> capped = [];
-        foreach ((StratumFamily family, Total total) in spill)
+        foreach ((StratumKey lump, Total total) in spill)
         {
             double seconds = Seconds(total.Ticks);
-            switch (family)
+            switch (lump.Family)
             {
                 case StratumFamily.Behavior:
-                    behaviors.Add(new BehaviorDelta(Other, Other, Other, Other, seconds));
+                    // A name that stands for many behaviors has no owner to look up: the modid
+                    // follows the name.
+                    behaviors.Add(new BehaviorDelta(
+                        lump.Category, lump.Name, ThreadLabel(lump.ThreadSafe), Other, seconds));
                     break;
                 case StratumFamily.AiTask:
-                    tasks.Add(new TaskDelta(Other, Other, seconds));
+                    tasks.Add(new TaskDelta(lump.Category, lump.Name, seconds));
                     break;
                 default:
-                    entities.Add(new EntityDelta(Other, seconds, total.Calls));
+                    entities.Add(new EntityDelta(lump.Name, seconds, total.Calls));
                     break;
             }
 
-            if (overflowed.Add(family))
+            if (overflowed.Add(lump.Family))
             {
-                capped.Add(family);
+                capped.Add(lump.Family);
             }
         }
 
@@ -135,8 +147,8 @@ internal sealed class StratumFold(Func<string, string?> owner, int cap = Stratum
     }
 
     /// <summary>Splits the burst's deltas into the ones that land on a series of their own and what
-    /// spills into each family's overflow series.</summary>
-    private (List<KeyValuePair<StratumKey, Total>> Kept, Dictionary<StratumFamily, Total> Spill) Admit(
+    /// spills into the overflow series, keyed by the key it came from with its name replaced.</summary>
+    private (List<KeyValuePair<StratumKey, Total>> Kept, Dictionary<StratumKey, Total> Spill) Admit(
         Dictionary<StratumKey, Total> deltas)
     {
         List<KeyValuePair<StratumKey, Total>> kept = [];
@@ -160,7 +172,7 @@ internal sealed class StratumFold(Func<string, string?> owner, int cap = Stratum
             .ThenBy(candidate => candidate.Key.Name, StringComparer.Ordinal)
             .ThenBy(candidate => candidate.Key.ThreadSafe);
 
-        Dictionary<StratumFamily, Total> spill = [];
+        Dictionary<StratumKey, Total> spill = [];
         foreach (KeyValuePair<StratumKey, Total> entry in heaviestFirst)
         {
             HashSet<StratumKey> room = admitted[entry.Key.Family];
@@ -171,7 +183,10 @@ internal sealed class StratumFold(Func<string, string?> owner, int cap = Stratum
             }
             else
             {
-                spill[entry.Key.Family] = spill.GetValueOrDefault(entry.Key.Family) + entry.Value;
+                // Only the name is lumped. What the category and the thread say about the seconds
+                // is not something to lose to the cap.
+                StratumKey lump = entry.Key with { Name = Other };
+                spill[lump] = spill.GetValueOrDefault(lump) + entry.Value;
             }
         }
 
@@ -198,7 +213,7 @@ internal sealed class StratumFold(Func<string, string?> owner, int cap = Stratum
             }
 
             startTotals.TryGetValue(key, out Total before);
-            Total added = new(Delta(before.Ticks, ticks), Delta(before.Calls, calls));
+            Total added = Added(before, new Total(ticks, calls));
             if (added != default)
             {
                 deltas[series] = deltas.GetValueOrDefault(series) + added;
@@ -208,10 +223,16 @@ internal sealed class StratumFold(Func<string, string?> owner, int cap = Stratum
         return deltas;
     }
 
-    /// <summary>What a cumulative total gained between two readings. One that went down was reset
-    /// in between, so all of it was gained since; one that is negative is nonsense, and must not run
-    /// a counter backwards.</summary>
-    private static long Delta(long before, long after) => Math.Max(0, after >= before ? after - before : after);
+    /// <summary>What a key's two totals gained between two readings. If either went down the key was
+    /// reset in between, so both are taken as they stand: all of what they hold was gained since,
+    /// and an end value paired with a delta would be seconds and a count that are not each other's.
+    /// A total that is negative is nonsense, and must not run a counter backwards.</summary>
+    private static Total Added(Total before, Total after)
+        => after.Ticks >= before.Ticks && after.Calls >= before.Calls
+            ? new Total(after.Ticks - before.Ticks, after.Calls - before.Calls)
+            : new Total(Math.Max(0, after.Ticks), Math.Max(0, after.Calls));
+
+    private static string ThreadLabel(bool threadSafe) => threadSafe ? "true" : "false";
 
     private static double Seconds(long ticks) => ticks / (double)Stopwatch.Frequency;
 

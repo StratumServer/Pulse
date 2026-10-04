@@ -10,9 +10,14 @@ namespace Pulse.Tests;
 
 public class StratumFoldTests
 {
-    /// <summary>The stopwatch ticks of <paramref name="seconds"/>. The tests use halves and
-    /// quarters, which are exact as seconds whatever the platform's frequency is.</summary>
-    private static long Ticks(double seconds) => (long)(seconds * Stopwatch.Frequency);
+    /// <summary>How far a number of seconds may be from what it should be: a few stopwatch ticks. A
+    /// reading is a whole number of ticks and a platform's frequency need not divide a quarter of a
+    /// second into them evenly, so the seconds a fold reports are compared within this and never
+    /// exactly.</summary>
+    private static readonly double Tolerance = 4.0 / Stopwatch.Frequency;
+
+    /// <summary>The stopwatch ticks of <paramref name="seconds"/>, to the nearest tick.</summary>
+    private static long Ticks(double seconds) => (long)Math.Round(seconds * Stopwatch.Frequency);
 
     /// <summary>One accumulator entry, as the snapshot reports it.</summary>
     private static (string Key, long Ticks, long Calls) Reading(string key, double seconds, long calls = 0)
@@ -21,11 +26,36 @@ public class StratumFoldTests
     private static StratumFold NewFold(int cap = StratumFold.SeriesCap, OwnerLookup? owner = null)
         => new(owner ?? (_ => null), cap);
 
+    private static void AssertSeconds(double expected, double actual) => Assert.Equal(expected, actual, Tolerance);
+
+    /// <summary>Compares what a burst reported with what it should have: the labels and the counts
+    /// exactly, the seconds within <see cref="Tolerance"/>, and in no particular order, since the
+    /// order of the series is the fold's business.</summary>
     private static void AssertSeries<T>(IEnumerable<T> expected, IEnumerable<T> actual)
         where T : notnull
-        => Assert.Equal(
-            expected.OrderBy(series => series.ToString(), StringComparer.Ordinal),
-            actual.OrderBy(series => series.ToString(), StringComparer.Ordinal));
+    {
+        List<(string Labels, double Seconds, long Calls)> want = Described(expected);
+        List<(string Labels, double Seconds, long Calls)> got = Described(actual);
+
+        Assert.Equal(want.Select(series => series.Labels), got.Select(series => series.Labels));
+        for (int i = 0; i < want.Count; i++)
+        {
+            AssertSeconds(want[i].Seconds, got[i].Seconds);
+            Assert.Equal(want[i].Calls, got[i].Calls);
+        }
+    }
+
+    private static List<(string Labels, double Seconds, long Calls)> Described<T>(IEnumerable<T> series)
+        where T : notnull
+        => [.. series.Select(one => Describe(one)).OrderBy(one => one.Labels, StringComparer.Ordinal)];
+
+    private static (string Labels, double Seconds, long Calls) Describe(object series) => series switch
+    {
+        BehaviorDelta b => ($"behavior|{b.Category}|{b.Behavior}|{b.ThreadSafe}|{b.Modid}", b.Seconds, 0),
+        TaskDelta t => ($"task|{t.Category}|{t.Task}", t.Seconds, 0),
+        EntityDelta e => ($"entity|{e.Type}", e.Seconds, e.Calls),
+        _ => throw new ArgumentException(series.GetType().Name + " is not a series"),
+    };
 
     private static EntityDelta Entity(StratumBurst burst, string type) => burst.Entities.Single(e => e.Type == type);
 
@@ -40,7 +70,7 @@ public class StratumFoldTests
             [Reading("entity.type.wolf-eurasian-adult-male", 3.0, 30)]);
 
         EntityDelta wolf = Assert.Single(burst.Entities);
-        Assert.Equal(2.0, wolf.Seconds, 9);
+        AssertSeconds(2.0, wolf.Seconds);
         Assert.Equal(20, wolf.Calls);
     }
 
@@ -49,18 +79,31 @@ public class StratumFoldTests
     {
         StratumBurst burst = NewFold().Fold([], [("entity.ai.creatures.task.idle", Stopwatch.Frequency * 5, 1)]);
 
-        Assert.Equal(5.0, Assert.Single(burst.Tasks).Seconds, 9);
+        Assert.Equal(5.0, Assert.Single(burst.Tasks).Seconds);
     }
 
-    /// <summary>The usual case: the accumulator is emptied when its last reader lets go, so a burst
-    /// opens on nothing and every key it sees appeared during it.</summary>
+    /// <summary>A key the baseline does not hold appeared during the burst, and everything it holds was
+    /// added in it. The baseline is taken on the warm-up tick, so what is missing from it is a type or
+    /// a task that did not run in that tick; on an empty accumulator it is every key.</summary>
     [Fact]
     public void Fold_Takes_EverythingAKeyHolds_WhenItAppearedDuringTheBurst()
+    {
+        StratumBurst burst = NewFold().Fold(
+            [Reading("entity.type.hare-a", 1.0, 1)],
+            [Reading("entity.type.hare-a", 1.0, 1), Reading("entity.type.wolf-a", 2.0, 7)]);
+
+        EntityDelta wolf = Assert.Single(burst.Entities);
+        AssertSeconds(2.0, wolf.Seconds);
+        Assert.Equal(7, wolf.Calls);
+    }
+
+    [Fact]
+    public void Fold_Takes_EverythingAKeyHolds_WhenTheBaselineIsEmpty()
     {
         StratumBurst burst = NewFold().Fold([], [Reading("entity.type.wolf-a", 2.0, 7)]);
 
         EntityDelta wolf = Assert.Single(burst.Entities);
-        Assert.Equal(2.0, wolf.Seconds, 9);
+        AssertSeconds(2.0, wolf.Seconds);
         Assert.Equal(7, wolf.Calls);
     }
 
@@ -84,8 +127,26 @@ public class StratumFoldTests
             [Reading("entity.type.wolf-a", 0.5, 5)]);
 
         EntityDelta wolf = Assert.Single(burst.Entities);
-        Assert.Equal(0.5, wolf.Seconds, 9);
+        AssertSeconds(0.5, wolf.Seconds);
         Assert.Equal(5, wolf.Calls);
+    }
+
+    /// <summary>A key is reset as a whole: when either of its totals went down, both are taken as
+    /// they stand. An end value paired with a delta would be seconds and a count that are not each
+    /// other's, and the seconds per entity tick would be wrong for the burst.</summary>
+    [Theory]
+    [InlineData(4.0, 10L, 1.0, 12L, 1.0, 12L)] // the seconds went down, the count went up
+    [InlineData(1.0, 10L, 2.0, 4L, 2.0, 4L)] // the count went down, the seconds went up
+    public void Fold_Takes_BothTotals_WhenEitherOfThemWentDown(
+        double startSeconds, long startCalls, double endSeconds, long endCalls, double seconds, long calls)
+    {
+        StratumBurst burst = NewFold().Fold(
+            [Reading("entity.type.wolf-a", startSeconds, startCalls)],
+            [Reading("entity.type.wolf-a", endSeconds, endCalls)]);
+
+        EntityDelta wolf = Assert.Single(burst.Entities);
+        AssertSeconds(seconds, wolf.Seconds);
+        Assert.Equal(calls, wolf.Calls);
     }
 
     /// <summary>A total never goes below zero, and a counter must not run backwards over one that
@@ -99,7 +160,7 @@ public class StratumFoldTests
 
         EntityDelta hare = Assert.Single(burst.Entities);
         Assert.Equal("hare", hare.Type);
-        Assert.Equal(1.0, hare.Seconds, 9);
+        AssertSeconds(1.0, hare.Seconds);
     }
 
     [Fact]
@@ -136,7 +197,7 @@ public class StratumFoldTests
         StratumBurst burst = fold.Fold([], [Reading("entity.type.wolf-a", 1.0, 5)]);
 
         EntityDelta wolf = Assert.Single(burst.Entities);
-        Assert.Equal(1.0, wolf.Seconds, 9);
+        AssertSeconds(1.0, wolf.Seconds);
         Assert.Equal(5, wolf.Calls);
     }
 
@@ -298,7 +359,7 @@ public class StratumFoldTests
         Assert.Equal(TickAttribution.Unattributed, Assert.Single(first.Behaviors).Modid);
         BehaviorDelta moved = Assert.Single(second.Behaviors);
         Assert.Equal("mymod", moved.Modid);
-        Assert.Equal(2.0, moved.Seconds, 9);
+        AssertSeconds(2.0, moved.Seconds);
     }
 
     /// <summary>The cap counts label sets that have a name, not the owner they are filed under: a
@@ -328,7 +389,7 @@ public class StratumFoldTests
 
         Assert.Equal(100, StratumFold.SeriesCap);
         Assert.Equal(101, burst.Entities.Count);
-        Assert.Equal(new EntityDelta("other", 1.0, 1), Entity(burst, "other"));
+        AssertSeries([new EntityDelta("other", 1.0, 1)], [Entity(burst, "other")]);
     }
 
     [Fact]
@@ -380,6 +441,8 @@ public class StratumFoldTests
         Assert.Contains(burst.Entities, entity => entity.Type == "a");
     }
 
+    /// <summary>The overflow series of the one that was not admitted shares its category, so it is the
+    /// name that tells the two apart.</summary>
     [Fact]
     public void Fold_Admits_EquallyHeavySeries_ByTheirCategory()
     {
@@ -387,7 +450,7 @@ public class StratumFoldTests
             [],
             [Reading("entity.behavior.players.fancy", 1.0), Reading("entity.behavior.creatures.fancy", 1.0)]);
 
-        Assert.Contains(burst.Behaviors, behavior => behavior.Category == "creatures");
+        Assert.Contains(burst.Behaviors, behavior => behavior.Category == "creatures" && behavior.Behavior == "fancy");
     }
 
     [Fact]
@@ -400,7 +463,7 @@ public class StratumFoldTests
                 Reading("entity.behavior.players.fancy", 1.0),
             ]);
 
-        Assert.Contains(burst.Behaviors, behavior => behavior.ThreadSafe == "false");
+        Assert.Contains(burst.Behaviors, behavior => behavior.ThreadSafe == "false" && behavior.Behavior == "fancy");
     }
 
     /// <summary>A series that has a place keeps it for the life of the server, even against a newcomer
@@ -431,7 +494,7 @@ public class StratumFoldTests
 
         StratumBurst burst = fold.Fold([], [Reading("entity.type.b-x", 3.0, 3)]);
 
-        Assert.Equal(new EntityDelta("other", 3.0, 3), Assert.Single(burst.Entities));
+        AssertSeries([new EntityDelta("other", 3.0, 3)], burst.Entities);
     }
 
     /// <summary>A series that already has its place is not counted against the cap again at the
@@ -450,7 +513,8 @@ public class StratumFoldTests
     }
 
     /// <summary>Each family counts its own places: a full family of entity types does not push a
-    /// behavior into other.</summary>
+    /// behavior into other. What spills keeps its category and its thread, and only the name reads
+    /// other.</summary>
     [Fact]
     public void Fold_Caps_EachFamilyOnItsOwn()
     {
@@ -466,28 +530,69 @@ public class StratumFoldTests
             ]);
 
         AssertSeries(
-            [new BehaviorDelta("players", "health", "false", TickAttribution.Unattributed, 2.0), new BehaviorDelta("other", "other", "other", "other", 1.0)],
+            [
+                new BehaviorDelta("players", "health", "false", TickAttribution.Unattributed, 2.0),
+                new BehaviorDelta("players", "other", "false", "other", 1.0),
+            ],
             burst.Behaviors);
-        AssertSeries([new TaskDelta("creatures", "idle", 2.0), new TaskDelta("other", "other", 1.0)], burst.Tasks);
+        AssertSeries([new TaskDelta("creatures", "idle", 2.0), new TaskDelta("creatures", "other", 1.0)], burst.Tasks);
         AssertSeries([new EntityDelta("a", 2.0, 2), new EntityDelta("other", 1.0, 1)], burst.Entities);
     }
 
-    /// <summary>Every label of the overflow series reads other, so it is one series per family and
-    /// not one per category and thread.</summary>
+    /// <summary>What overflows keeps its category and its thread. The thread separates CPU time summed
+    /// across the physics threads from main-thread time, so a panel that filters on it must not lose
+    /// what the cap lumped together; only the name, and the owner that goes with it, read other. That
+    /// is up to four overflow series for behaviors (players on either thread, creatures and inanimate
+    /// on the physics threads), and the keys that spill into the same one add up.</summary>
     [Fact]
-    public void Fold_Folds_EveryKindOfBehaviorThatSpills_IntoOneOtherSeries()
+    public void Fold_Lumps_WhatSpillsOfTheBehaviors_ByCategoryAndThread_AndOnlyTheNameReadsOther()
     {
         StratumBurst burst = NewFold(cap: 1).Fold(
             [],
             [
-                Reading("entity.behavior.players.health", 8.0),
+                Reading("entity.behavior.players.health", 16.0),
                 Reading("entity.behavior.players.fancy", 1.0),
-                Reading("entity.behavior.threadsafe.creatures.done-behavior-physics", 0.5),
+                Reading("entity.behavior.players.fancier", 0.5),
+                Reading("entity.behavior.threadsafe.players.done-behavior-physics", 0.125),
+                Reading("entity.behavior.threadsafe.creatures.done-behavior-physics", 4.0),
+                Reading("entity.behavior.threadsafe.creatures.done-behavior-harvestable", 2.0),
                 Reading("entity.behavior.threadsafe.inanimate.done-behavior-physics", 0.25),
             ]);
 
-        BehaviorDelta other = Assert.Single(burst.Behaviors, behavior => behavior.Behavior == "other");
-        Assert.Equal(new BehaviorDelta("other", "other", "other", "other", 1.75), other);
+        AssertSeries(
+            [
+                new BehaviorDelta("players", "health", "false", TickAttribution.Unattributed, 16.0),
+                new BehaviorDelta("players", "other", "false", "other", 1.5),
+                new BehaviorDelta("players", "other", "true", "other", 0.125),
+                new BehaviorDelta("creatures", "other", "true", "other", 6.0),
+                new BehaviorDelta("inanimate", "other", "true", "other", 0.25),
+            ],
+            burst.Behaviors);
+    }
+
+    /// <summary>The same for tasks, which have a category and no thread: up to three overflow series,
+    /// and the entity types, which have neither, keep a single one.</summary>
+    [Fact]
+    public void Fold_Lumps_WhatSpillsOfTheTasks_ByCategory()
+    {
+        StratumBurst burst = NewFold(cap: 1).Fold(
+            [],
+            [
+                Reading("entity.ai.creatures.task.idle", 8.0),
+                Reading("entity.ai.creatures.task.flee", 1.0),
+                Reading("entity.ai.creatures.task.wander", 0.5),
+                Reading("entity.ai.inanimate.task.idle", 2.0),
+                Reading("entity.ai.players.task.idle", 0.25),
+            ]);
+
+        AssertSeries(
+            [
+                new TaskDelta("creatures", "idle", 8.0),
+                new TaskDelta("creatures", "other", 1.5),
+                new TaskDelta("inanimate", "other", 2.0),
+                new TaskDelta("players", "other", 0.25),
+            ],
+            burst.Tasks);
     }
 
     [Fact]
@@ -500,7 +605,8 @@ public class StratumFoldTests
     }
 
     /// <summary>The burst that first pushes a family into its overflow series says so, once, so that
-    /// what the caller logs is one line the first time and nothing after.</summary>
+    /// what the caller logs is one line the first time and nothing after, however many categories of
+    /// the family spilled.</summary>
     [Fact]
     public void Fold_Reports_AFamilySpillingForTheFirstTime_OnceOnly()
     {
@@ -509,7 +615,12 @@ public class StratumFoldTests
         StratumBurst second = fold.Fold([], [Reading("entity.type.a-x", 2.0), Reading("entity.type.c-x", 1.0)]);
         StratumBurst third = fold.Fold(
             [],
-            [Reading("entity.type.a-x", 2.0), Reading("entity.ai.creatures.task.idle", 2.0), Reading("entity.ai.creatures.task.flee", 1.0)]);
+            [
+                Reading("entity.type.a-x", 2.0),
+                Reading("entity.ai.creatures.task.idle", 2.0),
+                Reading("entity.ai.creatures.task.flee", 1.0),
+                Reading("entity.ai.inanimate.task.idle", 0.5),
+            ]);
 
         Assert.Equal([StratumFamily.Entity], first.NewlyOverflowed);
         Assert.Empty(second.NewlyOverflowed);
@@ -529,7 +640,7 @@ public class StratumFoldTests
             ]);
 
         AssertSeries(
-            [new TaskDelta("creatures", "idle", 3.0), new TaskDelta("inanimate", "idle", 2.0), new TaskDelta("other", "other", 1.0)],
+            [new TaskDelta("creatures", "idle", 3.0), new TaskDelta("inanimate", "idle", 2.0), new TaskDelta("players", "other", 1.0)],
             burst.Tasks);
     }
 
@@ -569,7 +680,7 @@ public class StratumFoldTests
         {
             long ticks = totals.Where(t => t.Key.StartsWith("entity.type." + type + "-")).Sum(t => t.Value.Ticks);
             long calls = totals.Where(t => t.Key.StartsWith("entity.type." + type + "-")).Sum(t => t.Value.Calls);
-            Assert.Equal(ticks / (double)Stopwatch.Frequency, told[type].Seconds, 12);
+            Assert.Equal(ticks / (double)Stopwatch.Frequency, told[type].Seconds, 1e-9);
             Assert.Equal(calls, told[type].Calls);
         }
     }

@@ -15,7 +15,9 @@ namespace Pulse;
 /// read the same as vanilla's and Stratum releases often, so a list of known versions would always
 /// be stale. <c>ContractVersion</c> is a literal that Stratum bumps only when a member changes
 /// shape or meaning, never on additions: a Stratum without it predates the contract, one with
-/// another number has a contract this Pulse does not know, and neither is guessed at.</para>
+/// another number has a contract this Pulse does not know, one that has it as anything but an
+/// integer literal does not have the shape the contract promises, and none of them is guessed
+/// at.</para>
 /// <para>Every member of the contract is public, so nothing here asks for
 /// <c>BindingFlags.NonPublic</c>, and only framework types cross the boundary (<see cref="IDisposable"/>
 /// and a list of value tuples), so the delegates can be typed without the Stratum type at compile
@@ -37,6 +39,8 @@ internal sealed class StratumTimingsSource(
     /// name. Replace the value with the first release that has it before the feature ships; nothing
     /// else changes, the tests read this constant rather than a copy of it.</remarks>
     internal const string MinimumStratumVersion = "<first release with the reading contract>";
+
+    private const string MissingMembers = "Stratum's reading contract does not have the members its version promises";
 
     private static readonly Type SnapshotInto = typeof(List<(string, long, long)>);
 
@@ -67,13 +71,21 @@ internal sealed class StratumTimingsSource(
             return null;
         }
 
-        // A literal, read from metadata: a static field would have to run the type's initializer
-        // before its value could be read, which is Stratum's code running before Pulse knows it is
-        // looking at a shape it understands.
-        if (type.GetField("ContractVersion", BindingFlags.Public | BindingFlags.Static) is not { IsLiteral: true } field
-            || field.GetRawConstantValue() is not int version)
+        // Nothing public called ContractVersion: a Stratum from before the contract. Anything that is
+        // called that is not, whatever else is wrong with it.
+        MemberInfo[] declared = type.GetMember("ContractVersion", BindingFlags.Public | BindingFlags.Static);
+        if (declared.Length == 0)
         {
             reason = $"this Stratum predates the reading contract; Stratum {MinimumStratumVersion} or later is needed";
+            return null;
+        }
+
+        // An integer literal, read from metadata: a static field would have to run the type's
+        // initializer before its value could be read, which is Stratum's code running before Pulse
+        // knows it is looking at a shape it understands.
+        if (declared is not [FieldInfo { IsLiteral: true } field] || field.GetRawConstantValue() is not int version)
+        {
+            reason = MissingMembers;
             return null;
         }
 
@@ -89,7 +101,7 @@ internal sealed class StratumTimingsSource(
             || snapshot?.ReturnType != typeof(void)
             || snapshot.GetParameters()[0].ParameterType != SnapshotInto)
         {
-            reason = "Stratum's reading contract does not have the members its version promises";
+            reason = MissingMembers;
             return null;
         }
 
