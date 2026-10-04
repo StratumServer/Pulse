@@ -208,7 +208,7 @@ jobs:
       # moved.
       - name: Upload mutation report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-report-${{ matrix.project }}
           path: StrykerOutput/${{ matrix.project }}/reports/mutation-report.json
@@ -217,7 +217,7 @@ jobs:
       # Stryker's trace log: where the time of a slow run went.
       - name: Upload Stryker log
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: stryker-log-${{ matrix.project }}
           path: StrykerOutput/${{ matrix.project }}/logs/

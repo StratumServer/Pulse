@@ -52,7 +52,7 @@ public class AttributionCostScenarios : AtlasScenarioBase
     private const int MeasuredTicks = 100;
     private const double TickBudgetMs = 33.333;
     private const int Pairs = 3;
-    private const int Port = 39475;
+    private const int Port = 29475;
 
     // Matches data/attributioncost/pulse.json's Attribution.BurstTicks: wide open, so a clean
     // "on" MeasureTicks window fits inside one continuous profiled burst regardless of pacing.

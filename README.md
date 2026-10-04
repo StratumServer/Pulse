@@ -72,11 +72,14 @@ the file at all.
 
 Upgrading does not mean editing the file by hand. Each mod checks its config file at startup and
 writes back any key it knows about that the file is missing, with that key's default; the values
-you already set are kept exactly as they are, and the log lists what was added. A key neither mod
-recognises does not survive that rewrite, so it is reported as a warning instead of disappearing
-quietly: usually it is a typo, and the setting you meant has been running on its default. A file
-that already holds every key is not written at all, which matters if you mount `ModConfig`
-read-only or keep it under version control.
+you already set are kept exactly as they are, and the log lists what was written. A key neither
+mod recognises does not survive that rewrite, so it is reported as a warning instead of
+disappearing quietly: usually it is a typo, and the setting you meant has been running on its
+default. A file that already holds every key is not written at all, which matters if you mount
+`ModConfig` read-only or keep it under version control. There is one exception: the OTLP mod's
+`ServiceInstanceId` is not a default but an id the mod generates and writes when the key is missing
+or empty, so on a `ModConfig` mounted read-only you set that key yourself; see
+[OTLP export](#otlp-export).
 
 ## Configuration
 
@@ -117,6 +120,7 @@ The OTLP mod has no reload command: every key below needs a restart to take effe
 | `IntervalSeconds` | `60` | Seconds between two exports. Floored at 5, capped at 86400 (24 hours). | Restart |
 | `IncludeRuntimeMetrics` | `true` | Adds the `System.Runtime` meter to what gets pushed. Independent of the base mod's `RuntimeMetrics`. | Restart |
 | `ServiceName` | `"vintagestory"` | Sets the `service.name` resource attribute. A blank value falls back to `vintagestory`; `OTEL_SERVICE_NAME`, if set, overrides this key. | Restart |
+| `ServiceInstanceId` | `""` | Sets the `service.instance.id` resource attribute, which backends show as the `instance` label. Left blank, Pulse generates an id on startup and writes it back here, so it stays the same across restarts; any other value is used as written, trimmed. `service.instance.id` in `OTEL_RESOURCE_ATTRIBUTES`, if set, overrides this key, and `OTEL_SERVICE_NAME` leaves it unused. | Restart |
 
 ## Scraping it
 
@@ -255,30 +259,43 @@ out, instead of shipping a mod that quietly serves six families fewer.
 
 ## Runtime metrics
 
-With `RuntimeMetrics` left on, the .NET runtime's own `System.Runtime` meter is served
-alongside Pulse's, as `dotnet_*` families: GC collections and pause time, heap size and
-fragmentation by generation, working set, CPU time by mode, JIT, thread pool, lock contention,
-loaded assemblies. None of it is instrumented here. The runtime publishes the meter, and the
-writer renames each instrument the way Prometheus's otlptranslator does, the library Prometheus's
-own OTLP receiver, Mimir and Grafana Cloud use to turn an OTLP instrument into a Prometheus name:
-dots become underscores, the instrument's unit becomes a trailing word unless the name already
-contains it as a word, and a monotonic counter's name ends in `_total`, moved there rather than
-duplicated if the name already spells "total" somewhere. `dotnet.gc.collections` is served as
-`dotnet_gc_collections_total`; `dotnet.process.memory.working_set`, a gauge in bytes, is served as
+With `RuntimeMetrics` left on, the .NET runtime's own `System.Runtime` meter is served alongside
+Pulse's, as `dotnet_*` families: GC collections and pause time, bytes allocated, heap size and
+fragmentation by generation, committed memory, working set, CPU time by mode, JIT, thread pool, lock
+contention, exceptions thrown, loaded assemblies. None of it is instrumented here. The runtime
+publishes the meter, and the writer renames each instrument the way Prometheus's otlptranslator
+does, the library Prometheus's own OTLP receiver, Mimir and Grafana Cloud use to turn an OTLP
+instrument into a Prometheus name: dots become underscores, the instrument's unit becomes a trailing
+word unless the name already contains it as a word, and a monotonic counter's name ends in `_total`,
+moved there rather than duplicated if the name already spells "total" somewhere.
+`dotnet.gc.collections` is served as `dotnet_gc_collections_total`;
+`dotnet.process.memory.working_set`, a gauge in bytes, is served as
 `dotnet_process_memory_working_set_bytes`; `dotnet.gc.heap.total_allocated`, a counter also in
 bytes, is served as `dotnet_gc_heap_allocated_bytes_total` rather than the doubled
-`..._total_allocated_bytes_total`. This is the same name Grafana derives when it translates the
-OTLP export, so a dashboard or alert built against a server scraped over OTLP through Grafana
-Cloud reads Pulse's own `/metrics` without translation too.
+`..._total_allocated_bytes_total`. This is the same name Grafana derives when it translates the OTLP
+export, so a dashboard or alert built against a server scraped over OTLP through Grafana Cloud reads
+Pulse's own `/metrics` without translation too.
+
+Three of those are worth a line each, because the dashboard's Runtime row reads them and their names
+say little about what they count. `dotnet_exceptions_total` is the number of exceptions thrown in
+managed code since Pulse started, one series per exception type in an `error_type` label
+(`InvalidOperationException`, say). It counts throws, not failures: an exception that is thrown and
+caught is in it too. `dotnet_gc_heap_allocated_bytes_total` is the approximate number of bytes
+allocated on the managed GC heap since the process started, native allocations not included, so its
+`rate()` is the allocation rate. `dotnet_gc_last_collection_memory_committed_size_bytes` is a gauge
+in bytes: the committed virtual memory in use by the GC, as observed during its latest collection,
+so it moves in steps, one per collection. It can sit above the heap size, because it covers memory
+the GC keeps ready for objects not yet allocated as well as the objects that exist.
 
 Nine of these families moved to this spelling in 0.2, to line up with that translation; see the
 changelog for the full old to new list if you have a dashboard or alert built against the earlier
 names. `pulse_*` families are unaffected.
 
 Pulse renders the shape each instrument declares, including where that is arguable.
-`dotnet_thread_pool_thread_count_total` is typed as a counter because the runtime publishes it
-as an ObservableCounter, even though the number goes down as often as up. Second-guessing the
-framework here would only make the series harder to correlate with any other .NET exporter.
+`dotnet_thread_pool_thread_count_total` and `dotnet_thread_pool_queue_length_total` are typed as
+counters because the runtime publishes both as ObservableCounters, even though the numbers go down
+as often as up. Second-guessing the framework here would only make the series harder to correlate
+with any other .NET exporter.
 
 ## Attribution
 
@@ -334,8 +351,9 @@ Four families appear once it is on:
 
 - `pulse_mod_tick_share{modid}` (gauge): the fraction of profiled main-thread busy time that went
   to one mod over the last completed burst. The shares add up to 1 across every `modid`, including
-  the two Pulse adds: `engine` for the server's own systems and for the time no marker named, and
-  `unattributed` for work that was marked but that no loaded mod claims.
+  the two Pulse adds: `engine` for the server's own systems, for the engine's own passive physics
+  behaviour (`entitypassivephysics`, which Survival's multi-box variant inherits), and for the time
+  no marker named, and `unattributed` for work that was marked but that no loaded mod claims.
 - `pulse_mod_tick_seconds_total{modid}` (counter): main-thread seconds attributed to one mod.
   Sampled, not total: this is time measured inside the bursts, not time since startup. Divide by
   the tick counter below to compare two servers, or take `rate()` of it against
@@ -354,9 +372,15 @@ Four families appear once it is on:
 The engine already contains a per-mod tick attributor and simply never switches it on. With its
 frame profiler enabled, the server stamps a marker after every game tick listener, every delayed
 callback and every main-thread entity behaviour, keyed by the type that declared the handler or by
-the behaviour's registered code. Pulse turns the profiler on for a burst, reads the tree the tick
-left behind, maps each key back to a mod through the mod loader, and turns it off again. No
-Harmony, no engine patch, no bundled dependency.
+the behaviour's property name. Pulse turns the profiler on for a burst, reads the tree the tick
+left behind, maps each key back to a mod, and turns it off again. A listener's type goes back to a
+mod through the mod loader. A behaviour's name cannot go back through the class registry, because
+the name a behaviour marks with is often not the code its class was registered under (the game's
+own `despawn` and `reviveondeath` both mark as `timeddespawn`, the name tag as `displayname`), so
+at the start of each burst Pulse reads the behaviours of the entities that have loaded since the
+last one. Each knows the name it marks with, and the mod credited with that name is the one that
+ships the class declaring it: a subclass that inherits its parent's name is credited to the
+parent's mod. No Harmony, no engine patch, no bundled dependency.
 
 The cost is measured, not estimated from a mark count. `Pulse.Scenarios/AttributionCostScenarios.cs`
 joins a test player, spawns four thousand chickens (dense cluster and, separately, spread across
@@ -385,6 +409,12 @@ dotnet test Pulse.Scenarios --filter "Category=Cost"`; CI filters the `Cost` tra
 it is a no-op unless that variable is set, because spawning four thousand entities, three times
 over, is slow.
 
+One more cost, outside the profiled ticks: at the start of each burst Pulse reads the behaviours of
+the entities that have loaded since the last one, to learn which mod owns each behaviour name. The
+first burst reads all of them, which took about 3 to 4 ms with 1,700 entities loaded, 7 ms with
+4,000 and 23 to 40 ms with 8,000. After that a burst costs about 0.1 ms plus whatever loaded in
+between, apart from one early burst that took 8 to 12 ms in every run measured.
+
 One visible side effect: the engine logs "Over 400ms tick. Skipping N physics ticks" only while its
 frame profiler is on, and Pulse is what turns it on. It does so for the first tick after every
 start, attribution enabled or not, to prime the profiler so attribution can be switched on later
@@ -407,8 +437,23 @@ across several threads, and only the main thread's slice is marked. A mod whose 
 thread-safe therefore reads low, by roughly the thread count.
 
 Mapping is by assembly. A mod that ships several dlls only has the one its `ModSystem` lives in
-claimed, so a listener registered from a side library reads as `unattributed`. So does a handler
-on a static method, which the engine marks with no identity at all.
+claimed, so a listener registered from a side library, or a behaviour declared in one, reads as
+`unattributed`. So does a handler on a static method, which the engine marks with no identity at
+all.
+
+A behaviour is marked by its name, not by its class, so two classes that share a name share a
+mark. The name is credited to the mod that ships the class declaring it, so a subclass that
+inherits its parent's name is billed to the parent's mod: a mod's own `MyTaskAI`, deriving from the
+game's `EntityBehaviorTaskAI` and keeping its name `taskai`, is billed to the game, not to the mod.
+Only two classes that each declare the same name leave a choice, and Pulse keeps the first it
+meets, which is not always the same one after a restart. A Harmony patch on a game behaviour leaves
+the class where it was, so the time the patch adds is billed to the game, not to the mod that
+patched it.
+
+An entity's behaviours are read the first time it turns up in a burst, so one a mod attaches later
+(to the player from a `PlayerJoin` handler, say) is not learned from that entity. It is credited
+once another entity carries the same class, or if its name is the code it was registered under,
+and reads as `unattributed` until then.
 
 And it is a sample. Ten ticks every ten seconds describe a steady server well and a spiky one
 badly. The share is an average over the burst, so a mod that stalls for 200 ms once a minute may
@@ -435,7 +480,8 @@ The two mods share no code. `Pulse.Otlp.dll` has no reference to `Pulse.dll`; it
 the meter named `Pulse.Server`, which is all `System.Diagnostics.Metrics` needs, and
 `modinfo.json` declares the dependency so the loader guarantees the base mod is there first.
 
-On first boot it writes `ModConfig/pulse-otlp.json`:
+On first boot it writes `ModConfig/pulse-otlp.json`, with a freshly generated id in
+`ServiceInstanceId` where the block below shows an empty string:
 
 ```json
 {
@@ -445,7 +491,8 @@ On first boot it writes `ModConfig/pulse-otlp.json`:
   "Headers": {},
   "IntervalSeconds": 60,
   "IncludeRuntimeMetrics": true,
-  "ServiceName": "vintagestory"
+  "ServiceName": "vintagestory",
+  "ServiceInstanceId": ""
 }
 ```
 
@@ -460,11 +507,36 @@ other way round.
 
 `ServiceName` sets the `service.name` resource attribute, which is how a backend receiving
 metrics from more than one server tells them apart: grouping, filtering and dashboard variables
-are usually keyed off it. The `OTEL_SERVICE_NAME` environment variable, the ecosystem's standard
-override, takes precedence over this key when it is set. For a stable `instance` label, pair
-`OTEL_SERVICE_NAME` (not this key) with `OTEL_RESOURCE_ATTRIBUTES=service.instance.id=<id>`:
-without `OTEL_SERVICE_NAME`, a freshly generated id silently overrides that variable on every
-restart.
+are usually keyed off it. `ServiceInstanceId` sets `service.instance.id`, which Prometheus, Mimir
+and Grafana Cloud turn into the `instance` label and file a server's series under, so it has to be
+the same on every start: an id that changes at each restart begins a second set of series beside
+the first. Left blank, or missing from a file an older version wrote, the key is filled with a
+generated GUID at startup, written into `pulse-otlp.json`, and found there on every start after
+that. To use a readable id instead, put it in the key: any text works, such as `survival-eu-1`, and
+is used as written, trimmed. Clearing the key asks for a new generated one at the next start.
+
+Each server needs an id of its own. Two servers with the same `ServiceName` and the same id are
+one server to a backend, so a `pulse-otlp.json` copied to a second server has to have
+`ServiceInstanceId` cleared or changed first.
+
+Pulse OTLP cannot always keep the id it generates. A `ModConfig` folder mounted read-only takes no
+write, and a file Pulse cannot rewrite, one written with single quotes, say, is left as it is: Pulse
+then logs a warning that names the id, says the next start will export a different one, and gives
+both ways out. A `ModConfig` folder that does not survive a restart, a container without a volume
+for it, loses the id the same way but with no warning, since the write itself worked. In each case
+the fix is an id you set yourself: `ServiceInstanceId` in the file the server reads, or in the one
+its folder is created from, or `OTEL_RESOURCE_ATTRIBUTES=service.instance.id=<id>` in the server's
+environment. Give each server a different one: a template that several servers' `ModConfig`
+folders are built from would hand them all the same.
+
+The environment keeps the last word, for the id as for the name. When `OTEL_SERVICE_NAME` is set,
+it takes precedence over `ServiceName` and takes `ServiceInstanceId` with it: Pulse then leaves the
+whole identity to the environment, and the resource carries an instance id only if
+`OTEL_RESOURCE_ATTRIBUTES` has a `service.instance.id`. When it is not set, a `service.instance.id`
+in `OTEL_RESOURCE_ATTRIBUTES` takes precedence over `ServiceInstanceId`, while `ServiceName` is
+still the name, even if that variable carries a `service.name`. The startup line in the server log
+names the service and the id the backend will see, whichever of the file and the environment
+decided them: `Pulse OTLP exporting ... as service 'vintagestory', instance '<id>'`.
 
 `IntervalSeconds` is floored at 5 and capped at 86400 (24 hours), the cap there so a config typo
 several digits too long cannot overflow the millisecond count it is converted to. Sixty is the
@@ -515,11 +587,13 @@ OpenTelemetry SDK exports from its own background thread and the tick loop never
 failure. It no longer stays invisible, though. Pulse OTLP listens to the SDK's own diagnostic
 event source and turns the first failure of each kind into one line in the server log, repeated at
 most every ten minutes and logged at Warning rather than Error so a struggling backend can never
-count toward `DieAboveErrorCount`:
+count toward `DieAboveErrorCount`. Both mods write through the logger the game gives each mod, which
+marks every entry with the mod's id in square brackets, `[pulseotlp]` here and `[pulse]` for the
+base mod:
 
 ```
-Pulse OTLP export to https://otlp-gateway-prod-eu-west-2.grafana.net/otlp/v1/metrics failed:
-Response status code does not indicate success: 401 (Unauthorized). The backend answered:
+[pulseotlp] Pulse OTLP export to https://otlp-gateway-prod-eu-west-2.grafana.net/otlp/v1/metrics
+failed: Response status code does not indicate success: 401 (Unauthorized). The backend answered:
 {"status":"error","error":"authentication error: invalid token"} Metrics are not reaching the
 backend; check Endpoint and Headers in pulse-otlp.json. This is logged again at most every 10
 minutes.
@@ -560,7 +634,9 @@ server.
 You need the .NET 10 SDK and a Vintage Story 1.22.x install, with `VINTAGE_STORY` pointing at
 the folder that holds `VintagestoryAPI.dll` and `VintagestoryLib.dll` (the `.pdb` next to the
 first is required too, or the engine's logger crashes at boot). Both dlls are compile-time
-references only; neither is copied into the mod, which still ships as one file.
+references only; neither is copied into the mod, which still ships as one file. The unit tests
+also name one class from `Mods/VSSurvivalMod.dll`, so the install has to be whole, `Mods` folder
+included.
 
 ```sh
 export VINTAGE_STORY=/path/to/vintagestory
@@ -572,11 +648,40 @@ dotnet build Pulse.Otlp/Pulse.Otlp.csproj -c Release -t:PackageMod  # artifacts/
 
 The scenarios in `Pulse.Scenarios` boot a real headless server in-process through
 [Atlas](https://github.com/Pixnop/Atlas), load the mod, and scrape it over HTTP for real. The
-`atlas` CLI runs the same assembly without VSTest, which is faster to iterate against:
+`atlas` CLI runs the same assembly without VSTest and can run its classes side by side with
+`--parallel`. It is a .NET tool you install once, at the version of the `Pixnop.Atlas.XUnit` package
+the two scenario projects reference, so that the tool and the harness match:
+
+```sh
+dotnet tool install -g Pixnop.Atlas.Cli --version 0.16.0
+```
+
+That puts `atlas` in `~/.dotnet/tools`, which a non-interactive shell may not have on its `PATH`.
+Where `atlas` is not found, call it by its full path, `~/.dotnet/tools/atlas`.
 
 ```sh
 atlas run Pulse.Scenarios/bin/Release/net10.0/Pulse.Scenarios.dll
 atlas run Pulse.Otlp.Scenarios/bin/Release/net10.0/Pulse.Otlp.Scenarios.dll
+```
+
+One thing differs from `ci.yml`. `atlas run` runs every scenario in an assembly and cannot filter by
+category, so it also runs the three `Cost` scenarios in `Pulse.Scenarios`. They return at once
+unless `PULSE_MEASURE_ATTRIBUTION_COST=1` is set, but each still boots a server. `ci.yml` and
+`sonar.yml` run `dotnet test` with `--filter "Category!=Cost"`, which leaves them out; `release.yml`
+and `game-watch.yml` run the scenarios without it.
+
+Each scenario class pins a loopback port in its config fixture, unique within its suite: 29464
+to 29485 across the two, kept below 32768 so that nothing the kernel assigns by itself can land
+on one. One class binds the default 9464 instead, to prove the fallback when a config file will
+not parse, so a Pulse server already running on its default port on the same machine fails that
+class.
+Fixed ports also mean two runs of the same suite cannot share one machine's loopback: the second
+run's server logs that it could not bind, and its scenarios then scrape the first run's server
+and fail on what they read there. Run one at a time, or, once the solution is built and where
+unprivileged user namespaces are allowed, give each run a loopback of its own:
+
+```sh
+unshare -Urn sh -c 'ip link set lo up && dotnet test Pulse.Scenarios -c Release --no-build'
 ```
 
 `Pulse.Otlp.Scenarios` is a separate project because it stages both mods, laid out exactly as
@@ -593,7 +698,7 @@ them needs a server. `Pulse.Otlp.Tests` covers the config translation, which is 
 mod's only non-obvious logic lives. CI also runs both unit suites on Windows. The scenarios stay
 on Linux, since they boot a server build made for it.
 
-Mutation testing runs at two depths. `tools/mutation-check.sh` applies ninety-one representative
+Mutation testing runs at two depths. `tools/mutation-check.sh` applies one hundred and four representative
 mutations one at a time and requires the suite to fail on every one; CI runs it on every code
 change, deterministic and done in about six minutes. `.github/workflows/mutation.yml` runs
 dotnet-stryker incrementally on pull requests into `dev` touching `Pulse/`: it mutates only the

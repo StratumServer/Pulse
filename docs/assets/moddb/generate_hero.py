@@ -13,7 +13,7 @@ behind the glasses and the text block so both stay legible. Rendered at 2x
 and Lanczos-downscaled for antialiased rims. Seeded RNG only -> byte-identical
 output on every run.
 
-Run: python3 generate.py
+Run: python3 generate_hero.py
 """
 import bisect
 import hashlib

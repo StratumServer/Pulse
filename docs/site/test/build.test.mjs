@@ -43,6 +43,7 @@ test('the heading contract: README is exact for H1 and H2 and free for H3, the g
   assert.throws(() => altered('README.md', (t) => t.replace('## Degraded mode', '## Degraded modes')), /heading contract/);
   assert.throws(() => altered('README.md', (t) => t.replace('## License', '## Licence')), /heading contract/);
   assert.throws(() => altered('docs/getting-started.md', (t) => t.replace('### Before you start', '### Before you begin')), /heading contract/);
+  assert.throws(() => altered('docs/getting-started.md', (t) => t.replace('### Optional: load the alert rules', '### Optional: alerts')), /heading contract/);
   assert.throws(() => altered('docs/getting-started.md', (t) => t.replace('## Troubleshooting', '## Troubleshooting\n\n### A new H3')), /heading contract/);
   assert.throws(() => altered('contrib/alerts/README.md', (t) => t + '\n## One more\n'), /heading contract/);
   assert.throws(() => altered('CHANGELOG.md', (t) => t.replace('## [Unreleased]', '## Unreleased')), /CHANGELOG\.md/);
@@ -63,16 +64,16 @@ test('no raw HTML, no image inside a rendered part, no fourth log excerpt', () =
 test('log excerpts are named, and only the ones that are one wrapped line are joined', () => {
   const html = (name, file, page, shift = 0) => createMd(real).render(real.slice(name), { file, page, shift }).html;
   const guide = html('docs/getting-started.md', 'docs/getting-started.md', 'getting-started');
-  assert.match(guide, /<pre class="term__body" tabindex="0">Pulse OTLP export to https:\/\/otlp-gateway-&lt;region&gt;\.grafana\.net\/otlp\/v1\/metrics failed: Response status code does not indicate success: 401 \(Unauthorized\)\. The backend answered: \{/, 'one log line, not five');
-  assert.match(guide, /<pre class="term__body" tabindex="0">Pulse serving metrics on http:\/\/127\.0\.0\.1:9464\/metrics<\/pre>/);
+  assert.match(guide, /<pre class="term__body" tabindex="0">\[pulseotlp\] Pulse OTLP export to https:\/\/otlp-gateway-&lt;region&gt;\.grafana\.net\/otlp\/v1\/metrics failed: Response status code does not indicate success: 401 \(Unauthorized\)\. The backend answered: \{/, 'one log line, not five');
+  assert.match(guide, /<pre class="term__body" tabindex="0">\[pulse\] Pulse serving metrics on http:\/\/127\.0\.0\.1:9464\/metrics<\/pre>/);
   assert.doesNotMatch(guide, /term__body"[^>]*>[^<]*\n[^<]*<\/pre>/, 'no log excerpt keeps a line break of the document');
-  assert.match(html('otlp', 'README.md', 'otlp', 1), /<pre class="term__body" tabindex="0">Pulse OTLP export to [^\n<]+ minutes\.<\/pre>/);
+  assert.match(html('otlp', 'README.md', 'otlp', 1), /<pre class="term__body" tabindex="0">\[pulseotlp\] Pulse OTLP export to [^\n<]+ minutes\.<\/pre>/);
   assert.match(page('getting-started/index.html'), /failed: Response status code does not indicate success/);
   // a fence with a language is code: its lines stay
   assert.match(guide, /<code>\{\n  &quot;Endpoint&quot;/);
   // an excerpt that is declared one line and grows, or that disappears, stops the build
-  assert.throws(() => altered('docs/getting-started.md', (t) => { const at = 'Pulse serving metrics on http://127.0.0.1:9464/metrics\n'; assert.ok(t.includes(at)); return t.replace(at, `${at}   and a second line\n`); }), /declared as one line and now spans several/);
-  assert.throws(() => altered('docs/getting-started.md', (t) => t.replace('Pulse serving metrics on', 'Pulse is serving metrics on')), /is not one of the log excerpts/);
+  assert.throws(() => altered('docs/getting-started.md', (t) => { const at = '[pulse] Pulse serving metrics on http://127.0.0.1:9464/metrics\n'; assert.ok(t.includes(at)); return t.replace(at, `${at}   and a second line\n`); }), /declared as one line and now spans several/);
+  assert.throws(() => altered('docs/getting-started.md', (t) => t.replace('[pulse] Pulse serving metrics on', '[pulse] Pulse is serving metrics on')), /is not one of the log excerpts/);
 });
 
 test('a missing input stops the build before anything is written', () => {

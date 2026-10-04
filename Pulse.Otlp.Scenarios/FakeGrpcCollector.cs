@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -5,7 +6,7 @@ using System.Text;
 namespace Pulse.Otlp.Scenarios;
 
 /// <summary>An OTLP/gRPC collector reduced to what a test needs: it speaks just enough HTTP/2 to
-/// receive exports and answer them the way a collector answers, and it keeps the first one
+/// receive exports and answer them the way a collector answers, and it keeps every one
 /// whole.</summary>
 /// <remarks>Hand-rolled rather than Kestrel because gRPC over cleartext needs an HTTP/2 server and
 /// nothing else here does: taking the ASP.NET Core shared framework as a test dependency would put
@@ -26,6 +27,7 @@ internal sealed class FakeGrpcCollector : IDisposable
     private const byte Headers = 0x01;
     private const byte Settings = 0x04;
     private const byte GoAway = 0x07;
+    private const byte WindowUpdate = 0x08;
     private const byte EndStream = 0x01;
     private const byte EndHeaders = 0x04;
     private const byte Ack = 0x01;
@@ -51,9 +53,9 @@ internal sealed class FakeGrpcCollector : IDisposable
     private readonly TcpListener listener;
     private readonly CancellationTokenSource closing = new();
 
-    /// <summary>The first export received, or null while none has arrived. Written by the listener
-    /// thread and read by the scenario, hence the volatile: the record itself is immutable.</summary>
-    private volatile Export? first;
+    /// <summary>Every export received, in arrival order. Written by the listener thread and read
+    /// by the scenario, hence the concurrent queue: the records in it are immutable.</summary>
+    private readonly ConcurrentQueue<Export> received = new();
 
     public FakeGrpcCollector(int port)
     {
@@ -62,7 +64,15 @@ internal sealed class FakeGrpcCollector : IDisposable
         Task.Run(Accept);
     }
 
-    public Export? First => first;
+    /// <summary>How many exports have been received.</summary>
+    public int Count => received.Count;
+
+    /// <summary>The first export received, or null while none has arrived.</summary>
+    public Export? First => received.FirstOrDefault();
+
+    /// <summary>The first export received for which <paramref name="match"/> holds, or null while
+    /// none has.</summary>
+    public Export? FirstWhere(Func<Export, bool> match) => received.FirstOrDefault(match);
 
     public void Dispose()
     {
@@ -158,7 +168,8 @@ internal sealed class FakeGrpcCollector : IDisposable
                     // here, so the body is whatever came with the frame that ends the stream.
                     if (length > 0)
                     {
-                        first ??= new Export(headerBlock, payload);
+                        received.Enqueue(new Export(headerBlock, payload));
+                        await ReleaseWindow(stream, length, token);
                     }
 
                     if ((flags & EndStream) == EndStream)
@@ -172,6 +183,18 @@ internal sealed class FakeGrpcCollector : IDisposable
                     return;
             }
         }
+    }
+
+    /// <summary>Gives the client back the room a DATA frame of <paramref name="length"/> bytes took
+    /// from the connection's window. A client may send 65,535 bytes of DATA on a connection before
+    /// it waits to hear that there is room for more, and the exporter reuses one connection for
+    /// every export: without this, the export that crosses that total arrives cut short and the
+    /// rest stalls until the exporter gives up on it.</summary>
+    private static async Task ReleaseWindow(NetworkStream stream, int length, CancellationToken token)
+    {
+        byte[] increment = [(byte)(length >> 24), (byte)(length >> 16), (byte)(length >> 8), (byte)length];
+        await stream.WriteAsync(Frame(WindowUpdate, 0, 0, increment), token);
+        await stream.FlushAsync(token);
     }
 
     private static async Task Respond(NetworkStream stream, int streamId, CancellationToken token)

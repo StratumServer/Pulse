@@ -12,8 +12,10 @@ namespace Pulse.Scenarios;
 [AtlasDataFiles("data/bindfailure/pulse.json", TargetPath = "ModConfig")]
 public class BindFailureScenarios : AtlasScenarioBase, IDisposable
 {
-    private const int Port = 39466;
-    private const string BindFailureMarker = "Pulse could not bind";
+    private const int Port = 29466;
+
+    // The engine puts the mod's id in front of whatever goes through the mod's own logger.
+    private const string BindFailureMarker = "[pulse] Pulse could not bind";
 
     private readonly TcpListener squatter;
 

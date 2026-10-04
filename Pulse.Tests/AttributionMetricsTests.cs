@@ -20,13 +20,15 @@ public class AttributionMetricsTests
         FrameProfilerUtil profiler,
         List<(string Template, string Message)> warnings,
         bool enabled = true,
-        Action<ModOwners>? walkListeners = null)
+        Action<ModOwners>? walkListeners = null,
+        Action<ModOwners>? walkBehaviors = null)
         => new(
             meter,
             new AttributionConfig { Enabled = enabled, BurstTicks = 5, IntervalSeconds = 1 },
             () => profiler,
             walkListeners ?? (_ => { }),
-            (template, message) => warnings.Add((template, message)));
+            (template, message) => warnings.Add((template, message)),
+            walkBehaviors);
 
     /// <summary>Advances the duty cycle through the interval tick, the discarded warm-up sample,
     /// and a whole five-tick burst (the <see cref="Metrics"/> helper's own BurstTicks), folding
@@ -261,6 +263,77 @@ public class AttributionMetricsTests
             template);
         Assert.Equal("listener list is gone", message);
         Assert.Equal(EnumCommandStatus.Success, metrics.Status().Status);
+    }
+
+    /// <summary>The behavior walk is its own failure, with its own template: it names the class
+    /// registry the rest falls back on, not the listener lists. Attribution keeps running, the
+    /// listener walk is not stopped by it, and it is not tried again, so a walk that fails every
+    /// time costs one warning rather than one per burst.</summary>
+    [Fact]
+    public void Tick_LogsTheBehaviorWalkTemplate_AndKeepsRunning_WhenWalkingBehaviorsFails()
+    {
+        using Meter meter = new(UniqueMeterName());
+        FrameProfilerUtil profiler = new("test") { Enabled = true };
+        profiler.Begin("tick");
+        profiler.End();
+        List<(string Template, string Message)> warnings = [];
+        int listenerWalks = 0;
+        int behaviorWalks = 0;
+        AttributionMetrics metrics = Metrics(
+            meter, profiler, warnings,
+            walkListeners: _ => listenerWalks++,
+            walkBehaviors: _ =>
+            {
+                behaviorWalks++;
+                throw new InvalidOperationException("entity table is gone");
+            });
+
+        // Two whole bursts: the walks run when each one starts.
+        for (int tick = 0; tick < 14; tick++)
+        {
+            metrics.Tick(1.0);
+        }
+
+        (string template, string message) = Assert.Single(warnings);
+        Assert.Equal(
+            "Pulse could not read the behaviors of the loaded entities ({0}). Per-mod attribution carries "
+                + "on from the class registry, which maps only the behaviors whose name is their registration "
+                + "code: the rest report as unattributed.",
+            template);
+        Assert.Equal("entity table is gone", message);
+        Assert.Equal(1, behaviorWalks);
+        Assert.Equal(2, listenerWalks);
+        Assert.Equal(EnumCommandStatus.Success, metrics.Status().Status);
+    }
+
+    /// <summary>The behavior walk runs before the burst's first sample is folded, so a mark whose
+    /// name is not its class's registration code is credited to the mod that ships the class from
+    /// the first burst on, not unattributed until the next one.</summary>
+    [Fact]
+    public void Tick_CreditsABehaviorMark_ToTheModAWalkLearnedItFor_InTheFirstBurst()
+    {
+        using Meter meter = new(UniqueMeterName());
+        using MetricsAggregator aggregator = new(meter.Name);
+        FrameProfilerUtil profiler = new("test") { Enabled = true };
+        AttributionMetrics metrics = Metrics(
+            meter,
+            profiler,
+            [],
+            walkBehaviors: owners =>
+            {
+                owners.AddSystem("game", typeof(AttributionMetricsTests));
+                owners.LearnBehavior(TickAttribution.BehaviorPrefix + "timeddespawn", typeof(AttributionMetricsTests));
+            });
+
+        RunWholeBurst(metrics, profiler, new ProfileEntryRange
+        {
+            ElapsedTicks = 1000,
+            Marks = new Dictionary<string, ProfileEntry> { [TickAttribution.BehaviorPrefix + "timeddespawn"] = new ProfileEntry(1000, 1) },
+        });
+
+        List<MetricSample> shares = aggregator.Collect().Where(s => s.Name == "pulse_mod_tick_share").ToList();
+        Assert.Equal(1.0, Assert.Single(shares, s => s.Labels.Any(l => l.Value == "game")).Value);
+        Assert.Equal(0.0, Assert.Single(shares, s => s.Labels.Any(l => l.Value == "unattributed")).Value);
     }
 
     /// <summary>The whole duty cycle against a warmed profiler: the flag goes on once the interval

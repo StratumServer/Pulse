@@ -10,7 +10,7 @@ namespace Pulse.Scenarios;
 [AtlasDataFiles("data/configupgrade/pulse.json", TargetPath = "ModConfig")]
 public class ConfigUpgradeScenarios : AtlasScenarioBase
 {
-    private const int Port = 39472;
+    private const int Port = 29472;
 
     [AtlasScenario]
     public async Task Startup_Fills_AnOlderConfigFile_WithoutLosingWhatTheAdminSet()

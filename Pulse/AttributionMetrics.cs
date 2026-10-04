@@ -6,9 +6,9 @@ using Vintagestory.API.Server;
 namespace Pulse;
 
 /// <summary>Per-mod tick attribution end to end: the instruments and the duty cycle, which mod owns
-/// which tick listener, the listener walk that sharpens it, the profiler priming that makes
-/// switching it on safe, and the <c>/pulse</c> command and config reload that operate it from a
-/// running server.</summary>
+/// which tick listener and which entity behavior, the walks that sharpen both, the profiler
+/// priming that makes switching it on safe, and the <c>/pulse</c> command and config reload that
+/// operate it from a running server.</summary>
 /// <remarks>Extracted out of <see cref="PulseModSystem"/>, which otherwise stays a table of contents
 /// delegating to a collaborator per concern: this was the one concern still spelled out inline,
 /// about 200 lines behind one config flag, taking its field count from 31 to 23 (nine removed here,
@@ -18,12 +18,12 @@ namespace Pulse;
 /// carries the coverage exclusion because of that, the same reason <c>PulseModSystem</c> and the two
 /// probes carry it, not because of anything this class reflects into.
 /// <para>The tick-processing core reads the engine's frame profiler through a resolver function,
-/// walks tick listeners through a plain delegate, and logs through a sink that takes the warning
-/// template and the detail as two arguments rather than one pre-selected template, instead of
-/// reaching into <see cref="ICoreServerAPI"/> directly. That is what makes the unprimed-tick give-up
-/// path, a failed listener walk, and the on/off/status command transitions drivable from a unit test
-/// without a live server, and what makes it possible to assert which template a failure logs
-/// through, not just that it logged something.</para></remarks>
+/// walks tick listeners and entity behaviors through plain delegates, and logs through a sink that
+/// takes the warning template and the detail as two arguments rather than one pre-selected
+/// template, instead of reaching into <see cref="ICoreServerAPI"/> directly. That is what makes the
+/// unprimed-tick give-up path, a failed listener or behavior walk, and the on/off/status command
+/// transitions drivable from a unit test without a live server, and what makes it possible to
+/// assert which template a failure logs through, not just that it logged something.</para></remarks>
 internal sealed partial class AttributionMetrics
 {
     private const string AttributionWarning =
@@ -35,6 +35,11 @@ internal sealed partial class AttributionMetrics
         "Pulse could not read the engine's tick listener lists ({0}). Per-mod attribution carries "
         + "on from the mod loader's own type list, which maps fewer marks: the rest report as "
         + "unattributed.";
+
+    private const string BehaviorWalkWarning =
+        "Pulse could not read the behaviors of the loaded entities ({0}). Per-mod attribution carries "
+        + "on from the class registry, which maps only the behaviors whose name is their registration "
+        + "code: the rest report as unattributed.";
 
     /// <summary>How many ticks attribution waits for the primed profiler to complete one, before
     /// concluding that priming never took. Roughly half a minute at the default tick rate.</summary>
@@ -50,6 +55,7 @@ internal sealed partial class AttributionMetrics
     // before `this` exists), so it chains with a placeholder here and replaces it in its body,
     // once attributionProbe is a field it can actually reference.
     private Action<ModOwners> walkListeners;
+    private readonly Action<ModOwners> walkBehaviors;
     private readonly Counter<double> modTickSeconds;
     private readonly Counter<long> attributionTicks;
     private readonly Counter<long> attributionDropped;
@@ -64,8 +70,13 @@ internal sealed partial class AttributionMetrics
     private ModOwners? owners;
     private AttributionProbe? attributionProbe;
     private ICoreServerAPI? api;
+    private ILogger? logger;
     private PulseConfig? booted;
     private int unprimedTicks;
+
+    /// <summary>Set once the behavior walk has thrown, after which it is not tried again: one
+    /// warning, not one per burst for the rest of the run.</summary>
+    private bool behaviorWalkFailed;
 
     /// <summary>Whether the first primed tick has been seen yet. PrimeFrameProfiler turns the
     /// profiler on before this class's own duty cycle has had a say; the first primed tick is
@@ -80,18 +91,20 @@ internal sealed partial class AttributionMetrics
     private bool profilerEnabledLastWritten;
 
     /// <summary>Creates the duty cycle and the instruments it publishes to, with the profiler
-    /// resolver, the listener walk and the warning sink supplied directly rather than read off a
-    /// live server: what a unit test calls to drive the unprimed-tick give-up path, a failed
-    /// listener walk, and the on/off/status command transitions without one.</summary>
+    /// resolver, the two walks and the warning sink supplied directly rather than read off a live
+    /// server: what a unit test calls to drive the unprimed-tick give-up path, a failed listener or
+    /// behavior walk, and the on/off/status command transitions without one.</summary>
     internal AttributionMetrics(
         Meter meter,
         AttributionConfig config,
         Func<FrameProfilerUtil?> resolveProfiler,
         Action<ModOwners> walkListeners,
-        Action<string, string> warn)
+        Action<string, string> warn,
+        Action<ModOwners>? walkBehaviors = null)
     {
         this.resolveProfiler = resolveProfiler;
         this.walkListeners = walkListeners;
+        this.walkBehaviors = walkBehaviors ?? (_ => { });
         this.warn = warn;
 
         // A real, empty table rather than null: nothing but a live server's ModLoader walk can
@@ -310,12 +323,15 @@ internal sealed partial class AttributionMetrics
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static void DisableProfilerUnguarded(FrameProfilerUtil profiler) => profiler.Enabled = false;
 
-    /// <summary>Re-reads which mod owns which tick listener, once per burst.</summary>
+    /// <summary>Re-reads which mod owns which tick listener and which entity behavior, once per
+    /// burst.</summary>
     /// <remarks>Once per burst rather than once at startup because mods register and drop listeners
-    /// as the world runs. Its own catch: losing the walk costs precision in the map, not the
-    /// feature, which is why it logs through <see cref="ListenerWalkWarning"/> and leaves
+    /// as the world runs, and entities carrying behaviors nobody has seen yet load and spawn. Both
+    /// walks run here, before the burst's first sample is folded, and never per mark: the fold only
+    /// ever does dictionary lookups. Each has its own catch: losing a walk costs precision in the
+    /// map, not the feature, which is why each logs through its own template and leaves
     /// <see cref="attribution"/> running rather than giving up on it the way <see cref="Tick"/>
-    /// does when the profiler itself is unreadable.</remarks>
+    /// does when the profiler itself is unreadable. One failing does not stop the other.</remarks>
     private void RefreshOwners()
     {
         try
@@ -326,6 +342,21 @@ internal sealed partial class AttributionMetrics
         {
             attributionProbe = null;
             warn(ListenerWalkWarning, e.Message);
+        }
+
+        if (behaviorWalkFailed)
+        {
+            return;
+        }
+
+        try
+        {
+            walkBehaviors(owners!);
+        }
+        catch (Exception e)
+        {
+            behaviorWalkFailed = true;
+            warn(BehaviorWalkWarning, e.Message);
         }
     }
 

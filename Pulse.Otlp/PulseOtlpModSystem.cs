@@ -54,6 +54,15 @@ public sealed class PulseOtlpModSystem : ModSystem
         ConfigLoadResult<PulseOtlpConfig> loaded = ConfigLoad.Resolve(
             () => api.LoadModConfig<PulseOtlpConfig>(ConfigFile), () => new PulseOtlpConfig());
         PulseOtlpConfig config = loaded.Config;
+
+        // Before the file is stored or brought up to date below, so that what gets written is the
+        // id this session exports: a blank ServiceInstanceId (never set, or missing from a file an
+        // older version wrote) is replaced by a fresh GUID here, the store or the upgrade below puts
+        // it in the file, and the next start finds it there instead of generating another one.
+        // A random id per start is what made every restart a new series in the backend. Only a
+        // blank key is touched, so no unrelated rewrite of the file changes an id the admin wrote.
+        bool instanceIdGenerated = OtlpOptions.FillBlankServiceInstanceId(config);
+
         switch (loaded.Status)
         {
             case ConfigLoadStatus.Absent:
@@ -62,7 +71,7 @@ public sealed class PulseOtlpModSystem : ModSystem
                     // A ModConfig directory the mod cannot write to (mounted read-only, say) must
                     // not stop it from starting: it runs on the in-memory defaults for this
                     // session, exporting off, rather than never starting at all.
-                    api.Logger.Error(
+                    Mod.Logger.Error(
                         "Pulse OTLP could not write {0} ({1}). Running with defaults for this "
                         + "session; exporting is off until the file can be written.",
                         ConfigFile, storeFailure);
@@ -71,7 +80,7 @@ public sealed class PulseOtlpModSystem : ModSystem
 
                 break;
             case ConfigLoadStatus.Loaded:
-                ConfigUpgrade.Upgrade(api, config, ConfigFile, "Pulse OTLP");
+                ConfigUpgrade.Upgrade(api, Mod.Logger, config, ConfigFile, "Pulse OTLP");
                 break;
             case ConfigLoadStatus.Unreadable:
                 string unreadablePath = Path.Combine(api.GetOrCreateDataPath("ModConfig"), ConfigFile);
@@ -82,7 +91,7 @@ public sealed class PulseOtlpModSystem : ModSystem
                 // that value can be a real bearer token or API key. The path, line and position
                 // that make the error findable are not quoted and survive the redaction.
                 string safeMessage = OtlpOptions.RedactQuotedValues(loaded.FailureMessage ?? string.Empty);
-                api.Logger.Error(
+                Mod.Logger.Error(
                     ConfigLoad.UnreadableMessage, "Pulse OTLP", unreadablePath, safeMessage,
                     "Pulse OTLP is not exporting");
                 return;
@@ -90,13 +99,13 @@ public sealed class PulseOtlpModSystem : ModSystem
 
         if (!config.Enabled)
         {
-            api.Logger.Notification("Pulse OTLP is disabled in " + ConfigFile + ", nothing registered.");
+            Mod.Logger.Notification("Pulse OTLP is disabled in " + ConfigFile + ", nothing registered.");
             return;
         }
 
         if (!OtlpOptions.TryParseProtocol(config.Protocol, out OtlpExportProtocol protocol))
         {
-            api.Logger.Warning(
+            Mod.Logger.Warning(
                 "Pulse OTLP does not know the protocol '{0}'. Exporting over http/protobuf instead; "
                 + "the two names the OTLP specification defines are \"http/protobuf\" and \"grpc\".",
                 config.Protocol);
@@ -106,7 +115,7 @@ public sealed class PulseOtlpModSystem : ModSystem
         {
             // Never the value: a name colliding after trimming, or carrying a comma, says nothing
             // about what the value itself holds.
-            api.Logger.Error(
+            Mod.Logger.Error(
                 "Pulse OTLP's header '{0}' in {1} cannot be exported: its name collides with "
                 + "another header once trimmed, or its value contains a comma, which the "
                 + "exporter's own header format cannot carry. Nothing will be exported; the game "
@@ -133,7 +142,7 @@ public sealed class PulseOtlpModSystem : ModSystem
                 // Never the configured value itself: a backend authenticating through userinfo or
                 // a query string in the URL put both right there, and an unparsable endpoint is
                 // exactly the case where that value most needs to stay out of the log.
-                api.Logger.Error(
+                Mod.Logger.Error(
                     "Pulse OTLP's '{0}' in {1} is not an absolute http or https URL. Nothing will "
                     + "be exported; the game server is unaffected.",
                     nameof(PulseOtlpConfig.Endpoint), ConfigFile);
@@ -144,24 +153,6 @@ public sealed class PulseOtlpModSystem : ModSystem
             string[] meters = config.IncludeRuntimeMetrics
                 ? [PulseMeterName, RuntimeMeterName]
                 : [PulseMeterName];
-
-            // OTEL_SERVICE_NAME, the ecosystem's standard override, must win over the config key
-            // when it is set. That is not automatic: ResourceBuilder.CreateDefault() (the seed
-            // ConfigureResource lazily creates) already ends with the detector that reads this
-            // variable, but ConfigureResource's own AddService call is appended after it, and
-            // ResourceBuilder.Build() merges every detector's Resource left to right with the
-            // later one winning on a collision (Resource.Merge: "In case of a collision the other
-            // Resource takes precedence"). An unconditional AddService would therefore always beat
-            // the environment variable. Checked against MeterProviderBuilderSdk.ConfigureResource,
-            // ResourceBuilder.CreateDefault/Build and Resource.Merge in OpenTelemetry .NET 1.19.1
-            // (github.com/open-telemetry/opentelemetry-dotnet, tag core-1.19.1). Skipping the call
-            // when the variable is set leaves the SDK's own default resource pipeline, which
-            // already reads it, untouched.
-            string? serviceNameFromEnvironment = Environment.GetEnvironmentVariable("OTEL_SERVICE_NAME");
-            bool serviceNameSetByEnvironment = !string.IsNullOrWhiteSpace(serviceNameFromEnvironment);
-            string serviceName = serviceNameSetByEnvironment
-                ? serviceNameFromEnvironment!
-                : OtlpOptions.ResolveServiceName(config.ServiceName);
 
             // Nothing past the Build() below can take the server down. Every export runs on the
             // SDK's own background thread ("OpenTelemetry-PeriodicExportingMetricReader-..."), and
@@ -180,13 +171,8 @@ public sealed class PulseOtlpModSystem : ModSystem
 
             provider = Sdk.CreateMeterProviderBuilder()
                 .AddMeter(meters)
-                .ConfigureResource(r =>
-                {
-                    if (!serviceNameSetByEnvironment)
-                    {
-                        r.AddService(serviceName);
-                    }
-                })
+                .ConfigureResource(r => OtlpOptions.ConfigureServiceIdentity(
+                    r, config.ServiceName, config.ServiceInstanceId))
                 .AddOtlpExporter((exporter, reader) =>
                 {
                     exporter.Endpoint = endpoint;
@@ -202,15 +188,40 @@ public sealed class PulseOtlpModSystem : ModSystem
             exportFailureLogListenerId = api.Event.RegisterGameTickListener(
                 OnDrainExportFailures, OnDrainExportFailuresError, ExportFailureDrainIntervalMs);
 
+            // The identity is read back from the provider rather than worked out a second time
+            // here: the environment can decide either value (see
+            // OtlpOptions.ConfigureServiceIdentity), and the line is only any use to an admin if it
+            // names what the backend will actually see. No instance clause when the resource has
+            // none, which is what an OTEL_SERVICE_NAME set without an id in
+            // OTEL_RESOURCE_ATTRIBUTES gives.
+            Resource exported = provider.GetResource();
+            string? instanceId = OtlpOptions.ResourceAttribute(exported, OtlpOptions.ServiceInstanceIdKey);
+
             // Scheme, host, port and path only, the same components the exporter's own
             // diagnostics ever carry: userinfo or a query string in the configured endpoint (a
             // backend that authenticates through a signed URL, say) has no business in a log line
             // at any level.
-            api.Logger.Notification(
-                "Pulse OTLP exporting {0} to {1} over {2} every {3}s as service '{4}'",
+            Mod.Logger.Notification(
+                "Pulse OTLP exporting {0} to {1} over {2} every {3}s as service '{4}'{5}",
                 string.Join(", ", meters), OtlpOptions.LoggableEndpoint(endpoint),
                 protocol == OtlpExportProtocol.Grpc ? "grpc" : "http/protobuf", intervalMs / 1000,
-                serviceName);
+                OtlpOptions.ResourceAttribute(exported, OtlpOptions.ServiceNameKey),
+                instanceId is null ? string.Empty : $", instance '{instanceId}'");
+
+            // A generated id is only worth anything if the next start finds it in the file, and
+            // neither the store nor the upgrade above can promise that. A ModConfig folder mounted
+            // read-only is a warning of the upgrade's own, which does not say what it costs. A file
+            // Newtonsoft reads and the upgrade's comparison cannot (single quotes, unquoted keys)
+            // is no warning at all, since that comparison then finds nothing missing. Reading the
+            // file back, through the loader the next start will use, is the one check that covers
+            // every way of not getting the id written. Skipped when the exported id is not the
+            // generated one: the environment's decided it, or the key was never used.
+            if (instanceIdGenerated
+                && instanceId == config.ServiceInstanceId
+                && !FileHoldsInstanceId(() => api.LoadModConfig<PulseOtlpConfig>(ConfigFile), instanceId))
+            {
+                Mod.Logger.Warning(UnsavedInstanceIdMessage, ConfigFile, instanceId);
+            }
         }
         catch (Exception ex)
         {
@@ -218,7 +229,7 @@ public sealed class PulseOtlpModSystem : ModSystem
             // this mod controls, and nothing guarantees it never echoes the value that failed it.
             // The exception's type is diagnostic enough to tell a bad endpoint apart from a bad
             // interval without repeating either.
-            api.Logger.Error(
+            Mod.Logger.Error(
                 "Pulse OTLP could not start exporting ({0}); its configuration in {1} is not "
                 + "something the OpenTelemetry SDK accepts. Nothing will be exported; the game "
                 + "server is unaffected.",
@@ -288,9 +299,30 @@ public sealed class PulseOtlpModSystem : ModSystem
         }
     }
 
+    /// <summary>The one line an admin sees when the id this session generated could not be written
+    /// to pulse-otlp.json. Args: the config file's name, the id this session exports. It says what
+    /// that costs and both ways out, since the admin is the only one who can take either.</summary>
+    internal const string UnsavedInstanceIdMessage =
+        "Pulse OTLP exports the generated service.instance.id '{1}' this session but could not save "
+        + "it to {0} (a read-only ModConfig folder, say, or a file Pulse cannot rewrite), so the next "
+        + "start will export a different one and every restart will begin a new set of series in "
+        + "the backend. To keep one, set ServiceInstanceId in {0} to any text you like, '{1}' "
+        + "included, or set OTEL_RESOURCE_ATTRIBUTES=service.instance.id=<id> in the server's "
+        + "environment.";
+
+    /// <summary>Whether the config file, read back through <paramref name="load"/>, holds
+    /// <paramref name="instanceId"/>: what the next start will find in it. False for a file that is
+    /// gone or will not load, since <see cref="ConfigLoad.Resolve{T}"/> then hands back a default
+    /// config, whose id is blank and so never equals a generated one. Delegate-driven, like
+    /// <see cref="TryStoreDefaults"/>, so it is unit-tested without an engine.</summary>
+    internal static bool FileHoldsInstanceId(Func<PulseOtlpConfig?> load, string instanceId)
+        => string.Equals(
+            ConfigLoad.Resolve(load, () => new PulseOtlpConfig()).Config.ServiceInstanceId,
+            instanceId, StringComparison.Ordinal);
+
     private void OnDrainExportFailures(float _) => DrainExportFailures();
 
-    private void OnDrainExportFailuresError(Exception e) => sapi?.Logger.Error(e);
+    private void OnDrainExportFailuresError(Exception e) => Mod.Logger.Error(e);
 
     /// <summary>Passed as an argument, never as the format string: the game's logger runs every
     /// message through string.Format, and a backend's JSON error body can carry braces that would
@@ -298,6 +330,6 @@ public sealed class PulseOtlpModSystem : ModSystem
     /// Fatal; the "succeeded" line is Notification, so the very first export on a healthy server
     /// does not read as a warning about anything.</summary>
     private void DrainExportFailures() => exportFailureLog?.Drain(
-        line => sapi?.Logger.Warning("{0}", line),
-        line => sapi?.Logger.Notification("{0}", line));
+        line => Mod.Logger.Warning("{0}", line),
+        line => Mod.Logger.Notification("{0}", line));
 }

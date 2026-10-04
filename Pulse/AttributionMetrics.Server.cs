@@ -15,9 +15,10 @@ namespace Pulse;
 /// <see cref="ICoreServerAPI"/> use, same as the rest of <c>PulseModSystem</c>.</remarks>
 internal sealed partial class AttributionMetrics
 {
-    /// <summary>Wires attribution against a live server: which mod owns which tick listener, the
-    /// listener walk that sharpens it, the profiler priming, and the <c>/pulse</c> command, on top
-    /// of the instruments and the duty cycle the chained constructor sets up.</summary>
+    /// <summary>Wires attribution against a live server: which mod owns which tick listener and
+    /// which entity behavior, the walks that sharpen both, the profiler priming, and the
+    /// <c>/pulse</c> command, on top of the instruments and the duty cycle the chained constructor
+    /// sets up.</summary>
     /// <remarks>All of it runs whether or not <c>Attribution.Enabled</c> is set, priming included,
     /// because that is what makes switching attribution on later structurally safe rather than
     /// merely likely to work: see PrimeFrameProfiler for what happens to a server whose profiler is
@@ -25,15 +26,17 @@ internal sealed partial class AttributionMetrics
     /// never uses is two profiled ticks at startup and four instruments nothing records into, and
     /// an instrument with no measurement is not a series: an idle server serves the same exposition
     /// it did before.</remarks>
-    public AttributionMetrics(ICoreServerAPI api, Meter meter, PulseConfig booted)
+    public AttributionMetrics(ICoreServerAPI api, ILogger logger, Meter meter, PulseConfig booted)
         : this(
             meter,
             booted.Attribution ?? new AttributionConfig(),
             () => api.World.FrameProfiler,
             _ => { }, // replaced below: cannot reference attributionProbe before `this` exists
-            (template, message) => api.Logger.Warning(template, message))
+            (template, message) => logger.Warning(template, message),
+            modOwners => modOwners.LearnBehaviors(api.World.LoadedEntities))
     {
         this.api = api;
+        this.logger = logger;
         this.booted = booted;
         walkListeners = modOwners => attributionProbe?.Refresh(modOwners);
 
@@ -53,18 +56,18 @@ internal sealed partial class AttributionMetrics
         catch (Exception e)
         {
             attributionProbe = null;
-            api.Logger.Warning(ListenerWalkWarning, e.Message);
+            logger.Warning(ListenerWalkWarning, e.Message);
         }
 
         if (attribution!.Enabled)
         {
-            api.Logger.Notification(
+            logger.Notification(
                 "Pulse attributes the tick per mod: bursts of {0} ticks every {1}s.",
                 attribution.BurstTicks, attribution.IntervalSeconds);
         }
         else
         {
-            api.Logger.Notification(
+            logger.Notification(
                 "Pulse is ready to attribute the tick per mod but is not measuring: /pulse attribution on starts it.");
         }
 
@@ -74,7 +77,7 @@ internal sealed partial class AttributionMetrics
         // would ever turn a primed profiler back off for the rest of the run.
         if (ConfigLoad.TryRun(() => RegisterCommands(api)) is { } commandFailure)
         {
-            api.Logger.Warning(
+            logger.Warning(
                 "Pulse could not register /pulse ({0}). Attribution and the metrics endpoint are "
                 + "unaffected; only the chat command and /pulse reload are unavailable.",
                 commandFailure);
@@ -134,7 +137,7 @@ internal sealed partial class AttributionMetrics
         {
             loaded = api!.LoadModConfig<PulseConfig>(PulseModSystem.ConfigFile)
                 ?? throw new FileNotFoundException(PulseModSystem.ConfigFile + " is not in ModConfig");
-            ConfigUpgrade.Upgrade(api, loaded, PulseModSystem.ConfigFile, "Pulse");
+            ConfigUpgrade.Upgrade(api, logger!, loaded, PulseModSystem.ConfigFile, "Pulse");
         }
         catch (Exception e)
         {

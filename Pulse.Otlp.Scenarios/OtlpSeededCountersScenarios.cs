@@ -30,7 +30,7 @@ namespace Pulse.Otlp.Scenarios;
 [AtlasDataFiles("data/otlpseed", TargetPath = "ModConfig")]
 public class OtlpSeededCountersScenarios : AtlasScenarioBase
 {
-    private const int CollectorPort = 39481;
+    private const int CollectorPort = 29481;
 
     private static readonly TimeSpan ExportInterval = TimeSpan.FromSeconds(2);
 
@@ -62,7 +62,8 @@ public class OtlpSeededCountersScenarios : AtlasScenarioBase
         using FakeCollector collector = new(CollectorPort);
 
         FakeCollector.Export export = await Exports.WaitFor(
-            () => collector.First, () => World.Ticks(10), ExportInterval * 15, CollectorPort);
+            () => collector.First, () => collector.Count,
+            () => World.Ticks(10), ExportInterval * 15, CollectorPort);
 
         Assert.Equal("application/x-protobuf", export.ContentType);
 

@@ -274,6 +274,72 @@ public class ConfigUpgradeTests
         Assert.Empty(diff.Unknown);
     }
 
+    /// <summary>The one value Compare does look at. A key the file carries empty, null, an empty
+    /// string or whitespace, for which the loaded config now holds a real string: nothing but a mod
+    /// filling in a value of its own after loading can make the two differ that way, and only the
+    /// rewrite puts the new value into the file, so the key counts as missing even though the file
+    /// has it. (The OTLP mod's generated service instance id is the case this exists for: lost on
+    /// the next restart if the file were left alone.)</summary>
+    [Theory]
+    [InlineData("\"\"")]
+    [InlineData("\"   \"")]
+    [InlineData("null")]
+    public void Compare_Reports_ABlankKey_TheConfigHasSinceFilledIn(string blank)
+    {
+        string file = "{ \"Enabled\": true, \"ServiceInstanceId\": " + blank + " }";
+        const string config = """{ "Enabled": true, "ServiceInstanceId": "3f2a8c1e" }""";
+
+        ConfigDiff diff = ConfigUpgrade.Compare(file, config);
+
+        Assert.Equal(["ServiceInstanceId"], diff.Missing);
+        Assert.Empty(diff.Unknown);
+    }
+
+    /// <summary>The same key one block down is named by its path, like any other missing key.</summary>
+    [Fact]
+    public void Compare_Reports_ABlankKeyInsideABlock_ByItsPath()
+    {
+        ConfigDiff diff = ConfigUpgrade.Compare(
+            """{ "Attribution": { "Enabled": true, "Label": "" } }""",
+            """{ "Attribution": { "Enabled": true, "Label": "x" } }""");
+
+        Assert.Equal(["Attribution.Label"], diff.Missing);
+    }
+
+    /// <summary>A key spelled twice under different casing: Newtonsoft keeps the last spelling's
+    /// value for a scalar, so the last one decides whether the key is blank. "Id" holding a value
+    /// and "id" after it holding none loads blank, and the fill the config now holds has to be
+    /// written; the other way round loads the value, and there is nothing to write.</summary>
+    [Theory]
+    [InlineData("""{"Id":"abc","id":""}""", true)]
+    [InlineData("""{"Id":"","id":"abc"}""", false)]
+    public void Compare_Takes_TheLastSpellingOfADuplicatedKey_AsTheOneThatDecidesWhetherItIsBlank(
+        string file, bool reported)
+    {
+        ConfigDiff diff = ConfigUpgrade.Compare(file, """{"Id":"g"}""");
+
+        Assert.Equal(reported ? ["Id"] : [], diff.Missing);
+    }
+
+    /// <summary>Blank on both sides is the admin's own empty value, loaded as written and left
+    /// alone: a blank the mod did not fill in is no reason to rewrite their file. A value on disk
+    /// stays theirs whatever the config holds, which is what <see cref="Compare_Ignores_Values"/>
+    /// already says about every other value.</summary>
+    [Theory]
+    [InlineData("\"\"", "\"\"")]
+    [InlineData("\"\"", "null")]
+    [InlineData("null", "null")]
+    [InlineData("\"admin's own\"", "\"3f2a8c1e\"")]
+    [InlineData("\"admin's own\"", "\"\"")]
+    public void Compare_Leaves_AKeyAlone_UnlessTheFileIsBlankAndTheConfigIsNot(string onDisk, string loaded)
+    {
+        ConfigDiff diff = ConfigUpgrade.Compare(
+            "{ \"Label\": " + onDisk + " }", "{ \"Label\": " + loaded + " }");
+
+        Assert.Empty(diff.Missing);
+        Assert.Empty(diff.Unknown);
+    }
+
     /// <summary>A block that is not a block on disk stops the walk there. Whatever the admin put
     /// in its place is theirs, and the rewrite replaces the lot with one default block.</summary>
     [Fact]
@@ -315,6 +381,26 @@ public class ConfigUpgradeTests
 
         Assert.Empty(diff.Missing);
         Assert.Empty(diff.Unknown);
+    }
+
+    /// <summary>The line is written for a key the file held empty, which the mod filled in rather
+    /// than added, and for a value that is no default (the OTLP mod's generated service instance
+    /// id): it names what was written, and calls neither an addition nor a default.</summary>
+    [Fact]
+    public void AddedKeysTemplates_DoNotCallAWrittenKeyAnAddedOne_OrItsValueADefault()
+    {
+        foreach (ConfigDiff diff in new ConfigDiff[]
+        {
+            new(Missing: ["ServiceInstanceId"], Unknown: [], Duplicated: []),
+            new(Missing: ["ServiceInstanceId"], Unknown: [], Duplicated: ["Port: \"port\" wins over \"Port\""]),
+        })
+        {
+            string template = ConfigUpgrade.AddedKeysTemplate(diff);
+
+            Assert.Contains("wrote these keys into {1}: {2}.", template);
+            Assert.DoesNotContain("added", template);
+            Assert.DoesNotContain("default", template);
+        }
     }
 
     /// <summary>The release review's still-false variant of the added-keys line: the plain "kept

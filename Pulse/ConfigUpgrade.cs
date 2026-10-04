@@ -18,13 +18,15 @@ internal readonly record struct ConfigDiff(
 /// referencing Pulse.dll, because the two mods deliberately share no assembly.</remarks>
 internal static class ConfigUpgrade
 {
+    /// <summary>"Wrote", not "added", and no "defaults": a key the file held empty and the mod
+    /// filled in was not added, and what the OTLP mod fills a blank service instance id with is a
+    /// generated value, which is no default. The line only says what ended up in the file.</summary>
     private const string AddedKeys =
-        "{0} added these keys to {1} with their defaults: {2}. Everything already in the file was "
-        + "kept as it was.";
+        "{0} wrote these keys into {1}: {2}. Everything else in the file was kept as it was.";
 
     private const string AddedKeysDroppedDuplicates =
-        "{0} added these keys to {1} with their defaults: {2}. The same rewrite also dropped the "
-        + "duplicate keys below to one spelling each.";
+        "{0} wrote these keys into {1}: {2}. The same rewrite also dropped the duplicate keys "
+        + "below to one spelling each.";
 
     private const string DroppedKeys =
         "{0} does not know these keys in {1}, and rewriting the file has just dropped them: {2}. "
@@ -50,7 +52,7 @@ internal static class ConfigUpgrade
     private static readonly JsonDocumentOptions Lenient =
         new() { CommentHandling = JsonCommentHandling.Skip, AllowTrailingCommas = true };
 
-    /// <summary>Which added-keys line is true: the plain one, or the one admitting that the same
+    /// <summary>Which written-keys line is true: the plain one, or the one admitting that the same
     /// rewrite also collapsed a duplicate spelling, when <see cref="Compare"/> found one alongside
     /// the missing keys that triggered the rewrite. Returns the template, not a line with the
     /// missing keys already substituted into it: those names come straight off the admin's own
@@ -68,13 +70,14 @@ internal static class ConfigUpgrade
         diff.Missing.Count > 0 ? DuplicateKeysResolved : DuplicateKeys;
 
     /// <summary>Adds whatever keys a newer version of the mod introduced to the config file the
-    /// admin already has, and says in the log what changed.</summary>
+    /// admin already has, and says on <paramref name="logger"/> what changed.</summary>
     /// <remarks>The file is rewritten from <paramref name="config"/>, which the loader filled with
     /// defaults wherever the file was silent, so the write only ever adds: every value the admin
-    /// set is already in the object. It happens solely when a key is missing, because a complete
-    /// file must not be touched at all, not even its modification time, on a host that mounts
-    /// ModConfig read-only or tracks it. The same rewrite is what drops a key the config does not
-    /// know, which is why an unknown key is worth a warning rather than silence.
+    /// set is already in the object. (Or fills a blank one the mod has since replaced: see
+    /// <see cref="Compare"/>.) It happens solely when a key is missing, because a complete file
+    /// must not be touched at all, not even its modification time, on a host that mounts ModConfig
+    /// read-only or tracks it. The same rewrite is what drops a key the config does not know,
+    /// which is why an unknown key is worth a warning rather than silence.
     /// <para>Nothing in here may take a server down over a config file, so a read or a write that
     /// fails is one warning and then the server carries on unchanged.</para>
     /// <para>Excluded from coverage for the same reason <c>PulseModSystem</c>,
@@ -88,7 +91,7 @@ internal static class ConfigUpgrade
     /// touching Pulse.Otlp's own project file, which links this file in and belongs to a separate
     /// PR.</para></remarks>
     [ExcludeFromCodeCoverage]
-    public static void Upgrade<T>(ICoreServerAPI api, T config, string filename, string modName)
+    public static void Upgrade<T>(ICoreServerAPI api, ILogger logger, T config, string filename, string modName)
         where T : class
     {
         ConfigDiff diff;
@@ -101,26 +104,26 @@ internal static class ConfigUpgrade
             if (diff.Missing.Count > 0)
             {
                 api.StoreModConfig(config, filename);
-                api.Logger.Notification(
+                logger.Notification(
                     AddedKeysTemplate(diff), modName, filename, string.Join(", ", diff.Missing));
             }
         }
         catch (Exception e)
         {
-            api.Logger.Warning(UpgradeFailed, modName, filename, e.Message);
+            logger.Warning(UpgradeFailed, modName, filename, e.Message);
             return;
         }
 
         if (diff.Unknown.Count > 0)
         {
-            api.Logger.Warning(
+            logger.Warning(
                 diff.Missing.Count > 0 ? DroppedKeys : IgnoredKeys,
                 modName, filename, string.Join(", ", diff.Unknown));
         }
 
         if (diff.Duplicated.Count > 0)
         {
-            api.Logger.Warning(
+            logger.Warning(
                 DuplicateKeysTemplate(diff), modName, filename, string.Join("; ", diff.Duplicated));
         }
     }
@@ -129,7 +132,13 @@ internal static class ConfigUpgrade
     /// which keys of <paramref name="onDisk"/> are absent from <paramref name="loaded"/>, and which
     /// keys of <paramref name="onDisk"/> repeat the same key under different casing.</summary>
     /// <remarks>Keys only, never values, so key order and formatting make no difference, other than
-    /// deciding which of a duplicated key's spellings a rewrite would keep. A missing block is
+    /// deciding which of a duplicated key's spellings a rewrite would keep. The one value this does
+    /// look at is a blank one: a key the file carries as null, an empty string or whitespace, for
+    /// which <paramref name="loaded"/> now holds a real string, counts as missing too. Nothing but a
+    /// mod filling in a value of its own after loading the file can make the two differ that way
+    /// (what the file says and what Newtonsoft loaded from it are otherwise the same), and it is
+    /// the rewrite that puts the filled value into the file: without this, a service instance id
+    /// generated for a key the admin left empty would be lost on the next restart. A missing block is
     /// reported by its own name and not walked: naming its children would only pad the log line
     /// with keys the admin never had. Text that does not parse as a JSON object reports nothing,
     /// which leaves the file alone rather than rewriting something unreadable.
@@ -183,6 +192,14 @@ internal static class ConfigUpgrade
             {
                 missing.Add(prefix + entry.Key);
                 continue;
+            }
+
+            // The last spelling is the one Newtonsoft's binding keeps for a scalar, the same winner
+            // DescribeDuplicate names. Reported under the key's own name like an absent one, and
+            // not skipped past: a duplicate spelling of it still deserves its own warning below.
+            if (IsBlank(matches[^1].Value) && IsFilled(entry.Value))
+            {
+                missing.Add(prefix + entry.Key);
             }
 
             if (matches.Count > 1 && reported.Add(matches[0].Key))
@@ -260,6 +277,15 @@ internal static class ConfigUpgrade
 
         return merged;
     }
+
+    /// <summary>A JSON null, or a string with nothing but whitespace in it.</summary>
+    private static bool IsBlank(JsonNode? node) =>
+        node is null
+        || (node is JsonValue value && value.TryGetValue(out string? text) && string.IsNullOrWhiteSpace(text));
+
+    /// <summary>A string with something other than whitespace in it.</summary>
+    private static bool IsFilled(JsonNode? node) =>
+        node is JsonValue value && value.TryGetValue(out string? text) && !string.IsNullOrWhiteSpace(text);
 
     private static JsonObject? Parse(string json)
     {

@@ -34,7 +34,18 @@ public sealed class PulseOtlpConfig
     /// dashboard variables are usually keyed off it. A blank value falls back to the default
     /// rather than exporting an empty attribute; see <see cref="OtlpOptions.ResolveServiceName"/>.
     /// The OTEL_SERVICE_NAME environment variable, the ecosystem's standard override, takes
-    /// precedence over this key when it is set: see the guard in
-    /// PulseOtlpModSystem.StartServerSide.</summary>
+    /// precedence over this key when it is set: see <see cref="OtlpOptions.ConfigureServiceIdentity"/>.</summary>
     public string ServiceName { get; set; } = "vintagestory";
+
+    /// <summary>The service.instance.id resource attribute every export carries, which a backend
+    /// turns into the "instance" label: it tells two servers with the same <see cref="ServiceName"/>
+    /// apart, and a series is only continuous across restarts if it stays the same. Blank, or
+    /// missing from a file written by an older version, means "generate one": Pulse OTLP puts a
+    /// fresh GUID in this key at startup, writing the file, and so finds the same one on every
+    /// start after that. Any other value is used as written, trimmed. Each server needs its own: a
+    /// file copied to a second server carries the first one's id along. The
+    /// OTEL_RESOURCE_ATTRIBUTES environment variable's service.instance.id takes precedence over
+    /// this key when it has one, and OTEL_SERVICE_NAME leaves this key unused, along with
+    /// <see cref="ServiceName"/>: see <see cref="OtlpOptions.ConfigureServiceIdentity"/>.</summary>
+    public string ServiceInstanceId { get; set; } = string.Empty;
 }

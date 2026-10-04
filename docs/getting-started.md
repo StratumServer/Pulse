@@ -38,20 +38,25 @@ your own computer. Pulse needs Vintage Story 1.22 or newer.
    goes. By default that is:
    - Linux, the `server.sh` that ships with the server: `/var/vintagestory/data/Mods` (its
      `DATAPATH`, unless you changed it).
-   - Linux, running the server binary yourself with no `--dataPath`: `~/.config/VintagestoryData/Mods`.
+   - Linux, running the server binary yourself with no `--dataPath`:
+     `~/.config/VintagestoryData/Mods` (`$XDG_CONFIG_HOME/VintagestoryData/Mods` instead, if that
+     is set to an absolute path).
    - Windows: `%AppData%\VintagestoryData\Mods` (not `%AppData%\Vintagestory`, the install
      folder itself, a different place one word shorter).
+   - macOS: `~/Library/Application Support/VintagestoryData/Mods` (not `~/.config` as on Linux;
+     Finder hides `~/Library`, so use Go, Go to Folder and paste the path).
    - A rented panel: wherever its file manager already shows your other mods; the panel has
      usually worked this out for you already.
 3. Start (or restart) the server.
 4. Watch the server's log for this line, which is Pulse confirming it is up:
 
    ```
-   Pulse serving metrics on http://127.0.0.1:9464/metrics
+   [pulse] Pulse serving metrics on http://127.0.0.1:9464/metrics
    ```
 
    The log is either the console you started the server in, or `Logs/server-main.log` next to
-   `Mods/`. On a panel-only host, use whatever log view the panel gives you.
+   `Mods/`. On a panel-only host, use whatever log view the panel gives you. The `[pulse]` is the
+   game marking the entry as that mod's; the OTLP mod's entries carry `[pulseotlp]`.
 5. If you have a terminal or browser on the server itself, confirm the page it just mentioned
    actually answers (no shell on a panel-only host: skip this check and go straight to path B
    below). The address is `127.0.0.1`, meaning "this machine only", so this check has to run on
@@ -138,11 +143,14 @@ the server.
 3. When you are done, stop both programs from the same folder:
 
    ```sh
-   docker compose down
+   docker compose down -v
    ```
 
    This does not keep any history: this setup uses no named storage, so both containers start
-   empty again next time. That is fine for a first look; it is not a backup of anything.
+   empty again next time. That is fine for a first look; it is not a backup of anything. The `-v`
+   also deletes the volume Docker creates by itself for Prometheus's data, which a new run would
+   not reuse anyway; the files in this folder stay. Leave `-v` off if you add a named volume of
+   your own to keep the history.
 
 This assumes Pulse is running on the same machine as this Docker setup, using the default
 `127.0.0.1:9464` from step 1. That works because the compose file uses "host networking": the
@@ -172,8 +180,12 @@ elsewhere instead of widening that bind.
 3. When you are done:
 
    ```sh
-   docker compose -f docker-compose.desktop.yml down
+   docker compose -f docker-compose.desktop.yml down -v
    ```
+
+   The `-v` also deletes the volume Docker creates by itself for Prometheus's data, which a new
+   run would not reuse anyway; the files in this folder stay. Leave `-v` off if you add a named
+   volume of your own to keep the history.
 
 This file reaches Pulse through `host.docker.internal`, the address Docker Desktop provides for
 reaching the machine it runs on from inside a container, since Desktop cannot use host networking
@@ -181,6 +193,44 @@ the way Linux does. Use this file when Pulse runs directly on this same Windows 
 Docker Desktop is not available on Windows Server; use path B there instead. Both ports are
 published to `127.0.0.1` only, on purpose: Grafana's anonymous access has no password of its own,
 so nothing outside this machine should reach it.
+
+### Optional: load the alert rules
+
+Once the dashboard works, the same Prometheus can also watch for trouble. `contrib/alerts` holds a
+rules file for it, `pulse-alerts.yml`: rules such as a tick rate that stays low or a metrics
+endpoint that stops answering, most with a note on what to check first. The compose files do not
+load it unless you ask. With Prometheus still running, add these lines at the end of
+`prometheus.yml` (or `prometheus.desktop.yml`, if you started the Docker Desktop file), which name
+the rules file as the container will see it:
+
+```yaml
+rule_files:
+  - /etc/pulse/pulse-alerts.yml
+```
+
+Then, from the same `contrib/grafana` folder, copy the rules file in beside that config so the
+container can see it, and make Prometheus read its files again by sending SIGHUP to its process,
+number 1 inside the container the compose files call `pulse-prom`. Nothing is stopped: Prometheus
+keeps running, and if it cannot load something in the files it carries on with what it had:
+
+```sh
+cp ../alerts/pulse-alerts.yml .
+docker exec pulse-prom kill -HUP 1
+```
+
+Open `http://localhost:9090/alerts` (through your SSH tunnel if this is a remote server): the
+rules are listed there, and none is firing while nothing is wrong. If it lists no rules, check
+that the `rule_files` lines are saved in the config file your compose file starts Prometheus with
+(`prometheus.yml` for the Linux file, `prometheus.desktop.yml` for the Desktop one) and that the
+name after `/etc/pulse/` matches the file you copied: Prometheus does not complain about a rules
+file it cannot find. If the reload itself failed, `docker logs pulse-prom` says why; fix it before
+the next restart, which would stop on the same error.
+
+A firing alert only shows up on that page; to be told about one, point Prometheus at an
+Alertmanager, which [the alerts README](../contrib/alerts/README.md) leaves to you. After a
+`git pull`, run the two commands again to pick up newer rules; if you replaced the folder (the ZIP
+route) or the pull refused because of your edit to the config, add the `rule_files` lines again
+first.
 
 ## Path B: Grafana Cloud, if you would rather host nothing
 
@@ -225,9 +275,11 @@ have one already.
    }
    ```
 
-   Leave every other key as the mod wrote it. `Endpoint` is the base address only, Pulse adds
-   the rest of the path itself.
-5. Start the server again. Look for a log line starting with `Pulse OTLP exporting`, which
+   Leave every other key as the mod wrote it, `ServiceInstanceId` included (not the Grafana Cloud
+   instance ID from step 1): the mod generated that id when it first started, and it keeps this
+   server's numbers together in Grafana across restarts. `Endpoint` is the base address only, Pulse
+   adds the rest of the path itself.
+5. Start the server again. Look for a log line containing `[pulseotlp] Pulse OTLP exporting`, which
    confirms it is pushing on a timer; by default that timer is 60 seconds, so give it a minute.
 6. Confirm it arrived: in Grafana Cloud, open **Explore**, pick your Prometheus data source, and
    query `pulse_players_online`. A value coming back means it worked.
@@ -290,15 +342,15 @@ dashboard or alert you built against the old names still needs updating.
   README. Both apply the same way on path B.
 - **Path B: numbers never show up.** An OTLP push that Grafana Cloud rejects costs nothing on the
   game side, but it no longer stays quiet: check the server's log, the console or
-  `Logs/server-main.log` from step 4 of installing the mod above, for a line starting `Pulse OTLP
-  export to`. A wrong or expired token reads like this:
+  `Logs/server-main.log` from step 4 of installing the mod above, for a line containing
+  `[pulseotlp] Pulse OTLP export to`. A wrong or expired token reads like this:
 
   ```
-  Pulse OTLP export to https://otlp-gateway-<region>.grafana.net/otlp/v1/metrics failed:
+  [pulseotlp] Pulse OTLP export to https://otlp-gateway-<region>.grafana.net/otlp/v1/metrics failed:
   Response status code does not indicate success: 401 (Unauthorized). The backend answered:
-  {"code":16,"message":"authentication error: invalid scope provided"} Metrics are not reaching
-  the backend; check Endpoint and Headers in pulse-otlp.json. This is logged again at most every
-  10 minutes.
+  {"code":16,"message":"authentication error: invalid scope provided"} Metrics are not reaching the
+  backend; check Endpoint and Headers in pulse-otlp.json. This is logged again at most every 10
+  minutes.
   ```
 
   `pulse-otlp.json` only holds the already-encoded `Authorization` value, not a separate instance

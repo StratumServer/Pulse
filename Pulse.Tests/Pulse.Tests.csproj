@@ -6,9 +6,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageReference Include="xunit" Version="2.9.*" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
   </ItemGroup>
 
@@ -26,5 +26,11 @@
          VintagestoryLib rather than VintagestoryAPI: what PulseModSystemClashTests registers a
          name clash against, so the clash is the engine's own exception, not a stand-in for it. -->
     <Reference Include="VintagestoryLib" HintPath="$(VINTAGE_STORY)/VintagestoryLib.dll" Private="true" />
+
+    <!-- Survival, which the game ships in Mods/ beside the API. ModOwnersTests names its
+         EntityBehaviorPassivePhysicsMultiBox, which inherits the engine's passive physics name and is
+         the one pair of classes vanilla has that a name is shared across two owners. Only the type is
+         named: no Survival code runs. -->
+    <Reference Include="VSSurvivalMod" HintPath="$(VINTAGE_STORY)/Mods/VSSurvivalMod.dll" Private="true" />
   </ItemGroup>
 </Project>

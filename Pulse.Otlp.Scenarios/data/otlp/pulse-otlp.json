@@ -1,11 +1,12 @@
 {
   "Enabled": true,
-  "Endpoint": "http://127.0.0.1:39469",
+  "Endpoint": "http://127.0.0.1:29469",
   "Protocol": "http/protobuf",
   "Headers": {
     "x-scope-orgid": "atlas"
   },
   "IntervalSeconds": 5,
   "IncludeRuntimeMetrics": false,
-  "ServiceName": "pulse-atlas-test"
+  "ServiceName": "pulse-atlas-test",
+  "ServiceInstanceId": "pulse-atlas-test-instance"
 }

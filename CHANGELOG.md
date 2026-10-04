@@ -8,7 +8,80 @@ first.
 
 ## [Unreleased]
 
-Nothing yet.
+## [0.2.1] - 2026-10-04
+
+Everything from v0.2.1-indev.1, unchanged: each mod's id in its log lines, an OTLP `instance`
+label that survives restarts, and per-mod attribution that credits the game's own entity
+behaviours to the mod that ships them.
+
+### Changed
+
+- Both mods now write to the server log through the logger the game gives each mod, so every entry
+  they write carries the mod's id in square brackets right after the severity: `[pulse]` for the
+  base mod and `[pulseotlp]` for the OTLP mod. `Logs/server-main.log` used to hold
+  `[Notification] Pulse serving metrics on http://127.0.0.1:9464/metrics` and now holds
+  `[Notification] [pulse] Pulse serving metrics on http://127.0.0.1:9464/metrics`. An entry that
+  runs over several lines, such as an exception with its stack trace, has the severity and the id on
+  its first line only. The messages themselves are word for word what they were, so a search for the
+  words of one still finds it; a pattern, in a log shipper or an alert rule, that expects the
+  severity to be followed straight by Pulse's own words needs the mod's tag between the two.
+  `pulse_log_entries_total` and `pulse_engine_warnings_total` are unchanged: they count what the
+  server's own logger receives, and every mod's logger passes its entries on to it.
+- **The `instance` label of a Pulse OTLP server's series now stays the same across restarts, and
+  changes once, when the server first starts on this version.** 0.2.0 exported a
+  `service.instance.id` that the OpenTelemetry SDK generated at random on every start (unless
+  `OTEL_SERVICE_NAME` was set), which Prometheus, Mimir and Grafana Cloud show as the `instance`
+  label: every restart began a new set of series next to the old one, and a dashboard or an alert
+  keyed on `instance` saw a different server each time. The id now lives in a new
+  `ServiceInstanceId` key of `pulse-otlp.json`. Left blank, or missing from a file an older version
+  wrote, it is filled with a generated GUID at startup and written into the file, and every start
+  after that finds it there. That GUID is not the one the last 0.2.0 start exported, which is the
+  one change of label; after it, the label stays. Any other value is used as written, trimmed, so a
+  readable id such as `survival-eu-1` can go in the key instead, and clearing the key asks for a
+  new generated one. For a server coming from 0.2.0 that first start is also the first rewrite of
+  its complete `pulse-otlp.json`, which drops any comments in it without a word and any key Pulse
+  does not know with a warning. The line that reports the write, `Pulse OTLP wrote these keys into
+  pulse-otlp.json: ServiceInstanceId. Everything else in the file was kept as it was.`, reads that
+  way in both mods now: it said `added these keys to <file> with their defaults`, which was not
+  true of a key the file held empty or of a generated value.
+
+  Pulse OTLP cannot save the id it generated when `ModConfig` is mounted read-only, or when the
+  file is one it cannot rewrite (written with single quotes, say). It then logs a warning that
+  names the id and says the next start will export a different one. On a read-only `ModConfig`, put
+  `ServiceInstanceId` in the file yourself, or set `OTEL_RESOURCE_ATTRIBUTES=service.instance.id=<id>`
+  in the server's environment. A folder that does not survive a restart loses the id the same way,
+  with no warning, since the write itself worked. Each server needs an id of its own: a
+  `pulse-otlp.json` copied to a second server, or a template that several servers' `ModConfig`
+  folders are built from, carries one id to all of them, and two servers with the same
+  `ServiceName` and the same id are one server to a backend. Clear the key in the copy, or give each
+  server a different `ServiceInstanceId` or `OTEL_RESOURCE_ATTRIBUTES=service.instance.id=<id>`.
+
+  The environment keeps the last word, as it already did for the name. A `service.instance.id` in
+  `OTEL_RESOURCE_ATTRIBUTES` takes precedence over the key, and survives: 0.2.0 replaced it with a
+  random one on every start unless `OTEL_SERVICE_NAME` was set too. `OTEL_SERVICE_NAME`, when set,
+  still leaves the whole identity to the environment, so neither `ServiceName` nor
+  `ServiceInstanceId` is used and the resource carries an instance id only if
+  `OTEL_RESOURCE_ATTRIBUTES` has one; pairing the two variables, as the 0.2.0 notes advise, still
+  works and is no longer needed. `service.name` is unchanged: without `OTEL_SERVICE_NAME`,
+  `ServiceName` still wins over a `service.name` in `OTEL_RESOURCE_ATTRIBUTES`. The startup line
+  `Pulse OTLP exporting ... as service 'vintagestory'` now ends with `, instance '<id>'` when the
+  export carries one, naming what the backend will see.
+
+### Fixed
+
+- Per-mod attribution no longer reports the time of many of the game's own entity behaviours as
+  `unattributed`. The engine marks a behaviour with the name its `PropertyName()` returns, and Pulse
+  looked that name up by the code its class was registered under, which differs for 18 of the 59
+  behaviour classes the game's own mods register in 1.22.7: `despawn` marks as `timeddespawn`,
+  `nametag` as `displayname`, `entitystatetags` as `entityStateTags`. Twelve names found no class,
+  so their time was filed under `unattributed`, which the README defines as work that no loaded mod
+  claims, when it belonged to `game` (the game's own Essentials mod), to `survival` or, for the
+  passive physics, to `engine`. Pulse now credits each name to the mod that ships the class
+  declaring it, learned from the loaded entities: a behaviour from a third-party mod is billed to
+  that mod whatever its name, and a subclass that inherits its parent's name to the parent's mod. On
+  a test server with 1,691 entities loaded, `unattributed` went from about 2.5% of the sampled tick
+  time to under 0.1%, and the difference went to `game`. What the read costs is in the README's
+  cost section.
 
 ## [0.2.0] - 2026-09-29
 

@@ -30,7 +30,6 @@ public class PulseModSystemClashTests
         List<string> order = [];
         List<Action<float>> tickListeners = [];
         Action? runGamePhase = null;
-        List<object?[]?> warnings = [];
         FrameProfilerUtil profiler = new("clash-test");
 
         (ICoreServerAPI api, AutoFakeProxy apiFake) = AutoFakeProxy.Create<ICoreServerAPI>();
@@ -73,15 +72,12 @@ public class PulseModSystemClashTests
         worldFake.On("get_FrameProfiler", _ => profiler);
         apiFake.On("get_World", _ => world);
 
-        (ILogger logger, AutoFakeProxy loggerFake) = AutoFakeProxy.Create<ILogger>();
-        loggerFake.On("Warning", args =>
-        {
-            warnings.Add(args);
-            return null;
-        });
+        // The server's logger, which Pulse's own mod logger passes every entry on to.
+        FakeLogger logger = new();
         apiFake.On("get_Logger", _ => logger);
 
         PulseModSystem system = new();
+        LoadedMod.Attach(system, "pulse", logger);
         try
         {
             Exception? thrown = Record.Exception(() => system.StartServerSide(api));
@@ -92,10 +88,11 @@ public class PulseModSystemClashTests
             // first (the config file and the engine probe, both unreachable through this fake API
             // and both already unrelated, pre-existing degrade paths of their own), but exactly
             // one names the clash, and none of the three is an exception escaping StartServerSide.
-            string[] rendered = warnings
-                .Select(w => string.Format((string)w![0]!, (object?[])w[1]!))
+            string[] warnings = logger.Entries
+                .Where(entry => entry.Type == EnumLogType.Warning)
+                .Select(entry => entry.Message)
                 .ToArray();
-            string clashWarning = Assert.Single(rendered, message => message.Contains("could not register /pulse"));
+            string clashWarning = Assert.Single(warnings, message => message.Contains("could not register /pulse"));
             Assert.Contains("Command with such name already exists", clashWarning);
 
             // The order the review's own DispatchProxy probe recorded: the main tick listener

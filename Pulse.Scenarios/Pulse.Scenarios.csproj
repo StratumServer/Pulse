@@ -6,10 +6,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageReference Include="xunit" Version="2.9.*" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
-    <PackageReference Include="Pixnop.Atlas.XUnit" Version="0.15.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" />
+    <!-- README.md names this version too, in the install command for the atlas CLI. Dependabot
+         ignores Pixnop.Atlas.*, so a bump here takes the README along by hand. -->
+    <PackageReference Include="Pixnop.Atlas.XUnit" Version="0.16.0" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
   </ItemGroup>
 
@@ -28,7 +30,15 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- Config fixtures seeded into the embedded server's data path by [AtlasDataFiles]. -->
+    <!-- Config fixtures seeded into the embedded server's data path by [AtlasDataFiles]. Each
+         pins the mod's port for its scenario class, and every one of those ports is below 32768
+         on purpose. From 32768 to 60999 Linux hands ports out by itself, to any listener bound
+         on port 0 and to every outgoing connection, and the test platform owns some of both:
+         vstest.console listens on one for the whole run, the test host connects to it from
+         another, and each dotnet test that ran in the minute before leaves one more in
+         TIME_WAIT. A fixture port inside that range coincides with one of them once in a few
+         hundred runs. The mod then fails to bind, serves nothing, and a whole class is refused
+         or times out with nothing in its own code to say why. -->
     <Content Include="data\**\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

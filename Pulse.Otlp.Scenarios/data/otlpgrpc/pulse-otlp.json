@@ -1,6 +1,6 @@
 {
   "Enabled": true,
-  "Endpoint": "http://127.0.0.1:39471",
+  "Endpoint": "http://127.0.0.1:29471",
   "Protocol": "grpc",
   "Headers": {
     "x-scope-orgid": "atlas"

@@ -6,15 +6,24 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.10.1" />
     <PackageReference Include="xunit" Version="2.9.*" />
-    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5" />
-    <PackageReference Include="Pixnop.Atlas.XUnit" Version="0.15.0" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="4.0.0" />
+    <!-- README.md names this version too, in the install command for the atlas CLI. Dependabot
+         ignores Pixnop.Atlas.*, so a bump here takes the README along by hand. -->
+    <PackageReference Include="Pixnop.Atlas.XUnit" Version="0.16.0" />
     <PackageReference Include="coverlet.collector" Version="6.0.4" />
   </ItemGroup>
 
   <ItemGroup>
     <Reference Include="VintagestoryAPI" HintPath="$(VINTAGE_STORY)/VintagestoryAPI.dll" Private="true" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The base suite's reader of the server log, shared as source rather than written out a
+         fifth time: a scenario here that checks a line a mod logged at startup needs exactly what
+         the base suite already has. Pulse.Otlp links the config upgrade the same way. -->
+    <Compile Include="..\Pulse.Scenarios\ServerLog.cs" Link="ServerLog.cs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -27,6 +36,9 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Every port these fixtures pin, the collectors' own included, stays below 32768, out of
+         the range the kernel assigns from by itself. Pulse.Scenarios.csproj says what goes
+         wrong inside it. -->
     <Content Include="data\**\*.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 

@@ -1,12 +1,15 @@
 using System.Diagnostics.CodeAnalysis;
 using System.Text.RegularExpressions;
 using OpenTelemetry.Exporter;
+using OpenTelemetry.Resources;
 
 namespace Pulse.Otlp;
 
-/// <summary>Turns the config file into what the OTLP exporter actually wants. Every method here is
-/// pure, which is the point: the wiring in the mod system is trivial and this is where the sharp
-/// edges of the exporter's own option handling are dealt with.</summary>
+/// <summary>Turns the config file into what the OTLP exporter actually wants. Nearly every method
+/// here is pure, which is the point: the wiring in the mod system is trivial and this is where the
+/// sharp edges of the exporter's own option handling are dealt with. The two exceptions make or
+/// read something of the process's own, a generated GUID and the environment variables, and are
+/// tested through the SDK itself.</summary>
 /// <remarks>Partial: <see cref="QuotedValue"/> is a source-generated regex, which requires the
 /// declaring type (and its method) to be partial.</remarks>
 public static partial class OtlpOptions
@@ -31,6 +34,16 @@ public static partial class OtlpOptions
     /// would recognise even before anyone edits the config.</summary>
     public const string DefaultServiceName = "vintagestory";
 
+    /// <summary>The resource attribute keys Pulse sets or reads, spelled as the OpenTelemetry
+    /// semantic conventions do.</summary>
+    public const string ServiceNameKey = "service.name";
+
+    public const string ServiceInstanceIdKey = "service.instance.id";
+
+    /// <summary>The ecosystem's standard override for service.name, which also takes the whole
+    /// service identity out of Pulse's hands: see <see cref="ConfigureServiceIdentity"/>.</summary>
+    private const string ServiceNameVariable = "OTEL_SERVICE_NAME";
+
     /// <summary>Export interval in milliseconds, clamped to <see cref="MinimumIntervalSeconds"/> and
     /// <see cref="MaximumIntervalSeconds"/> before the multiply, so neither end of a config typo can
     /// reach the reader unvalidated or overflow on the way there.</summary>
@@ -42,6 +55,82 @@ public static partial class OtlpOptions
     /// attribute. Trimmed like the other string config values this class handles.</summary>
     public static string ResolveServiceName(string? configuredName)
         => string.IsNullOrWhiteSpace(configuredName) ? DefaultServiceName : configuredName.Trim();
+
+    /// <summary>Resolves the service.instance.id to export: the configured value as written,
+    /// trimmed, or a fresh GUID when it is blank. The GUID only stays the same from one start to the
+    /// next because the caller writes it back into the config file, which is why this runs before
+    /// the file is stored or brought up to date: see PulseOtlpModSystem.StartServerSide.</summary>
+    public static string ResolveServiceInstanceId(string? configuredId)
+        => string.IsNullOrWhiteSpace(configuredId) ? Guid.NewGuid().ToString() : configuredId.Trim();
+
+    /// <summary>Gives a blank ServiceInstanceId a generated GUID, and says whether it did. Only a
+    /// blank key is touched: an id the admin wrote stays exactly as written, whitespace included,
+    /// since it is trimmed where it is used (see <see cref="ConfigureServiceIdentity"/>) and any
+    /// rewrite of the file for another reason would otherwise write the trimmed copy over it.
+    /// The caller needs the answer to know whether a generated id, which is only worth anything
+    /// once the file holds it, still has to be checked for.</summary>
+    public static bool FillBlankServiceInstanceId(PulseOtlpConfig config)
+    {
+        if (!string.IsNullOrWhiteSpace(config.ServiceInstanceId))
+        {
+            return false;
+        }
+
+        config.ServiceInstanceId = ResolveServiceInstanceId(config.ServiceInstanceId);
+        return true;
+    }
+
+    /// <summary>The string value <paramref name="resource"/> holds under <paramref name="key"/>, or
+    /// null when it holds none.</summary>
+    public static string? ResourceAttribute(Resource resource, string key)
+        => resource.Attributes.FirstOrDefault(attribute => attribute.Key == key).Value as string;
+
+    /// <summary>Gives the exported resource its service.name and service.instance.id, with the
+    /// precedence the ecosystem's own variables ask for: OTEL_SERVICE_NAME, when set, leaves the
+    /// whole identity to the environment; otherwise the environment's service.instance.id
+    /// (OTEL_RESOURCE_ATTRIBUTES), when it has one, wins over <paramref name="configuredInstanceId"/>;
+    /// otherwise the configured name and id are used.</summary>
+    /// <remarks>None of this is automatic. ResourceBuilder.CreateDefault() (the seed
+    /// ConfigureResource lazily creates) already ends with the detector that reads both variables,
+    /// but AddService is appended after it, and ResourceBuilder.Build() merges every detector's
+    /// Resource left to right with the later one winning on a collision (Resource.Merge: "In case
+    /// of a collision the other Resource takes precedence"). An unconditional AddService therefore
+    /// beats the environment on every key it sets: service.name, and, left to its default of
+    /// autoGenerateServiceInstanceId, a random service.instance.id too, which is what made every
+    /// restart a new series and what silently overrode an id set in OTEL_RESOURCE_ATTRIBUTES.
+    /// Checked against MeterProviderBuilderSdk.ConfigureResource, ResourceBuilder.CreateDefault/Build,
+    /// ResourceBuilderExtensions.AddService and Resource.Merge in OpenTelemetry .NET 1.19.1
+    /// (github.com/open-telemetry/opentelemetry-dotnet, tag core-1.19.1), and measured against it:
+    /// with OTEL_RESOURCE_ATTRIBUTES=service.instance.id=env-id, AddService("n") exports a random
+    /// GUID, AddService("n", serviceInstanceId: null, autoGenerateServiceInstanceId: false) exports
+    /// env-id, and the builder's own Build(), called from inside the ConfigureResource callback,
+    /// already holds env-id. Skipping AddService when OTEL_SERVICE_NAME is set leaves the SDK's own
+    /// default pipeline, which reads both variables, untouched.
+    /// <para>The environment's id is read from that Build() rather than parsed here, so what counts
+    /// as an id (percent-decoding, trimming, which of two duplicate entries wins) stays the SDK's
+    /// own and can never disagree with it. It is then passed back to AddService as the id to use,
+    /// the same value the environment already put there, instead of being left to survive by
+    /// omission; generation stays off either way, so the id can only ever be one of the two
+    /// values chosen here, never a third, random one. A blank one (an empty
+    /// OTEL_RESOURCE_ATTRIBUTES=service.instance.id=) identifies nothing and counts as not set.</para>
+    /// <para>service.name is unchanged from 0.2.0: without OTEL_SERVICE_NAME, the configured name
+    /// still wins over a service.name in OTEL_RESOURCE_ATTRIBUTES.</para></remarks>
+    public static void ConfigureServiceIdentity(
+        ResourceBuilder resource, string? configuredName, string? configuredInstanceId)
+    {
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(ServiceNameVariable)))
+        {
+            return;
+        }
+
+        string? fromEnvironment = ResourceAttribute(resource.Build(), ServiceInstanceIdKey);
+        resource.AddService(
+            ResolveServiceName(configuredName),
+            serviceInstanceId: string.IsNullOrWhiteSpace(fromEnvironment)
+                ? ResolveServiceInstanceId(configuredInstanceId)
+                : fromEnvironment,
+            autoGenerateServiceInstanceId: false);
+    }
 
     /// <summary>Parses the OTLP specification's two protocol names. Returns false for anything
     /// else, having still produced http/protobuf: an unreadable protocol name is a reason to warn

@@ -287,6 +287,68 @@ mutate Pulse/ModOwners.cs \
     's/byName\[name\] = resolved;//' \
     "mod owners: a class registry miss is asked again on every profiled tick"
 
+# A behavior's mark carries its property name, not the code its class was registered under, so a
+# live instance is the only thing that can say whose a renamed behavior is. Each of these is a way
+# the walk that reads them can quietly go wrong: a name that never matches a mark, a class that is
+# no longer read once, a name credited to the class of the instance instead of the class that
+# declares it, a name that changes hands between two bursts, an engine behavior left to report as
+# nobody's, and an entity that is read again every burst.
+mutate Pulse/ModOwners.cs \
+    's/profilerName\[TickAttribution\.BehaviorPrefix\.Length\.\.\]/profilerName/' \
+    "mod owners: a learned behavior name keeps its prefix, so no mark ever finds it"
+
+mutate Pulse/ModOwners.cs \
+    's/if \(!seenBehaviorClasses\.Add\(behavior\)\)/if (false)/' \
+    "mod owners: every instance of a class is read again, so the walk costs the instance count"
+
+mutate Pulse/ModOwners.cs \
+    's/OwnerOfClass\(NameDeclarer\(behavior\)\)/OwnerOfClass(behavior)/' \
+    "mod owners: a subclass that inherits its parent's name is credited to its own mod, so the owner of the name depends on which entity the walk meets first"
+
+mutate Pulse/ModOwners.cs \
+    's/learnedBehaviors\.Add\(name\) \|\| \(byName\[name\] == null && modid != null\)/learnedBehaviors.Add(name) || modid != null/' \
+    "mod owners: a later class that declares the same name takes it from the first, so it flaps between bursts"
+
+mutate Pulse/ModOwners.cs \
+    's/learnedBehaviors\.Add\(name\) \|\| \(byName\[name\] == null && modid != null\)/learnedBehaviors.Add(name)/' \
+    "mod owners: a shared name stays with the first class even when that one has no owner"
+
+mutate Pulse/ModOwners.cs \
+    's/ \?\? \(behavior\.Assembly == EngineApi \? TickAttribution\.Engine : null\)//' \
+    "mod owners: a behavior the game's API assembly declares reports as unattributed instead of engine"
+
+mutate Pulse/ModOwners.cs \
+    's/for \(int i = 0; i < behaviors\?\.Count; i\+\+\)/for (int i = 0; i < 1 \&\& i < behaviors?.Count; i++)/' \
+    "mod owners: the walk reads the first behavior of each entity and no other"
+
+mutate Pulse/ModOwners.cs \
+    's/if \(readEntities\.Contains\(entry\.Key\)\)/if (false)/' \
+    "mod owners: every entity is read again on every burst, so the walk costs the loaded entity count times their behaviors"
+
+mutate Pulse/ModOwners.cs \
+    's/^( +)stillLoaded\.Add\(entry\.Key\);$/\1if (!readEntities.Contains(entry.Key)) { stillLoaded.Add(entry.Key); }/' \
+    "mod owners: an entity already read is left out of the set the next walk keeps, so it is read again every other burst"
+
+mutate Pulse/ModOwners.cs \
+    's/\(readEntities, stillLoaded\) = \(stillLoaded, readEntities\);//' \
+    "mod owners: the walk never remembers what it has read, so each burst reads every entity again"
+
+mutate Pulse/ModOwners.cs \
+    's/stillLoaded\.Clear\(\);//' \
+    "mod owners: an entity that has unloaded is never forgotten, so the ids pile up for the life of the server"
+
+mutate Pulse/ModOwners.cs \
+    's/behavior == null \? null : OwnerOfClass\(behavior\)/behavior == null ? null : OfAssembly(behavior.Assembly)/' \
+    "mod owners: a class the game's API declares, reached through the class registry, reports as unattributed instead of engine"
+
+mutate Pulse/AttributionMetrics.cs \
+    's/walkBehaviors\(owners!\);//' \
+    "attribution: the behavior walk never runs, so a renamed behavior reports as unattributed again"
+
+mutate Pulse/AttributionMetrics.cs \
+    's/behaviorWalkFailed = true;//' \
+    "attribution: a behavior walk that throws is tried again every burst, one warning each"
+
 # The config upgrade decides whether a live server rewrites a file an admin owns, so the two ways
 # it can be wrong are both here: not writing what it should, and writing over what it cannot read.
 mutate Pulse/ConfigUpgrade.cs \
@@ -308,6 +370,14 @@ mutate Pulse/ConfigUpgrade.cs \
 mutate Pulse/ConfigUpgrade.cs \
     's/configValue is JsonObject \|\| configByKey\[key\]\.Count\(\) > 1/false/' \
     "config upgrade: a duplicated block or a dictionary's colliding keys claims a winner that does not exist"
+
+mutate Pulse/ConfigUpgrade.cs \
+    's/if \(IsBlank\(matches\[\^1\]\.Value\) && IsFilled\(entry\.Value\)\)/if (false)/' \
+    "config upgrade: a key the file carries blank, which a mod has since filled in, goes unreported, so the value it generated is never written back and changes on every restart"
+
+mutate Pulse/ConfigUpgrade.cs \
+    's/IsBlank\(matches\[\^1\]\.Value\)/IsBlank(matches[0].Value)/' \
+    "config upgrade: the first spelling of a duplicated key decides whether it is blank, where Newtonsoft keeps the last"
 
 # Loading a config file has the same two ways to be wrong as upgrading one: an unreadable file is
 # the one this whole fix exists for, so mistaking it for a loaded or an absent one is exactly the
@@ -380,6 +450,42 @@ mutate Pulse.Otlp/OtlpOptions.cs \
     's/string\.IsNullOrWhiteSpace\(configuredName\)/!string.IsNullOrWhiteSpace(configuredName)/' \
     "otlp: a blank ServiceName exports as-is and a real one is replaced by the default"
 
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/string\.IsNullOrWhiteSpace\(configuredId\)/!string.IsNullOrWhiteSpace(configuredId)/' \
+    "otlp: a blank ServiceInstanceId exports as-is and a real one is replaced by a generated one"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/: configuredId\.Trim\(\);/: configuredId;/' \
+    "otlp: a configured ServiceInstanceId is no longer trimmed"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/Guid\.NewGuid\(\)\.ToString\(\)/Guid.Empty.ToString()/' \
+    "otlp: the generated service instance id is the same all-zero GUID on every server"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/: fromEnvironment,/: ResolveServiceInstanceId(configuredInstanceId),/' \
+    "otlp: the environment's service.instance.id no longer wins over the config key"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/string\.IsNullOrWhiteSpace\(fromEnvironment\)/fromEnvironment == null/' \
+    "otlp: an empty service.instance.id in the environment counts as set, so the resource exports an empty one"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/if \(!string\.IsNullOrWhiteSpace\(Environment\.GetEnvironmentVariable\(ServiceNameVariable\)\)\)/if (false)/' \
+    "otlp: OTEL_SERVICE_NAME no longer leaves the whole service identity to the environment"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/^            ResolveServiceName\(configuredName\),$/            configuredName!,/' \
+    "otlp: the configured service name goes out unresolved, so a blank one is an empty service.name"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/^                \? ResolveServiceInstanceId\(configuredInstanceId\)$/                ? (string.IsNullOrWhiteSpace(configuredInstanceId) ? null : ResolveServiceInstanceId(configuredInstanceId))/;s/autoGenerateServiceInstanceId: false\);/autoGenerateServiceInstanceId: true);/' \
+    "otlp: a blank service instance id is left to the SDK's own automatic one, a single GUID for the whole process"
+
+mutate Pulse.Otlp/OtlpOptions.cs \
+    's/if \(!string\.IsNullOrWhiteSpace\(config\.ServiceInstanceId\)\)/if (false)/' \
+    "otlp: an id the admin wrote is overwritten by a generated one at every start"
+
 # The failure log turns a silent export into one rate-limited line; both of its limits exist to
 # bound the log itself, and a mutation that erases either one is exactly what would let a stuck
 # collector or a churning cause flood it.
@@ -446,6 +552,14 @@ mutate Pulse.Otlp/OtlpOptions.cs \
 mutate Pulse.Otlp/PulseOtlpModSystem.cs \
     's/failureReason = ex\.GetType\(\)\.Name;/failureReason = null;/' \
     "otlp: TryStoreDefaults stops reporting what failed when writing the default config throws"
+
+mutate Pulse.Otlp/PulseOtlpModSystem.cs \
+    's/instanceId, StringComparison\.Ordinal\);/instanceId, StringComparison.Ordinal) || true;/' \
+    "otlp: a generated service instance id counts as saved whatever the file holds, so the warning that it was not never fires"
+
+mutate Pulse.Otlp/PulseOtlpModSystem.cs \
+    's/set ServiceInstanceId in \{0\}/set it in {0}/' \
+    "otlp: the warning about an id that could not be saved stops naming the key to set"
 
 # Every mutation is reverted in the source, but the last one of each block was built before it
 # was, so the binaries on disk still carry it. Leave them matching the tree: anything running

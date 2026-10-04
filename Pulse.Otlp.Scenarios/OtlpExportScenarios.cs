@@ -1,6 +1,7 @@
 using System.Text;
 using Atlas.Api;
 using Atlas.XUnit;
+using Pulse.Scenarios;
 using Vintagestory.API.MathTools;
 using Xunit;
 
@@ -15,11 +16,18 @@ namespace Pulse.Otlp.Scenarios;
 [AtlasDataFiles("data/otlp", TargetPath = "ModConfig")]
 public class OtlpExportScenarios : AtlasScenarioBase, IDisposable
 {
-    private const int CollectorPort = 39469;
+    private const int CollectorPort = 29469;
+    private const string TicksCounter = "pulse_server_ticks_total";
 
     /// <summary>Seeded IntervalSeconds, so the first export is at most this far away plus the
     /// startup the reader does before its first wait.</summary>
     private static readonly TimeSpan ExportInterval = TimeSpan.FromSeconds(5);
+
+    // Assembly.Location, not AppContext.BaseDirectory: Atlas repoints the latter at the embedded
+    // server's own data path once it boots, which is not where this test assembly (and the
+    // fixture AtlasDataFiles copied from) lives.
+    private static readonly string TestAssemblyDirectory =
+        Path.GetDirectoryName(typeof(OtlpExportScenarios).Assembly.Location)!;
 
     private readonly FakeCollector collector;
 
@@ -39,7 +47,7 @@ public class OtlpExportScenarios : AtlasScenarioBase, IDisposable
     [AtlasScenario(TimeoutMs = 180_000)]
     public async Task Exporter_Pushes_PulsesMetrics_ToAnOtlpCollector()
     {
-        FakeCollector.Export export = await WaitForExport();
+        FakeCollector.Export export = await WaitForTicksExport();
 
         Assert.Equal("POST", export.Method);
         Assert.Equal("/v1/metrics", export.Path);
@@ -48,9 +56,9 @@ public class OtlpExportScenarios : AtlasScenarioBase, IDisposable
 
         // Instrument and scope names travel as plain UTF-8 length-prefixed strings inside the
         // protobuf payload, so finding them in the raw bytes is enough to prove the base mod's
-        // meter reached the collector. Parsing the payload would only test a protobuf library.
+        // meter reached the collector. Parsing the payload would only test a protobuf library. The
+        // wait above found the ticks counter that way already.
         string body = Encoding.UTF8.GetString(export.Body);
-        Assert.Contains("pulse_server_ticks_total", body, StringComparison.Ordinal);
         Assert.Contains("Pulse.Server", body, StringComparison.Ordinal);
 
         // service.name is a resource attribute, not a metric or scope name, but it travels in the
@@ -60,6 +68,36 @@ public class OtlpExportScenarios : AtlasScenarioBase, IDisposable
 
         // The configured header arrived with it: this is how a hosted backend authenticates.
         Assert.Equal("atlas", export.OrgId);
+    }
+
+    /// <summary>The service.instance.id the config file sets is the one on the wire, under its own
+    /// key, and the file is left exactly as the admin wrote it: the key was set, so nothing is
+    /// generated and nothing rewritten. Both attributes are matched whole, key and value together
+    /// (see <see cref="Exports.CarriesAttribute"/>).</summary>
+    [AtlasScenario(TimeoutMs = 180_000)]
+    public async Task Export_Carries_TheConfiguredServiceInstanceId()
+    {
+        FakeCollector.Export export = await WaitForExport();
+
+        Assert.True(
+            Exports.CarriesAttribute(export.Body, "service.instance.id", "pulse-atlas-test-instance"),
+            "the export does not carry service.instance.id = pulse-atlas-test-instance");
+        Assert.True(
+            Exports.CarriesAttribute(export.Body, "service.name", "pulse-atlas-test"),
+            "the export does not carry service.name = pulse-atlas-test");
+
+        // The match is exact, not a search for the two strings: the service name is in the payload,
+        // and is the start of the id, and neither makes it the id.
+        Assert.False(Exports.CarriesAttribute(export.Body, "service.instance.id", "pulse-atlas-test"));
+
+        string seedPath = Path.Combine(TestAssemblyDirectory, "data", "otlp", "pulse-otlp.json");
+        string configPath = Path.Combine(World.Api.GetOrCreateDataPath("ModConfig"), "pulse-otlp.json");
+        Assert.Equal(File.ReadAllBytes(seedPath), File.ReadAllBytes(configPath));
+
+        // The line the README and the changelog promise: the identity the backend will see, at the
+        // end of the startup line.
+        string log = await ServerLog.WaitFor(World, "Pulse OTLP exporting");
+        Assert.Contains("as service 'pulse-atlas-test', instance 'pulse-atlas-test-instance'", log);
     }
 
     [AtlasScenario(TimeoutMs = 180_000)]
@@ -74,6 +112,20 @@ public class OtlpExportScenarios : AtlasScenarioBase, IDisposable
         Assert.Equal("game:chest-east", World.BlockAt(pos).Code.ToString());
     }
 
+    /// <summary>Any export will do: what this scenario proves is that the server keeps ticking
+    /// while the exporter runs, not what the export holds.</summary>
     private Task<FakeCollector.Export> WaitForExport()
-        => Exports.WaitFor(() => collector.First, () => World.Ticks(10), ExportInterval * 6, CollectorPort);
+        => Exports.WaitFor(
+            () => collector.First, () => collector.Count,
+            () => World.Ticks(10), ExportInterval * 6, CollectorPort);
+
+    /// <summary>The first export that holds the ticks counter, which is not always the first one
+    /// the collector gets: that one leaves five seconds after the exporter starts, and on a slow
+    /// boot the server has not run a tick by then, so it holds what startup recorded and no ticks
+    /// counter. The next one does.</summary>
+    private Task<FakeCollector.Export> WaitForTicksExport()
+        => Exports.WaitFor(
+            () => collector.FirstWhere(export => Exports.Carries(export.Body, TicksCounter)),
+            () => collector.Count, () => World.Ticks(10), ExportInterval * 6, CollectorPort,
+            $"export carrying {TicksCounter}");
 }

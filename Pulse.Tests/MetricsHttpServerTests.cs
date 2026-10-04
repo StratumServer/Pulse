@@ -5,6 +5,7 @@ using System.Net.Http;
 using System.Net.Sockets;
 using System.Reflection;
 using System.Text;
+using Pulse.Tests.Fakes;
 using Vintagestory.API.Common;
 using Xunit;
 using Xunit.Abstractions;
@@ -1204,6 +1205,15 @@ public class MetricsHttpServerTests
             using HttpResponseMessage response = await client.GetAsync($"http://127.0.0.1:{port}/metrics");
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
 
+            // Serve resets the backoff on the accept thread right after handing the connection to
+            // its handler thread, so the response can reach this test before the reset runs: wait
+            // for it, briefly, instead of reading the value the instant the response is in.
+            Stopwatch watch = Stopwatch.StartNew();
+            while (backoff.CurrentMs != MetricsHttpServer.AcceptBackoff.InitialMs && watch.Elapsed < TimeSpan.FromSeconds(2))
+            {
+                await Task.Delay(10);
+            }
+
             Assert.Equal(MetricsHttpServer.AcceptBackoff.InitialMs, backoff.CurrentMs);
         }
         finally
@@ -1297,27 +1307,5 @@ public class MetricsHttpServerTests
     public void ParseBind_InvalidValues_ThrowFormatException(string? bind)
     {
         Assert.Throws<FormatException>(() => MetricsHttpServer.ParseBind(bind));
-    }
-
-    /// <summary>Captures every entry through the one abstract hook LoggerBase funnels its whole
-    /// friendly API (Warning, Error, ...) through, so it needs no server and no mod loader.</summary>
-    private sealed class FakeLogger : LoggerBase
-    {
-        private readonly object gate = new();
-        private readonly List<(EnumLogType Type, string Message)> entries = [];
-
-        public IReadOnlyList<(EnumLogType Type, string Message)> Entries
-        {
-            get { lock (gate) { return entries.ToList(); } }
-        }
-
-        protected override void LogImpl(EnumLogType logType, string format, object[] args)
-        {
-            string message = args is { Length: > 0 } ? string.Format(format, args) : format;
-            lock (gate)
-            {
-                entries.Add((logType, message));
-            }
-        }
     }
 }
