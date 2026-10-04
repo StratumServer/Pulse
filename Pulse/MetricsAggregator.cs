@@ -1,5 +1,6 @@
 using System.Diagnostics.Metrics;
 using System.Globalization;
+using System.Runtime.CompilerServices;
 
 namespace Pulse;
 
@@ -29,6 +30,13 @@ public sealed class MetricsAggregator : IDisposable
 
     private readonly object gate = new();
     private readonly List<Series> series = [];
+
+    /// <summary>The same series as <see cref="series"/>, found by instrument and tag set instead of
+    /// by scanning for them, so a record costs one lookup however many tag sets a family has. The
+    /// list stays the order series are served in; this only says which of them a measurement
+    /// belongs to. Like the list it is only ever touched under <see cref="gate"/>.</summary>
+    private readonly Dictionary<SeriesKey, Series> index = [];
+
     private readonly MeterListener listener = new();
 
     /// <summary>Bumped once per <see cref="Collect"/>, stamped onto every series a measurement
@@ -94,8 +102,18 @@ public sealed class MetricsAggregator : IDisposable
             // An observable series this pass never touched did not report that tag set this time,
             // which for an observable instrument means it is gone, not merely unchanged: this is
             // what lets a family like a per-mod share retire a modid instead of serving it forever
-            // at whatever it last measured.
-            series.RemoveAll(s => s.Instrument.IsObservable && s.Generation != generation);
+            // at whatever it last measured. It leaves the index with it: an entry left behind would
+            // hand that tag set's next measurement a series nobody serves.
+            series.RemoveAll(s =>
+            {
+                bool retired = s.Instrument.IsObservable && s.Generation != generation;
+                if (retired)
+                {
+                    index.Remove(s.Key);
+                }
+
+                return retired;
+            });
 
             List<MetricSample> samples = new(series.Count);
             foreach (Series s in series)
@@ -216,21 +234,8 @@ public sealed class MetricsAggregator : IDisposable
         }
     }
 
-    // ponytail: linear scan over the published series, called once per record. Two dozen series
-    // and a couple of records per tick make a dictionary index pure ceremony; add one the day a
-    // meter with real label cardinality shows up.
     private Series? Find(Instrument instrument, KeyValuePair<string, string>[] labels)
-    {
-        foreach (Series s in series)
-        {
-            if (ReferenceEquals(s.Instrument, instrument) && SameLabels(s.Labels, labels))
-            {
-                return s;
-            }
-        }
-
-        return null;
-    }
+        => index.GetValueOrDefault(new SeriesKey(instrument, labels));
 
     /// <summary>Starts the series for a tag set seen for the first time. Series appear on first
     /// measurement, not at publish time, because the tag sets an instrument will use are not
@@ -260,7 +265,34 @@ public sealed class MetricsAggregator : IDisposable
         };
 
         series.Add(s);
+        index[s.Key] = s;
         return s;
+    }
+
+    /// <summary>What makes two measurements one series: the very same instrument object and an
+    /// equal tag set. Tag sets arrive sorted by key (see <see cref="ToLabels"/>), so they are equal
+    /// when <see cref="SameLabels"/> says so, and hash pair by pair in array order.</summary>
+    /// <remarks>Internal so a test can pin that the hash spreads tag sets: one that collapsed would
+    /// still serve every value right, only as slowly as a scan. The array is shared with the samples
+    /// <see cref="Collect"/> returns and is part of the hash, so nothing may write to it once
+    /// <see cref="ToLabels"/> has built it.</remarks>
+    internal readonly record struct SeriesKey(Instrument Instrument, KeyValuePair<string, string>[] Labels)
+    {
+        public bool Equals(SeriesKey other)
+            => ReferenceEquals(Instrument, other.Instrument) && SameLabels(Labels, other.Labels);
+
+        public override int GetHashCode()
+        {
+            HashCode hash = new();
+            hash.Add(RuntimeHelpers.GetHashCode(Instrument));
+            foreach (KeyValuePair<string, string> label in Labels)
+            {
+                hash.Add(label.Key);
+                hash.Add(label.Value);
+            }
+
+            return hash.ToHashCode();
+        }
     }
 
     private sealed class Series
@@ -280,6 +312,8 @@ public sealed class MetricsAggregator : IDisposable
         public required string Unit { get; init; }
 
         public KeyValuePair<string, string>[] Labels { get; init; } = [];
+
+        public SeriesKey Key => new(Instrument, Labels);
 
         public double[] Bounds { get; init; } = [];
 

@@ -534,6 +534,37 @@ public class MetricsAggregatorTests
         Assert.All(samples, s => Assert.Equal(int.Parse(s.Labels[1].Value) % 10, int.Parse(s.Labels[0].Value)));
     }
 
+    /// <summary>The index is only as good as its key. Equal tag sets held in two arrays have to
+    /// hash alike, since the dictionary finds a series by that, and a thousand different ones must
+    /// not pile into a few buckets: a hash that collapsed would still serve every value right, only
+    /// as slowly as the scan it replaced, which no other test could tell.</summary>
+    [Fact]
+    public void TheSeriesKey_Compares_ByInstrumentAndTagSetContent_AndSpreadsTagSetsInItsHash()
+    {
+        using Meter meter = new(UniqueMeterName());
+        Counter<long> counter = meter.CreateCounter<long>("c_total", "{x}", "C.");
+        Counter<long> other = meter.CreateCounter<long>("other_total", "{x}", "Other.");
+        static KeyValuePair<string, string>[] Labels(int id) => [new("group", $"{id % 10}"), new("id", $"{id}")];
+
+        MetricsAggregator.SeriesKey seven = new(counter, Labels(7));
+        MetricsAggregator.SeriesKey sevenAgain = new(counter, Labels(7));
+        Assert.Equal(seven, sevenAgain);
+        Assert.Equal(seven.GetHashCode(), sevenAgain.GetHashCode());
+
+        // The dictionary only asks whether two keys are equal once their hashes are, so each part
+        // of the equality is pinned here, on its own, and not only through the aggregator.
+        Assert.NotEqual(seven, new MetricsAggregator.SeriesKey(counter, Labels(8)));
+        Assert.NotEqual(seven, new MetricsAggregator.SeriesKey(other, Labels(7)));
+
+        // Hash codes are 32 bits, so a few of the thousand may meet by chance; a hash that ignores
+        // what tells these tag sets apart is nowhere near that.
+        int distinct = Enumerable.Range(0, 1_000)
+            .Select(id => new MetricsAggregator.SeriesKey(counter, Labels(id)).GetHashCode())
+            .Distinct()
+            .Count();
+        Assert.True(distinct > 990, $"{distinct} different hashes for 1,000 tag sets");
+    }
+
     /// <summary>A tag set an observable instrument stops reporting is retired. One it reports
     /// again later is a series like any new one: served again, after the others of its family,
     /// and not recorded into the series that was retired.</summary>
