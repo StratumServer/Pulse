@@ -715,10 +715,10 @@ gate turns the check red instead of sitting unnoticed on SonarCloud's side. The 
 code only: an A rating for reliability, security and maintainability, at least 80 percent
 coverage, at most 3 percent duplication, and every security hotspot reviewed. The coverage badge
 at the top of this page comes from the same job, which runs the two unit suites and the base
-scenarios under coverlet. Five files are left out of that figure: the two ModSystems, the engine
-probe, the attribution probe and the live-server half of the attribution metrics. The game's
-loader loads the staged dll outside coverlet's instrumentation, so nothing a scenario executes in
-them can reach a coverage report. The scenarios are still what tests them.
+scenarios under coverlet. Six files are left out of that figure: the two ModSystems, the engine
+probe, the attribution probe and the live-server halves of the attribution metrics and the Stratum
+timings. The game's loader loads the staged dll outside coverlet's instrumentation, so nothing a
+scenario executes in them can reach a coverage report. The scenarios are still what tests them.
 
 The documentation site is built by `docs/site/build.mjs` from the README, the getting-started
 guide, the two `contrib` READMEs, the alert rules, the dashboard JSON and the changelog. It also

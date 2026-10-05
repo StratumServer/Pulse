@@ -10,7 +10,8 @@
       "!**/PulseModSystem.cs",
       "!**/EngineProbe.cs",
       "!**/AttributionProbe.cs",
-      "!**/AttributionMetrics.Server.cs"
+      "!**/AttributionMetrics.Server.cs",
+      "!**/StratumTimingsMetrics.Server.cs"
     ],
     "configuration": "Release",
     "reporters": [
