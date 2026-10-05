@@ -31,6 +31,17 @@ public class PulseCommandsTests
         Assert.Empty(PulseCommands.RestartKeys(Config(), loaded));
     }
 
+    /// <summary>The Stratum timings block is applied by a reload just as the Attribution one is, so
+    /// a change there is not a reason to restart either.</summary>
+    [Fact]
+    public void RestartKeys_Ignores_TheStratumTimingsBlock()
+    {
+        PulseConfig loaded = Config();
+        loaded.StratumTimings = new StratumTimingsConfig { Enabled = true, BurstTicks = 7, IntervalSeconds = 2 };
+
+        Assert.Empty(PulseCommands.RestartKeys(Config(), loaded));
+    }
+
     [Fact]
     public void RestartKeys_Names_EveryKeyThatIsReadOnlyAtStartup()
     {
