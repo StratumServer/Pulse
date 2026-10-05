@@ -166,10 +166,10 @@ jobs:
       # mod, and scrape it over HTTP. The OTLP suite stages both mods and puts a fake collector
       # on the other end of a socket, so it proves the export path end to end.
       #
-      # The fixtures pin ports 29464 to 29485, below the range the kernel assigns from by itself,
+      # The fixtures pin ports 29464 to 29486, below the range the kernel assigns from by itself,
       # because a socket of the test platform landing on a fixture port makes the mod fail its
       # bind and every scenario of that class fail with it. The first line prints that range, so
-      # a runner image that ever moves it below 29485 shows in the log of the run it breaks.
+      # a runner image that ever moves it below 29486 shows in the log of the run it breaks.
       - name: Atlas scenarios
         run: |
           cat /proc/sys/net/ipv4/ip_local_port_range

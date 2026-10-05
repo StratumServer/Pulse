@@ -671,7 +671,7 @@ unless `PULSE_MEASURE_ATTRIBUTION_COST=1` is set, but each still boots a server.
 and `game-watch.yml` run the scenarios without it.
 
 Each scenario class pins a loopback port in its config fixture, unique within its suite: 29464
-to 29485 across the two, kept below 32768 so that nothing the kernel assigns by itself can land
+to 29486 across the two, kept below 32768 so that nothing the kernel assigns by itself can land
 on one. One class binds the default 9464 instead, to prove the fallback when a config file will
 not parse, so a Pulse server already running on its default port on the same machine fails that
 class.
