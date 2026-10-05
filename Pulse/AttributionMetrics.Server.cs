@@ -15,6 +15,10 @@ namespace Pulse;
 /// <see cref="ICoreServerAPI"/> use, same as the rest of <c>PulseModSystem</c>.</remarks>
 internal sealed partial class AttributionMetrics
 {
+    /// <summary>Applies whatever a reloaded config holds that is not attribution's. Null for the
+    /// test-facing constructor, which has no command to reload from.</summary>
+    private readonly Action<PulseConfig>? reloaded;
+
     /// <summary>Wires attribution against a live server: the walks that sharpen which mod owns which
     /// tick listener and which entity behavior, the profiler priming, and the <c>/pulse</c> command,
     /// on top of the instruments and the duty cycle the chained constructor sets up.</summary>
@@ -26,8 +30,11 @@ internal sealed partial class AttributionMetrics
     /// an instrument with no measurement is not a series: an idle server serves the same exposition
     /// it did before.
     /// <para><paramref name="owners"/> is built by the caller, with every mod's systems in it,
-    /// because the Stratum timings read the same table.</para></remarks>
-    public AttributionMetrics(ICoreServerAPI api, ILogger logger, Meter meter, PulseConfig booted, ModOwners owners)
+    /// because the Stratum timings read the same table. <paramref name="reloaded"/> is how the rest
+    /// of the config that <c>/pulse reload</c> applies, which is not attribution's, reaches the code
+    /// that applies it: the command is registered here, and the reload is its.</para></remarks>
+    public AttributionMetrics(
+        ICoreServerAPI api, ILogger logger, Meter meter, PulseConfig booted, ModOwners owners, Action<PulseConfig> reloaded)
         : this(
             meter,
             booted.Attribution ?? new AttributionConfig(),
@@ -40,6 +47,7 @@ internal sealed partial class AttributionMetrics
         this.api = api;
         this.logger = logger;
         this.booted = booted;
+        this.reloaded = reloaded;
         walkListeners = modOwners => attributionProbe?.Refresh(modOwners);
 
         try
@@ -122,7 +130,8 @@ internal sealed partial class AttributionMetrics
     /// <remarks>The same load and upgrade path startup uses, so a file that gained keys since it
     /// was written is completed here as well. A file that does not parse leaves everything exactly
     /// as it was: the reply carries the parse error and the server keeps running on what it
-    /// booted with.</remarks>
+    /// booted with. The reply speaks of attribution and of the keys that need a restart, as it
+    /// always has: the Stratum timings say what they did in the log.</remarks>
     public TextCommandResult Reload()
     {
         PulseConfig loaded;
@@ -146,6 +155,7 @@ internal sealed partial class AttributionMetrics
         attribution?.Apply(cycle.Enabled, cycle.BurstTicks, cycle.IntervalSeconds);
         lastShares = [];
         Seed();
+        reloaded?.Invoke(loaded);
 
         return TextCommandResult.Success(PulseCommands.Reloaded(
             attribution?.Enabled ?? false,

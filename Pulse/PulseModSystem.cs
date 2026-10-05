@@ -80,6 +80,7 @@ public sealed class PulseModSystem : ModSystem
     private TickBookkeeper? tickBookkeeper;
     private EngineProbe? probe;
     private AttributionMetrics? attributionMetrics;
+    private StratumTimingsMetrics? stratumTimings;
     private Counter<long>? columnsGenerated;
     private Counter<long>? logEntries;
     private Counter<long>? engineWarnings;
@@ -191,6 +192,27 @@ public sealed class PulseModSystem : ModSystem
         // healthy server with no traffic.
         StartEngineProbe(api, meter);
 
+        // One table of which mod ships what, for the two features that credit time to mods. Built
+        // here and not by either: neither may depend on the other being on, or having started.
+        ModOwners owners = LoadOwners(api);
+
+        // Bound whether or not the config asks for it, so that /pulse reload can switch it on
+        // later: it is one reflection pass. Guarded on its own, because the binder reads the shape
+        // of a type this mod knows nothing about, and nothing that type does may cost more than the
+        // feature that reads it.
+        try
+        {
+            stratumTimings = StratumTimingsMetrics.Create(api, Mod.Logger, meter, config, owners);
+        }
+        catch (Exception e)
+        {
+            stratumTimings = null;
+            Mod.Logger.Warning(
+                "Pulse could not start the Stratum entity timings ({0}). Every other metric is "
+                + "unaffected.",
+                e.Message);
+        }
+
         // Armed whether or not the operator asked for it, so /pulse attribution on has something
         // to switch. Nothing is measured until it is switched on.
         //
@@ -202,7 +224,8 @@ public sealed class PulseModSystem : ModSystem
         // degrades on once construction succeeds.
         try
         {
-            attributionMetrics = new AttributionMetrics(api, Mod.Logger, meter, config, LoadOwners(api));
+            attributionMetrics = new AttributionMetrics(
+                api, Mod.Logger, meter, config, owners, loaded => stratumTimings?.Reload(loaded));
         }
         catch (Exception e)
         {
@@ -224,6 +247,7 @@ public sealed class PulseModSystem : ModSystem
         // listening when these seeds fire. Do not give this class an ExecuteOrder at or below 0.05.
         SeedCounters(logEntries, engineWarnings, suspendSeconds, columnsGenerated, playerDeaths, suspends);
         attributionMetrics?.Seed();
+        stratumTimings?.Seed();
         PublishSnapshot();
 
         // The errorHandler overload is not optional. Without it an exception from this listener
@@ -279,6 +303,7 @@ public sealed class PulseModSystem : ModSystem
             sapi.Event.ServerResume -= OnServerResume;
 
             attributionMetrics?.Stop();
+            stratumTimings?.Stop();
         }
 
         UnregisterListener(ref listenerId);
@@ -331,6 +356,7 @@ public sealed class PulseModSystem : ModSystem
         }
 
         attributionMetrics?.Tick(elapsedSeconds);
+        stratumTimings?.Tick(elapsedSeconds);
     }
 
     private void OnTickError(Exception e) => Mod.Logger.Error(e);
