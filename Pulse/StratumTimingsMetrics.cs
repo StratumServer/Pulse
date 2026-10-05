@@ -53,7 +53,7 @@ internal sealed partial class StratumTimingsMetrics
         + "comes after is added to series whose {2} label reads other.";
 
     private const string StartedNotification =
-        "Pulse times Stratum's entity behaviors: bursts of {0} ticks every {1}s.";
+        "Pulse reads Stratum's entity timings: bursts of {0} ticks every {1}s.";
 
     private readonly StratumTimingsSource? source;
     private readonly string? unavailable;

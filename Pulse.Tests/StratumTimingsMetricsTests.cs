@@ -832,17 +832,17 @@ public class StratumTimingsMetricsTests
     }
 
     [Fact]
-    public void Constructor_SaysItIsTiming_WhenStratumIsBound_AndTheBlockIsOn()
+    public void Constructor_SaysItIsReading_WhenStratumIsBound_AndTheBlockIsOn()
     {
         using Rig rig = new();
 
         (EnumLogType type, string message) = Only(rig.Logger);
         Assert.Equal(EnumLogType.Notification, type);
-        Assert.Equal("Pulse times Stratum's entity behaviors: bursts of 5 ticks every 1s.", message);
+        Assert.Equal("Pulse reads Stratum's entity timings: bursts of 5 ticks every 1s.", message);
 
         rig.Metrics.Apply(Config(burstTicks: 7));
         Assert.Equal(
-            "Pulse times Stratum's entity behaviors: bursts of 7 ticks every 1s.", rig.Logger.Entries[^1].Message);
+            "Pulse reads Stratum's entity timings: bursts of 7 ticks every 1s.", rig.Logger.Entries[^1].Message);
     }
 
     // The one series that is seeded.
