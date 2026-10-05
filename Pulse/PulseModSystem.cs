@@ -202,7 +202,7 @@ public sealed class PulseModSystem : ModSystem
         // degrades on once construction succeeds.
         try
         {
-            attributionMetrics = new AttributionMetrics(api, Mod.Logger, meter, config);
+            attributionMetrics = new AttributionMetrics(api, Mod.Logger, meter, config, LoadOwners(api));
         }
         catch (Exception e)
         {
@@ -385,6 +385,24 @@ public sealed class PulseModSystem : ModSystem
             "Bytes received since startup over UDP, which the public server API does not report.");
 
         engineListenerId = api.Event.RegisterGameTickListener(OnEngineTick, OnTickError, EngineSampleIntervalMs);
+    }
+
+    /// <summary>Which mod ships which type: the systems every loaded mod declares, and the class
+    /// registry for the entity behaviors whose name is their registration code.</summary>
+    /// <remarks>Plain reads of the mod loader and the registry, so nothing here needs the guard the
+    /// engine-facing constructors sit in.</remarks>
+    private static ModOwners LoadOwners(ICoreServerAPI api)
+    {
+        ModOwners owners = new(api.ClassRegistry.GetEntityBehaviorClass);
+        foreach (Mod mod in api.ModLoader.Mods)
+        {
+            foreach (ModSystem system in mod.Systems)
+            {
+                owners.AddSystem(mod.Info.ModID, system.GetType());
+            }
+        }
+
+        return owners;
     }
 
     /// <summary>Samples the engine's statistics bucket, and gives up on it for good if that ever

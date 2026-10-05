@@ -15,39 +15,32 @@ namespace Pulse;
 /// <see cref="ICoreServerAPI"/> use, same as the rest of <c>PulseModSystem</c>.</remarks>
 internal sealed partial class AttributionMetrics
 {
-    /// <summary>Wires attribution against a live server: which mod owns which tick listener and
-    /// which entity behavior, the walks that sharpen both, the profiler priming, and the
-    /// <c>/pulse</c> command, on top of the instruments and the duty cycle the chained constructor
-    /// sets up.</summary>
+    /// <summary>Wires attribution against a live server: the walks that sharpen which mod owns which
+    /// tick listener and which entity behavior, the profiler priming, and the <c>/pulse</c> command,
+    /// on top of the instruments and the duty cycle the chained constructor sets up.</summary>
     /// <remarks>All of it runs whether or not <c>Attribution.Enabled</c> is set, priming included,
     /// because that is what makes switching attribution on later structurally safe rather than
     /// merely likely to work: see PrimeFrameProfiler for what happens to a server whose profiler is
     /// enabled part-way through a tick having never completed one. The cost of arming an operator
     /// never uses is two profiled ticks at startup and four instruments nothing records into, and
     /// an instrument with no measurement is not a series: an idle server serves the same exposition
-    /// it did before.</remarks>
-    public AttributionMetrics(ICoreServerAPI api, ILogger logger, Meter meter, PulseConfig booted)
+    /// it did before.
+    /// <para><paramref name="owners"/> is built by the caller, with every mod's systems in it,
+    /// because the Stratum timings read the same table.</para></remarks>
+    public AttributionMetrics(ICoreServerAPI api, ILogger logger, Meter meter, PulseConfig booted, ModOwners owners)
         : this(
             meter,
             booted.Attribution ?? new AttributionConfig(),
             () => api.World.FrameProfiler,
             _ => { }, // replaced below: cannot reference attributionProbe before `this` exists
             (template, message) => logger.Warning(template, message),
-            modOwners => modOwners.LearnBehaviors(api.World.LoadedEntities))
+            modOwners => modOwners.LearnBehaviors(api.World.LoadedEntities),
+            owners)
     {
         this.api = api;
         this.logger = logger;
         this.booted = booted;
         walkListeners = modOwners => attributionProbe?.Refresh(modOwners);
-
-        owners = new ModOwners(api.ClassRegistry.GetEntityBehaviorClass);
-        foreach (Mod mod in api.ModLoader.Mods)
-        {
-            foreach (ModSystem system in mod.Systems)
-            {
-                owners.AddSystem(mod.Info.ModID, system.GetType());
-            }
-        }
 
         try
         {
