@@ -53,7 +53,11 @@ internal static class PulseCommands
             : $"Attribution is off. It would run {Cycle(burstTicks, intervalSeconds)}; "
                 + $"{ticksProfiled} ticks profiled so far.";
 
-    public static string Reloaded(bool on, int burstTicks, int intervalSeconds, IReadOnlyList<string> restartKeys)
+    /// <param name="stratum">What the reload did to the Stratum timings, one of the sentences below, or
+    /// null when there is nothing to say: the block is off and was not running, which is every server
+    /// that never used it, whose reply stays what it always was.</param>
+    public static string Reloaded(
+        bool on, int burstTicks, int intervalSeconds, IReadOnlyList<string> restartKeys, string? stratum = null)
     {
         string attribution = on ? $"Attribution is on: {Cycle(burstTicks, intervalSeconds)}." : "Attribution is off.";
         string rest = restartKeys.Count switch
@@ -63,8 +67,37 @@ internal static class PulseCommands
             _ => $"{string.Join(", ", restartKeys)} differ from what the server is running and need a restart.",
         };
 
+        // Before the rest, whose "nothing else" is about everything said so far.
+        if (stratum != null)
+        {
+            rest = $"{stratum} {rest}";
+        }
+
         return $"Reloaded pulse.json. {attribution} {rest}";
     }
+
+    // What a reload says about the Stratum timings, when the block is on or was running. One sentence
+    // each, in the voice of the attribution ones: the state it is in now, and for a block that is on
+    // and not running, why not.
+
+    /// <summary>The block is on and timing.</summary>
+    public static string StratumTimingsOn(int burstTicks, int intervalSeconds)
+        => $"Stratum entity timings are on: {Cycle(burstTicks, intervalSeconds)}.";
+
+    /// <summary>The block was running and the file has switched it off.</summary>
+    public const string StratumTimingsOff = "Stratum entity timings are off.";
+
+    /// <summary>The block is on, and this is not a Stratum server.</summary>
+    public const string StratumTimingsAbsent = "Stratum entity timings need a Stratum server; this is not one.";
+
+    /// <summary>The block is on, and this is a Stratum that Pulse cannot read. The reason is the
+    /// binder's own, a clause with no full stop of its own.</summary>
+    public static string StratumTimingsUnreadable(string reason)
+        => $"Stratum entity timings cannot be read: {reason}.";
+
+    /// <summary>The block is on, and Stratum threw earlier in this run, which switched the feature
+    /// off until the server restarts.</summary>
+    public const string StratumTimingsGivenUp = "Stratum entity timings are off for the rest of this run.";
 
     private static string Cycle(int burstTicks, int intervalSeconds)
         => $"bursts of {burstTicks} ticks every {intervalSeconds}s";

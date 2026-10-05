@@ -3,6 +3,10 @@ using System.Runtime.CompilerServices;
 using Vintagestory.API.Common;
 using Vintagestory.API.Server;
 
+// The game's API declares a Func delegate of its own in Vintagestory.API.Common, so the one this
+// file wants gets a name of its own rather than a namespace qualifier on every signature.
+using ReloadHook = System.Func<Pulse.PulseConfig, string?>;
+
 namespace Pulse;
 
 /// <summary>The half of <see cref="AttributionMetrics"/> that only a live server ever executes:
@@ -15,9 +19,10 @@ namespace Pulse;
 /// <see cref="ICoreServerAPI"/> use, same as the rest of <c>PulseModSystem</c>.</remarks>
 internal sealed partial class AttributionMetrics
 {
-    /// <summary>Applies whatever a reloaded config holds that is not attribution's. Null for the
+    /// <summary>Applies whatever a reloaded config holds that is not attribution's, and returns the
+    /// sentence the reply says about it, or null when there is nothing to say. Null for the
     /// test-facing constructor, which has no command to reload from.</summary>
-    private readonly Action<PulseConfig>? reloaded;
+    private readonly ReloadHook? reloaded;
 
     /// <summary>Wires attribution against a live server: the walks that sharpen which mod owns which
     /// tick listener and which entity behavior, the profiler priming, and the <c>/pulse</c> command,
@@ -32,9 +37,10 @@ internal sealed partial class AttributionMetrics
     /// <para><paramref name="owners"/> is built by the caller, with every mod's systems in it,
     /// because the Stratum timings read the same table. <paramref name="reloaded"/> is how the rest
     /// of the config that <c>/pulse reload</c> applies, which is not attribution's, reaches the code
-    /// that applies it: the command is registered here, and the reload is its.</para></remarks>
+    /// that applies it, and how that code gets a sentence into the reply: the command is registered
+    /// here, and the reload is its.</para></remarks>
     public AttributionMetrics(
-        ICoreServerAPI api, ILogger logger, Meter meter, PulseConfig booted, ModOwners owners, Action<PulseConfig> reloaded)
+        ICoreServerAPI api, ILogger logger, Meter meter, PulseConfig booted, ModOwners owners, ReloadHook reloaded)
         : this(
             meter,
             booted.Attribution ?? new AttributionConfig(),
@@ -131,7 +137,8 @@ internal sealed partial class AttributionMetrics
     /// was written is completed here as well. A file that does not parse leaves everything exactly
     /// as it was: the reply carries the parse error and the server keeps running on what it
     /// booted with. The reply speaks of attribution and of the keys that need a restart, as it
-    /// always has: the Stratum timings say what they did in the log.</remarks>
+    /// always has, and of the Stratum timings only when the block is on or was running: a server
+    /// that never used it gets the reply it always got.</remarks>
     public TextCommandResult Reload()
     {
         PulseConfig loaded;
@@ -155,13 +162,14 @@ internal sealed partial class AttributionMetrics
         attribution?.Apply(cycle.Enabled, cycle.BurstTicks, cycle.IntervalSeconds);
         lastShares = [];
         Seed();
-        reloaded?.Invoke(loaded);
+        string? stratum = reloaded?.Invoke(loaded);
 
         return TextCommandResult.Success(PulseCommands.Reloaded(
             attribution?.Enabled ?? false,
             attribution?.BurstTicks ?? cycle.BurstTicks,
             attribution?.IntervalSeconds ?? cycle.IntervalSeconds,
-            PulseCommands.RestartKeys(booted!, loaded)));
+            PulseCommands.RestartKeys(booted!, loaded),
+            stratum));
     }
 
     /// <summary>Turns the engine's frame profiler on once, before the server starts ticking.</summary>

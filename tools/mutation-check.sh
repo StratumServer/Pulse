@@ -675,7 +675,7 @@ mutate Pulse/StratumFold.cs \
 # family registered on a server that cannot serve it breaks the promise that such a server serves
 # what it always did.
 mutate Pulse/StratumTimingsMetrics.cs \
-    '/public void Apply\(StratumTimingsConfig config\)/,/^    }$/ s/ReleaseLeaseBestEffort\(\);//' \
+    '/public string\? Apply\(StratumTimingsConfig config\)/,/^    }$/ s/ReleaseLeaseBestEffort\(\);//' \
     "stratum timings: a reload part-way through a burst keeps the lease, so the next burst takes a second one and the first is never released"
 
 mutate Pulse/StratumTimingsMetrics.cs \
@@ -695,7 +695,7 @@ mutate Pulse/StratumTimingsMetrics.cs \
     "stratum timings: the behavior walk runs after the fold, so a behavior is credited to its mod a burst late"
 
 mutate Pulse/StratumTimingsMetrics.cs \
-    's/^        if \(source != null\)$/        if (true)/' \
+    '/internal StratumTimingsMetrics\(/,/^    }$/ s/^        if \(source != null\)$/        if (true)/' \
     "stratum timings: the five families are registered on a server that cannot serve them"
 
 # Switching attribution from a command is a promise about a live server: that a server which never

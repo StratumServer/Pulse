@@ -32,8 +32,8 @@ namespace Pulse;
 internal sealed partial class StratumTimingsMetrics
 {
     private const string AbsentNotification =
-        "StratumTimings.Enabled is set in pulse.json, but per-behavior timings need a Stratum server "
-        + "and this is not one, so Pulse does not serve them. Every other metric is unaffected.";
+        "Pulse cannot serve Stratum's entity timings here: StratumTimings.Enabled is set in pulse.json, "
+        + "but they need a Stratum server and this is not one. Every other metric is unaffected.";
 
     private const string UnreadableWarning =
         "Pulse cannot read Stratum's entity timings: {0}. They are not served on this server; every "
@@ -121,20 +121,33 @@ internal sealed partial class StratumTimingsMetrics
         }
 
         cycle = new DutyCycle(config.BurstTicks, config.IntervalSeconds, config.Enabled && source != null);
-        Announce(config.Enabled);
+
+        // Said at boot only: a reload says what it did in its reply, which is where an admin who
+        // runs it from chat reads it.
+        if (cycle.Enabled)
+        {
+            logger.Notification(StartedNotification, cycle.BurstTicks, cycle.IntervalSeconds);
+        }
+
+        SayUnavailable(config.Enabled);
     }
 
-    /// <summary>Applies a block of the config to the running feature: a reload.</summary>
+    /// <summary>Applies a block of the config to the running feature: a reload. Returns the sentence
+    /// the reload's reply says about it, or null when there is nothing to say: the block is off and
+    /// was not running.</summary>
     /// <remarks>The burst in progress is dropped, whatever the new block says, and the lease it held
     /// is let go of. A cycle restarted with a lease still out would request a second one at its next
     /// burst, and the first would never be released. A feature that has given up stays off: the
-    /// block cannot talk it back into reading a Stratum that threw.</remarks>
-    public void Apply(StratumTimingsConfig config)
+    /// block cannot talk it back into reading a Stratum that threw. On a server that cannot serve the
+    /// block, the first reload that asks for it is also the first time the log says so, once.</remarks>
+    public string? Apply(StratumTimingsConfig config)
     {
+        bool wasRunning = cycle.Enabled;
         ReleaseLeaseBestEffort();
         cycle.Apply(config.Enabled && source != null && !gaveUp, config.BurstTicks, config.IntervalSeconds);
-        Announce(config.Enabled);
+        SayUnavailable(config.Enabled);
         Seed();
+        return Reply(config.Enabled, wasRunning);
     }
 
     /// <summary>Puts the one counter that has no labels on the wire at zero, so that a panel can tell
@@ -262,16 +275,9 @@ internal sealed partial class StratumTimingsMetrics
         }
     }
 
-    /// <summary>Says what the block does now that it has been applied: that it runs, or, the first
-    /// time it is wanted on a server that cannot serve it, why not.</summary>
-    private void Announce(bool wanted)
+    /// <summary>The first time the block is wanted on a server that cannot serve it, says why not.</summary>
+    private void SayUnavailable(bool wanted)
     {
-        if (cycle.Enabled)
-        {
-            logger.Notification(StartedNotification, cycle.BurstTicks, cycle.IntervalSeconds);
-            return;
-        }
-
         if (!wanted || source != null || unavailableSaid)
         {
             return;
@@ -286,6 +292,33 @@ internal sealed partial class StratumTimingsMetrics
         {
             logger.Warning(UnreadableWarning, unavailable);
         }
+    }
+
+    /// <summary>What a reload says about the block, now that it has been applied: that it is on, or why
+    /// a block that is wanted is not, or that it was running and is off. Nothing for a block that is
+    /// off and was not running, which keeps the reply of a server that never used it the reply it
+    /// always was.</summary>
+    private string? Reply(bool wanted, bool wasRunning)
+    {
+        if (cycle.Enabled)
+        {
+            return PulseCommands.StratumTimingsOn(cycle.BurstTicks, cycle.IntervalSeconds);
+        }
+
+        if (!wanted)
+        {
+            return wasRunning ? PulseCommands.StratumTimingsOff : null;
+        }
+
+        // Wanted and not running: there is no Stratum to read, or there was and it threw.
+        if (source != null)
+        {
+            return PulseCommands.StratumTimingsGivenUp;
+        }
+
+        return unavailable == null
+            ? PulseCommands.StratumTimingsAbsent
+            : PulseCommands.StratumTimingsUnreadable(unavailable);
     }
 
     /// <summary>Stratum threw: let go of the lease if one is out, say so once, and stay off.</summary>

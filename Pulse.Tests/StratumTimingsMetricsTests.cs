@@ -16,8 +16,8 @@ namespace Pulse.Tests;
 public class StratumTimingsMetricsTests
 {
     private const string AbsentNotification =
-        "StratumTimings.Enabled is set in pulse.json, but per-behavior timings need a Stratum server "
-        + "and this is not one, so Pulse does not serve them. Every other metric is unaffected.";
+        "Pulse cannot serve Stratum's entity timings here: StratumTimings.Enabled is set in pulse.json, "
+        + "but they need a Stratum server and this is not one. Every other metric is unaffected.";
 
     private const string GiveUpWarning =
         "Pulse could not read Stratum's entity timings ({0}). They are off for the rest of this run and "
@@ -852,8 +852,10 @@ public class StratumTimingsMetricsTests
         Assert.Single(rig.Logger.Entries);
     }
 
+    /// <summary>The start line is a boot line. A reload says what it did in its reply instead, where an
+    /// admin who ran it from chat reads it, and writes nothing more to the log.</summary>
     [Fact]
-    public void Constructor_SaysItIsReading_WhenStratumIsBound_AndTheBlockIsOn()
+    public void Constructor_SaysItIsReading_WhenStratumIsBound_AndTheBlockIsOn_AndAReloadDoesNot()
     {
         using Rig rig = new();
 
@@ -862,8 +864,93 @@ public class StratumTimingsMetricsTests
         Assert.Equal("Pulse reads Stratum's entity timings: bursts of 5 ticks every 1s.", message);
 
         rig.Metrics.Apply(Config(burstTicks: 7));
+        rig.Metrics.Apply(Config(enabled: false));
+        rig.Metrics.Apply(Config());
+
+        Assert.Single(rig.Logger.Entries);
+    }
+
+    // What a reload says.
+
+    /// <summary>The block is on and timing: its cycle, the way attribution says its own. Said on every
+    /// reload that leaves it on, the cycle that was just applied and not the one it booted with.</summary>
+    [Fact]
+    public void Apply_Says_TheBlockIsOn_AndItsCycle_WhenItIsTiming()
+    {
+        using Rig rig = new(Config(enabled: false));
+
         Assert.Equal(
-            "Pulse reads Stratum's entity timings: bursts of 7 ticks every 1s.", rig.Logger.Entries[^1].Message);
+            "Stratum entity timings are on: bursts of 7 ticks every 1s.", rig.Metrics.Apply(Config(burstTicks: 7)));
+        Assert.Equal(
+            "Stratum entity timings are on: bursts of 3 ticks every 1s.", rig.Metrics.Apply(Config(burstTicks: 3)));
+    }
+
+    /// <summary>A block that was running and has been switched off says so, once: the reload after it
+    /// finds it off and not running, and has nothing to add.</summary>
+    [Fact]
+    public void Apply_Says_TheBlockIsOff_WhenItWasRunning_AndNothingWhenItWasNot()
+    {
+        using Rig rig = new();
+
+        Assert.Equal("Stratum entity timings are off.", rig.Metrics.Apply(Config(enabled: false)));
+        Assert.Null(rig.Metrics.Apply(Config(enabled: false)));
+    }
+
+    /// <summary>The default: a block that is off and never ran, bound or not, which is every server that
+    /// does not use the feature, leaves the reply exactly what it always was.</summary>
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public void Apply_SaysNothing_WhenTheBlockIsOff_AndWasNotRunning(bool bound)
+    {
+        using Rig rig = new(Config(enabled: false), bound: bound);
+
+        Assert.Null(rig.Metrics.Apply(Config(enabled: false)));
+        Assert.Null(rig.Metrics.Apply(Config(enabled: false, burstTicks: 9)));
+    }
+
+    /// <summary>On a server that is not Stratum the reply must not let "nothing else differs" stand for
+    /// a block that is on in the file and not running.</summary>
+    [Fact]
+    public void Apply_Says_ThisIsNotAStratumServer_WhenTheBlockIsOn_AndStratumIsAbsent()
+    {
+        using Rig rig = new(Config(enabled: false), bound: false);
+
+        Assert.Equal(
+            "Stratum entity timings need a Stratum server; this is not one.", rig.Metrics.Apply(Config()));
+        Assert.Equal(
+            "Stratum entity timings need a Stratum server; this is not one.", rig.Metrics.Apply(Config()));
+
+        // Switched off again: it was never running, so there is nothing to say.
+        Assert.Null(rig.Metrics.Apply(Config(enabled: false)));
+    }
+
+    [Fact]
+    public void Apply_Says_WhyStratumCannotBeRead_WhenTheBlockIsOn_AndStratumIsUnreadable()
+    {
+        using Rig rig = new(
+            Config(enabled: false), bound: false,
+            unavailable: "this Stratum predates the reading contract; Stratum 9.9 or later is needed");
+
+        Assert.Equal(
+            "Stratum entity timings cannot be read: this Stratum predates the reading contract; Stratum 9.9 "
+                + "or later is needed.",
+            rig.Metrics.Apply(Config()));
+    }
+
+    /// <summary>A feature that gave up stays off whatever the file says, and the reply says so rather
+    /// than claim it is on: the log has the warning that says why.</summary>
+    [Fact]
+    public void Apply_Says_TheFeatureIsOffForTheRun_WhenTheBlockIsOn_AfterAGiveUp()
+    {
+        using Rig rig = new();
+        rig.Stratum.RequestThrows = new InvalidOperationException("no accumulator");
+        rig.Tick(1);
+
+        Assert.Equal("Stratum entity timings are off for the rest of this run.", rig.Metrics.Apply(Config()));
+
+        // And a block switched off after that has nothing running to switch off.
+        Assert.Null(rig.Metrics.Apply(Config(enabled: false)));
     }
 
     // The one series that is seeded.
@@ -920,8 +1007,9 @@ public class StratumTimingsMetricsTests
         Assert.Equal(AbsentNotification, Only(logger).Message);
         Assert.Empty(Registered(meter));
 
-        metrics.Reload(booted);
-        metrics.Reload(new PulseConfig { StratumTimings = null! });
+        Assert.Equal(
+            "Stratum entity timings need a Stratum server; this is not one.", metrics.Reload(booted));
+        Assert.Null(metrics.Reload(new PulseConfig { StratumTimings = null! }));
 
         Assert.Single(logger.Entries);
     }

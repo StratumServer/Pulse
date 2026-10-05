@@ -37,6 +37,7 @@ internal sealed partial class StratumTimingsMetrics
             logger);
     }
 
-    /// <summary>Applies the block of a config file that <c>/pulse reload</c> has just read.</summary>
-    public void Reload(PulseConfig loaded) => Apply(loaded.StratumTimings ?? new StratumTimingsConfig());
+    /// <summary>Applies the block of a config file that <c>/pulse reload</c> has just read, and returns
+    /// what the reply says about it.</summary>
+    public string? Reload(PulseConfig loaded) => Apply(loaded.StratumTimings ?? new StratumTimingsConfig());
 }

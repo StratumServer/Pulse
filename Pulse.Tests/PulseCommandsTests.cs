@@ -135,6 +135,56 @@ public class PulseCommandsTests
             "Port, Bind differ from what the server is running and need a restart.",
             PulseCommands.Reloaded(false, 30, 10, ["Port", "Bind"]));
 
+    /// <summary>The default: with nothing to say about the Stratum timings, which is every server that
+    /// never used the block, the reply is the one it always was, whichever way it is asked for.</summary>
+    [Fact]
+    public void Reloaded_Is_WhatItAlwaysWas_WhenTheStratumTimingsHaveNothingToSay()
+    {
+        const string always =
+            "Reloaded pulse.json. Attribution is off. "
+            + "Nothing else in the file differs from what the server is running.";
+
+        Assert.Equal(always, PulseCommands.Reloaded(false, 10, 10, []));
+        Assert.Equal(always, PulseCommands.Reloaded(false, 10, 10, [], null));
+    }
+
+    /// <summary>What the reload did to the Stratum timings goes before the rest, whose "nothing else" is
+    /// about everything said so far, so that on a server where the block is on and not running it
+    /// cannot read as a claim that the file and the server agree.</summary>
+    [Fact]
+    public void Reloaded_Says_WhatItDidToTheStratumTimings_BeforeTheRest()
+    {
+        Assert.Equal(
+            "Reloaded pulse.json. Attribution is off. Stratum entity timings need a Stratum server; this is not one. "
+                + "Nothing else in the file differs from what the server is running.",
+            PulseCommands.Reloaded(false, 10, 10, [], PulseCommands.StratumTimingsAbsent));
+        Assert.Equal(
+            "Reloaded pulse.json. Attribution is on: bursts of 7 ticks every 2s. Stratum entity timings are off. "
+                + "Port differs from what the server is running and needs a restart.",
+            PulseCommands.Reloaded(true, 7, 2, ["Port"], PulseCommands.StratumTimingsOff));
+        Assert.Equal(
+            "Reloaded pulse.json. Attribution is off. Stratum entity timings are on: bursts of 10 ticks every 10s. "
+                + "Port, Bind differ from what the server is running and need a restart.",
+            PulseCommands.Reloaded(false, 10, 10, ["Port", "Bind"], PulseCommands.StratumTimingsOn(10, 10)));
+    }
+
+    /// <summary>Each sentence a reload can say about the Stratum timings, in the voice of the ones about
+    /// attribution: the state the block is in, and for one that is on and not running, why not.</summary>
+    [Fact]
+    public void TheStratumTimingsSentences_AreTheOnesAReloadSays()
+    {
+        Assert.Equal("Stratum entity timings are on: bursts of 10 ticks every 10s.", PulseCommands.StratumTimingsOn(10, 10));
+        Assert.Equal("Stratum entity timings are on: bursts of 3 ticks every 1s.", PulseCommands.StratumTimingsOn(3, 1));
+        Assert.Equal("Stratum entity timings are off.", PulseCommands.StratumTimingsOff);
+        Assert.Equal(
+            "Stratum entity timings need a Stratum server; this is not one.", PulseCommands.StratumTimingsAbsent);
+        Assert.Equal(
+            "Stratum entity timings cannot be read: this Stratum predates the reading contract.",
+            PulseCommands.StratumTimingsUnreadable("this Stratum predates the reading contract"));
+        Assert.Equal(
+            "Stratum entity timings are off for the rest of this run.", PulseCommands.StratumTimingsGivenUp);
+    }
+
     /// <summary>The engine runs a command reply through string.Format on its way to whoever asked,
     /// so the parse error goes in as a parameter. A sentence that interpolated it would throw on
     /// the very typo it is reporting: a stray brace in the JSON.</summary>
