@@ -75,14 +75,15 @@ jobs:
         #
         # stryker/Pulse.json and stryker/Pulse.Otlp.json exclude the same files sonar.yml's
         # sonar.coverage.exclusions does (PulseModSystem.cs, EngineProbe.cs, AttributionProbe.cs,
-        # AttributionMetrics.Server.cs, PulseOtlpModSystem.cs), and Pulse.Otlp.json also excludes
-        # ConfigUpgrade.cs. Each is excluded for the same shape of reason: its mutants are killed
-        # by tests this lane cannot see, either a live-server Atlas scenario, or, for
-        # ConfigUpgrade.cs, Pulse.Tests's own ConfigUpgradeTests.cs (Pulse.Otlp.csproj compiles a
-        # linked copy of that file that Pulse.Otlp.Tests never calls). Keep this list in step with
-        # sonar.yml's; a file added to one belongs on the other. Before an exclusion, that file's
-        # mutants counted as NoCoverage, which drags the headline score down the same way a real
-        # survivor does, for code no unit test was ever going to kill.
+        # AttributionMetrics.Server.cs, StratumTimingsMetrics.Server.cs, PulseOtlpModSystem.cs),
+        # and Pulse.Otlp.json also excludes ConfigUpgrade.cs. Each is excluded for the same shape
+        # of reason: its mutants are killed by tests this lane cannot see, either a live-server
+        # Atlas scenario, or, for ConfigUpgrade.cs, Pulse.Tests's own ConfigUpgradeTests.cs
+        # (Pulse.Otlp.csproj compiles a linked copy of that file that Pulse.Otlp.Tests never
+        # calls). Keep this list in step with sonar.yml's; a file added to one belongs on the
+        # other. Before an exclusion, that file's mutants counted as NoCoverage, which drags the
+        # headline score down the same way a real survivor does, for code no unit test was ever
+        # going to kill.
         #
         # Pulse's break (83) comes from two CI runs on one commit, 87.59% then 88.35%, with a
         # nearly identical survivor list both times (43 of 45 lines repeat). That list is a real

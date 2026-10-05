@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Xunit;
 
 namespace Pulse.Tests;
@@ -38,6 +39,51 @@ public class ConfigUpgradeTests
         // naming them would only pad the log line.
         Assert.Equal(["Attribution"], diff.Missing);
         Assert.Empty(diff.Unknown);
+    }
+
+    /// <summary>The Stratum timings block arrived after the Attribution one, so a file written by the
+    /// release before it has the one and not the other. Read off the real config object, not a copy
+    /// of its JSON: a block the class did not declare would never be added to anybody's file. The
+    /// framework's serializer stands in for the game's, which needs a Newtonsoft this project does not
+    /// carry: both write a plain class's properties under their own names.</summary>
+    [Fact]
+    public void Compare_Reports_TheStratumTimingsBlock_AsMissing_FromAFileThatPredatesIt()
+    {
+        const string file = """
+            {
+              "Enabled": true,
+              "Bind": "127.0.0.1",
+              "Port": 9464,
+              "RuntimeMetrics": true,
+              "ChunksRefreshSeconds": 30,
+              "Attribution": { "Enabled": true, "BurstTicks": 30, "IntervalSeconds": 10 }
+            }
+            """;
+
+        ConfigDiff diff = ConfigUpgrade.Compare(file, JsonSerializer.Serialize(new PulseConfig()));
+
+        Assert.Equal(["StratumTimings"], diff.Missing);
+        Assert.Empty(diff.Unknown);
+    }
+
+    [Fact]
+    public void Compare_Reports_TheKeysAStratumTimingsBlockPredates_ByTheirPath()
+    {
+        const string file = """
+            {
+              "Enabled": true,
+              "Bind": "127.0.0.1",
+              "Port": 9464,
+              "RuntimeMetrics": true,
+              "ChunksRefreshSeconds": 30,
+              "Attribution": { "Enabled": true, "BurstTicks": 30, "IntervalSeconds": 10 },
+              "StratumTimings": { "Enabled": true }
+            }
+            """;
+
+        ConfigDiff diff = ConfigUpgrade.Compare(file, JsonSerializer.Serialize(new PulseConfig()));
+
+        Assert.Equal(["StratumTimings.BurstTicks", "StratumTimings.IntervalSeconds"], diff.Missing);
     }
 
     /// <summary>The recursive half. A file that has the block but predates one key inside it gets

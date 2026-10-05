@@ -24,6 +24,11 @@ public sealed class PulseConfig
 
     /// <summary>Per-mod tick attribution. Off by default, and duty-cycled when on.</summary>
     public AttributionConfig Attribution { get; set; } = new();
+
+    /// <summary>Per-behavior, per-AI-task and per-entity-type tick timings read from a Stratum
+    /// server. Off by default, duty-cycled when on, and nothing at all on a server that is not
+    /// Stratum.</summary>
+    public StratumTimingsConfig StratumTimings { get; set; } = new();
 }
 
 /// <summary>The <c>Attribution</c> block of ModConfig/pulse.json.</summary>
@@ -38,6 +43,24 @@ public sealed class AttributionConfig
 
     /// <summary>Consecutive ticks profiled per burst. Tick composition is stable over seconds, so
     /// a short burst describes the interval around it perfectly well.</summary>
+    public int BurstTicks { get; set; } = 10;
+
+    /// <summary>Seconds between the end of one burst and the start of the next.</summary>
+    public int IntervalSeconds { get; set; } = 10;
+}
+
+/// <summary>The <c>StratumTimings</c> block of ModConfig/pulse.json.</summary>
+/// <remarks>Off by default on purpose, and on the same duty cycle as attribution. While Stratum
+/// records, every behavior, AI task and entity tick pays for two clock reads and a table update:
+/// with the admin's whole timings switch on, which is an upper bound for the recording alone, a
+/// server with about 4000 loose chickens spent a median 9 percent of its tick budget more and
+/// allocated about 2.7 MB more per tick. The duty cycle is what makes it affordable: a short burst,
+/// then nothing until the next interval.</remarks>
+public sealed class StratumTimingsConfig
+{
+    public bool Enabled { get; set; }
+
+    /// <summary>Consecutive ticks timed per burst.</summary>
     public int BurstTicks { get; set; } = 10;
 
     /// <summary>Seconds between the end of one burst and the start of the next.</summary>

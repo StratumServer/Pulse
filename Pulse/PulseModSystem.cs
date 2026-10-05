@@ -80,6 +80,7 @@ public sealed class PulseModSystem : ModSystem
     private TickBookkeeper? tickBookkeeper;
     private EngineProbe? probe;
     private AttributionMetrics? attributionMetrics;
+    private StratumTimingsMetrics? stratumTimings;
     private Counter<long>? columnsGenerated;
     private Counter<long>? logEntries;
     private Counter<long>? engineWarnings;
@@ -191,6 +192,34 @@ public sealed class PulseModSystem : ModSystem
         // healthy server with no traffic.
         StartEngineProbe(api, meter);
 
+        // One table of which mod ships what, for the two features that credit time to mods. Built
+        // here and not by either, and by whichever asks first, inside that feature's own guard
+        // below: a mod list that cannot be read costs the features that read it, as it always cost
+        // attribution, and nothing else. The Stratum timings ask only on a server they can serve.
+        //
+        // Neither feature depends on the other being on, with one exception. /pulse reload, which is
+        // how the Stratum block is applied after boot, is registered by attribution's constructor,
+        // so when that fails, or another mod already owns /pulse, the block can only be set at boot.
+        ModOwners? owners = null;
+        ModOwners SharedOwners() => owners ??= LoadOwners(api);
+
+        // Bound whether or not the config asks for it, so that /pulse reload can switch it on
+        // later: it is one reflection pass. Guarded on its own, because the binder reads the shape
+        // of a type this mod knows nothing about, and nothing that type does may cost more than the
+        // feature that reads it.
+        try
+        {
+            stratumTimings = StratumTimingsMetrics.Create(api, Mod.Logger, meter, config, SharedOwners);
+        }
+        catch (Exception e)
+        {
+            stratumTimings = null;
+            Mod.Logger.Warning(
+                "Pulse could not start the Stratum entity timings ({0}). Every other metric is "
+                + "unaffected.",
+                e.Message);
+        }
+
         // Armed whether or not the operator asked for it, so /pulse attribution on has something
         // to switch. Nothing is measured until it is switched on.
         //
@@ -202,7 +231,8 @@ public sealed class PulseModSystem : ModSystem
         // degrades on once construction succeeds.
         try
         {
-            attributionMetrics = new AttributionMetrics(api, Mod.Logger, meter, config);
+            attributionMetrics = new AttributionMetrics(
+                api, Mod.Logger, meter, config, SharedOwners(), loaded => stratumTimings?.Reload(loaded));
         }
         catch (Exception e)
         {
@@ -224,6 +254,7 @@ public sealed class PulseModSystem : ModSystem
         // listening when these seeds fire. Do not give this class an ExecuteOrder at or below 0.05.
         SeedCounters(logEntries, engineWarnings, suspendSeconds, columnsGenerated, playerDeaths, suspends);
         attributionMetrics?.Seed();
+        stratumTimings?.Seed();
         PublishSnapshot();
 
         // The errorHandler overload is not optional. Without it an exception from this listener
@@ -279,6 +310,7 @@ public sealed class PulseModSystem : ModSystem
             sapi.Event.ServerResume -= OnServerResume;
 
             attributionMetrics?.Stop();
+            stratumTimings?.Stop();
         }
 
         UnregisterListener(ref listenerId);
@@ -331,6 +363,7 @@ public sealed class PulseModSystem : ModSystem
         }
 
         attributionMetrics?.Tick(elapsedSeconds);
+        stratumTimings?.Tick(elapsedSeconds);
     }
 
     private void OnTickError(Exception e) => Mod.Logger.Error(e);
@@ -385,6 +418,22 @@ public sealed class PulseModSystem : ModSystem
             "Bytes received since startup over UDP, which the public server API does not report.");
 
         engineListenerId = api.Event.RegisterGameTickListener(OnEngineTick, OnTickError, EngineSampleIntervalMs);
+    }
+
+    /// <summary>Which mod ships which type: the systems every loaded mod declares, and the class
+    /// registry for the entity behaviors whose name is their registration code.</summary>
+    private static ModOwners LoadOwners(ICoreServerAPI api)
+    {
+        ModOwners owners = new(api.ClassRegistry.GetEntityBehaviorClass);
+        foreach (Mod mod in api.ModLoader.Mods)
+        {
+            foreach (ModSystem system in mod.Systems)
+            {
+                owners.AddSystem(mod.Info.ModID, system.GetType());
+            }
+        }
+
+        return owners;
     }
 
     /// <summary>Samples the engine's statistics bucket, and gives up on it for good if that ever

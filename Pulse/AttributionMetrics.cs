@@ -67,6 +67,10 @@ internal sealed partial class AttributionMetrics
     private List<KeyValuePair<string, double>> lastShares = [];
 
     private TickAttribution? attribution;
+
+    /// <summary>Which mod ships which listener type and entity behavior. Handed in rather than built
+    /// here: the Stratum timings credit behaviors to mods through the very same table, so there is
+    /// one, and what either feature learns is known to both.</summary>
     private ModOwners? owners;
     private AttributionProbe? attributionProbe;
     private ICoreServerAPI? api;
@@ -91,26 +95,29 @@ internal sealed partial class AttributionMetrics
     private bool profilerEnabledLastWritten;
 
     /// <summary>Creates the duty cycle and the instruments it publishes to, with the profiler
-    /// resolver, the two walks and the warning sink supplied directly rather than read off a live
-    /// server: what a unit test calls to drive the unprimed-tick give-up path, a failed listener or
-    /// behavior walk, and the on/off/status command transitions without one.</summary>
+    /// resolver, the two walks, the warning sink and the table of owners supplied directly rather
+    /// than read off a live server: what a unit test calls to drive the unprimed-tick give-up path, a
+    /// failed listener or behavior walk, and the on/off/status command transitions without one.</summary>
+    /// <param name="owners">The table the walks fill and the profiler marks are resolved through. A
+    /// real, empty one when nobody hands one in.</param>
     internal AttributionMetrics(
         Meter meter,
         AttributionConfig config,
         Func<FrameProfilerUtil?> resolveProfiler,
         Action<ModOwners> walkListeners,
         Action<string, string> warn,
-        Action<ModOwners>? walkBehaviors = null)
+        Action<ModOwners>? walkBehaviors = null,
+        ModOwners? owners = null)
     {
         this.resolveProfiler = resolveProfiler;
         this.walkListeners = walkListeners;
         this.walkBehaviors = walkBehaviors ?? (_ => { });
         this.warn = warn;
 
-        // A real, empty table rather than null: nothing but a live server's ModLoader walk can
-        // populate it, but Owner still has to be a callable delegate the moment a primed tick asks
-        // for one, in a test as much as on a server that has not walked any mods yet.
-        owners = new ModOwners(_ => null);
+        // A real, empty table rather than null when none is handed in: nothing but a live server's
+        // ModLoader walk can populate it, but Owner still has to be a callable delegate the moment a
+        // primed tick asks for one, in a test as much as on a server that has not walked any mods yet.
+        this.owners = owners ?? new ModOwners(_ => null);
 
         attribution = new TickAttribution(config.BurstTicks, config.IntervalSeconds, config.Enabled);
         meter.CreateObservableGauge(

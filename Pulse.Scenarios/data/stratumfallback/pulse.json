@@ -1,17 +1,17 @@
 {
-  "Enabled": false,
+  "Enabled": true,
   "Bind": "127.0.0.1",
-  "Port": 29473,
+  "Port": 29486,
   "RuntimeMetrics": false,
   "ChunksRefreshSeconds": 30,
   "Attribution": {
     "Enabled": false,
-    "BurstTicks": 30,
-    "IntervalSeconds": 10
+    "BurstTicks": 5,
+    "IntervalSeconds": 1
   },
   "StratumTimings": {
-    "Enabled": false,
-    "BurstTicks": 10,
-    "IntervalSeconds": 10
+    "Enabled": true,
+    "BurstTicks": 5,
+    "IntervalSeconds": 1
   }
 }
