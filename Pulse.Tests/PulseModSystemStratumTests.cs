@@ -58,4 +58,41 @@ public class PulseModSystemStratumTests
             system.Dispose();
         }
     }
+
+    /// <summary>The table of owners is built from the mod list, which is two plain reads, but whatever
+    /// they do, it costs the two features that read the table and nothing else: attribution has always
+    /// been guarded against what its constructor reads, and the Stratum timings are guarded the same
+    /// way. The endpoint is still served.</summary>
+    [Fact]
+    public void StartServerSide_LosesOnlyTheFeaturesThatReadTheModList_WhenTheModLoaderThrows()
+    {
+        (ICoreServerAPI api, AutoFakeProxy apiFake) = AutoFakeProxy.Create<ICoreServerAPI>();
+        apiFake.On("LoadModConfig", _ => new PulseConfig { Port = 0 });
+        apiFake.On("get_ModLoader", _ => throw new InvalidOperationException("the mod loader is gone"));
+
+        FakeLogger serverLogger = new();
+        apiFake.On("get_Logger", _ => serverLogger);
+
+        PulseModSystem system = new();
+        LoadedMod.Attach(system, "pulse", serverLogger);
+        try
+        {
+            Exception? thrown = Record.Exception(() => system.StartServerSide(api));
+
+            Assert.Null(thrown);
+            Assert.Single(
+                serverLogger.Entries,
+                entry => entry.Type == EnumLogType.Warning
+                    && entry.Message.Contains("could not start per-mod tick attribution (the mod loader is gone)"));
+            Assert.Single(
+                serverLogger.Entries,
+                entry => entry.Type == EnumLogType.Warning
+                    && entry.Message.Contains("could not start the Stratum entity timings (the mod loader is gone)"));
+            Assert.Contains(serverLogger.Entries, entry => entry.Message.Contains("Pulse serving metrics on"));
+        }
+        finally
+        {
+            system.Dispose();
+        }
+    }
 }

@@ -193,8 +193,11 @@ public sealed class PulseModSystem : ModSystem
         StartEngineProbe(api, meter);
 
         // One table of which mod ships what, for the two features that credit time to mods. Built
-        // here and not by either: neither may depend on the other being on, or having started.
-        ModOwners owners = LoadOwners(api);
+        // here and not by either, so that neither depends on the other being on or having started,
+        // and by whichever asks first, inside its own guard below: a mod list that cannot be read
+        // costs the features that read it, as it always cost attribution, and nothing else.
+        ModOwners? owners = null;
+        ModOwners SharedOwners() => owners ??= LoadOwners(api);
 
         // Bound whether or not the config asks for it, so that /pulse reload can switch it on
         // later: it is one reflection pass. Guarded on its own, because the binder reads the shape
@@ -202,7 +205,7 @@ public sealed class PulseModSystem : ModSystem
         // feature that reads it.
         try
         {
-            stratumTimings = StratumTimingsMetrics.Create(api, Mod.Logger, meter, config, owners);
+            stratumTimings = StratumTimingsMetrics.Create(api, Mod.Logger, meter, config, SharedOwners());
         }
         catch (Exception e)
         {
@@ -225,7 +228,7 @@ public sealed class PulseModSystem : ModSystem
         try
         {
             attributionMetrics = new AttributionMetrics(
-                api, Mod.Logger, meter, config, owners, loaded => stratumTimings?.Reload(loaded));
+                api, Mod.Logger, meter, config, SharedOwners(), loaded => stratumTimings?.Reload(loaded));
         }
         catch (Exception e)
         {
@@ -415,8 +418,6 @@ public sealed class PulseModSystem : ModSystem
 
     /// <summary>Which mod ships which type: the systems every loaded mod declares, and the class
     /// registry for the entity behaviors whose name is their registration code.</summary>
-    /// <remarks>Plain reads of the mod loader and the registry, so nothing here needs the guard the
-    /// engine-facing constructors sit in.</remarks>
     private static ModOwners LoadOwners(ICoreServerAPI api)
     {
         ModOwners owners = new(api.ClassRegistry.GetEntityBehaviorClass);
