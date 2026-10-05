@@ -992,8 +992,34 @@ public class StratumTimingsMetricsTests
 
     // The live-server half.
 
+    /// <summary>A type with the contract's exact shape, for the lookup by type. Only its shape is read:
+    /// nothing here is ever called.</summary>
+    private static class BoundContract
+    {
+        public const int ContractVersion = 1;
+
+        public static IDisposable RequestRecording() => throw new NotSupportedException();
+
+        public static void Snapshot(List<(string Key, long Ticks, long Calls)> into)
+        {
+        }
+    }
+
+    /// <summary>A Stratum that predates the contract: there, and without a ContractVersion.</summary>
+    private static class PredatesTheContract
+    {
+        public static IDisposable RequestRecording() => throw new NotSupportedException();
+
+        public static void Snapshot(List<(string Key, long Ticks, long Calls)> into)
+        {
+        }
+    }
+
+    private static Func<ModOwners> MustNotBeAsked() => () => throw new InvalidOperationException("the mod list was read");
+
     /// <summary>The by-name lookup against the game's own API assembly, which on a vanilla server has
-    /// no such type: the block on earns the one notification, and a reload does not repeat it.</summary>
+    /// no such type: the block on earns the one notification, a reload does not repeat it, and the mod
+    /// list is never read, because the feature has no use for it here.</summary>
     [Fact]
     public void Create_BindsNothing_AgainstTheGamesOwnApi_AndSaysSoOnce_WhenTheBlockIsOn()
     {
@@ -1002,7 +1028,7 @@ public class StratumTimingsMetricsTests
         using Meter meter = new($"Pulse.Test.StratumTimingsMetrics.{Guid.NewGuid():N}");
         PulseConfig booted = new() { StratumTimings = Config() };
 
-        StratumTimingsMetrics metrics = StratumTimingsMetrics.Create(api, logger, meter, booted, new ModOwners(_ => null));
+        StratumTimingsMetrics metrics = StratumTimingsMetrics.Create(api, logger, meter, booted, MustNotBeAsked());
 
         Assert.Equal(AbsentNotification, Only(logger).Message);
         Assert.Empty(Registered(meter));
@@ -1012,5 +1038,56 @@ public class StratumTimingsMetricsTests
         Assert.Null(metrics.Reload(new PulseConfig { StratumTimings = null! }));
 
         Assert.Single(logger.Entries);
+    }
+
+    /// <summary>The mod list is read when there is a Stratum to read and not otherwise: a server that
+    /// cannot serve the feature, or that does not use it, must not have its mod list's failure reported
+    /// a second time under the feature's name.</summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData(typeof(PredatesTheContract))]
+    public void Create_NeverAsksForTheModList_WhenStratumIsNotBound(Type? stratum)
+    {
+        (ICoreServerAPI api, _) = AutoFakeProxy.Create<ICoreServerAPI>();
+        using Meter meter = new($"Pulse.Test.StratumTimingsMetrics.{Guid.NewGuid():N}");
+
+        StratumTimingsMetrics.Create(stratum, api, new FakeLogger(), meter, new PulseConfig(), MustNotBeAsked());
+
+        Assert.Empty(Registered(meter));
+    }
+
+    [Fact]
+    public void Create_AsksForTheModListOnce_AndRegistersTheFamilies_WhenStratumIsBound()
+    {
+        (ICoreServerAPI api, _) = AutoFakeProxy.Create<ICoreServerAPI>();
+        using Meter meter = new($"Pulse.Test.StratumTimingsMetrics.{Guid.NewGuid():N}");
+        int asked = 0;
+
+        StratumTimingsMetrics.Create(
+            typeof(BoundContract), api, new FakeLogger(), meter, new PulseConfig(),
+            () =>
+            {
+                asked++;
+                return new ModOwners(_ => null);
+            });
+
+        Assert.Equal(1, asked);
+        Assert.Equal(5, Registered(meter).Count);
+    }
+
+    /// <summary>On a server the feature can serve, a mod list that cannot be read is the feature's to
+    /// report: it throws out of the constructor, into the guard the mod system keeps around it.</summary>
+    [Fact]
+    public void Create_LetsAModListThatCannotBeRead_Through_WhenStratumIsBound()
+    {
+        (ICoreServerAPI api, _) = AutoFakeProxy.Create<ICoreServerAPI>();
+        using Meter meter = new($"Pulse.Test.StratumTimingsMetrics.{Guid.NewGuid():N}");
+
+        InvalidOperationException thrown = Assert.Throws<InvalidOperationException>(
+            () => StratumTimingsMetrics.Create(
+                typeof(BoundContract), api, new FakeLogger(), meter, new PulseConfig(),
+                () => throw new InvalidOperationException("the mod loader is gone")));
+
+        Assert.Equal("the mod loader is gone", thrown.Message);
     }
 }

@@ -193,9 +193,13 @@ public sealed class PulseModSystem : ModSystem
         StartEngineProbe(api, meter);
 
         // One table of which mod ships what, for the two features that credit time to mods. Built
-        // here and not by either, so that neither depends on the other being on or having started,
-        // and by whichever asks first, inside its own guard below: a mod list that cannot be read
-        // costs the features that read it, as it always cost attribution, and nothing else.
+        // here and not by either, and by whichever asks first, inside that feature's own guard
+        // below: a mod list that cannot be read costs the features that read it, as it always cost
+        // attribution, and nothing else. The Stratum timings ask only on a server they can serve.
+        //
+        // Neither feature depends on the other being on, with one exception. /pulse reload, which is
+        // how the Stratum block is applied after boot, is registered by attribution's constructor,
+        // so when that fails, or another mod already owns /pulse, the block can only be set at boot.
         ModOwners? owners = null;
         ModOwners SharedOwners() => owners ??= LoadOwners(api);
 
@@ -205,7 +209,7 @@ public sealed class PulseModSystem : ModSystem
         // feature that reads it.
         try
         {
-            stratumTimings = StratumTimingsMetrics.Create(api, Mod.Logger, meter, config, SharedOwners());
+            stratumTimings = StratumTimingsMetrics.Create(api, Mod.Logger, meter, config, SharedOwners);
         }
         catch (Exception e)
         {

@@ -60,14 +60,19 @@ public class PulseModSystemStratumTests
     }
 
     /// <summary>The table of owners is built from the mod list, which is two plain reads, but whatever
-    /// they do, it costs the two features that read the table and nothing else: attribution has always
-    /// been guarded against what its constructor reads, and the Stratum timings are guarded the same
-    /// way. The endpoint is still served.</summary>
-    [Fact]
-    public void StartServerSide_LosesOnlyTheFeaturesThatReadTheModList_WhenTheModLoaderThrows()
+    /// they do, it costs the features that read the table and nothing else. On a server that is not
+    /// Stratum the Stratum timings have no use for it and never ask, so attribution, which has always
+    /// been guarded against what its constructor reads, loses its line to a mod list that cannot be
+    /// read and the Stratum timings add none of their own, with the block off or on. The endpoint is
+    /// still served.</summary>
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void StartServerSide_LosesOnlyAttribution_WhenTheModLoaderThrows_OnAServerThatIsNotStratum(bool block)
     {
         (ICoreServerAPI api, AutoFakeProxy apiFake) = AutoFakeProxy.Create<ICoreServerAPI>();
-        apiFake.On("LoadModConfig", _ => new PulseConfig { Port = 0 });
+        apiFake.On(
+            "LoadModConfig", _ => new PulseConfig { Port = 0, StratumTimings = new StratumTimingsConfig { Enabled = block } });
         apiFake.On("get_ModLoader", _ => throw new InvalidOperationException("the mod loader is gone"));
 
         FakeLogger serverLogger = new();
@@ -80,14 +85,22 @@ public class PulseModSystemStratumTests
             Exception? thrown = Record.Exception(() => system.StartServerSide(api));
 
             Assert.Null(thrown);
+
+            // Attribution's line, as it was before the Stratum timings existed, and no other warning
+            // about the mod list.
             Assert.Single(
                 serverLogger.Entries,
                 entry => entry.Type == EnumLogType.Warning
                     && entry.Message.Contains("could not start per-mod tick attribution (the mod loader is gone)"));
-            Assert.Single(
-                serverLogger.Entries,
-                entry => entry.Type == EnumLogType.Warning
-                    && entry.Message.Contains("could not start the Stratum entity timings (the mod loader is gone)"));
+            Assert.DoesNotContain(
+                serverLogger.Entries, entry => entry.Message.Contains("could not start the Stratum entity timings"));
+            Assert.DoesNotContain(
+                serverLogger.Entries, entry => entry.Message.Contains("the mod loader is gone") && entry.Message.Contains("Stratum"));
+
+            // What the Stratum timings do say is the one notification the block earns on such a server,
+            // and only when it is on.
+            Assert.Equal(
+                block ? 1 : 0, serverLogger.Entries.Count(entry => entry.Message.Contains("need a Stratum server")));
             Assert.Contains(serverLogger.Entries, entry => entry.Message.Contains("Pulse serving metrics on"));
         }
         finally

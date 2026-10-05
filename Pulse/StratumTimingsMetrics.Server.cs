@@ -22,22 +22,35 @@ internal sealed partial class StratumTimingsMetrics
     /// server actually loaded, so a mod that declares a type of the same name in its own assembly
     /// cannot be mistaken for Stratum. The binder can throw on a type that is broken in a way of its
     /// own, so the caller guards this the way it guards the engine probe.</remarks>
+    /// <param name="owners">Hands out the table of which mod ships what, which is built from the mod
+    /// list. It is asked for only on a server the feature can serve: anywhere else the feature has no
+    /// use for it, and a mod list that cannot be read must not cost it a line of its own in the log.</param>
     public static StratumTimingsMetrics Create(
-        ICoreServerAPI api, ILogger logger, Meter meter, PulseConfig booted, ModOwners owners)
+        ICoreServerAPI api, ILogger logger, Meter meter, PulseConfig booted, Func<ModOwners> owners)
+        => Create(
+            typeof(Entity).Assembly.GetType(StratumTimingsSource.TypeName, throwOnError: false),
+            api, logger, meter, booted, owners);
+
+    /// <summary>The same, with the type that stands for Stratum's accumulator handed in rather than
+    /// looked up in the game's API, which is what lets a test bind a fake without a Stratum.</summary>
+    internal static StratumTimingsMetrics Create(
+        Type? stratum, ICoreServerAPI api, ILogger logger, Meter meter, PulseConfig booted, Func<ModOwners> owners)
     {
-        Type? type = typeof(Entity).Assembly.GetType(StratumTimingsSource.TypeName, throwOnError: false);
-        StratumTimingsSource? source = StratumTimingsSource.TryBind(type, out string? reason);
+        StratumTimingsSource? source = StratumTimingsSource.TryBind(stratum, out string? reason);
         return new StratumTimingsMetrics(
             meter,
             booted.StratumTimings ?? new StratumTimingsConfig(),
             source,
             reason,
-            owners,
+            source != null ? owners() : new ModOwners(_ => null),
             modOwners => modOwners.LearnBehaviors(api.World.LoadedEntities),
             logger);
     }
 
     /// <summary>Applies the block of a config file that <c>/pulse reload</c> has just read, and returns
     /// what the reply says about it.</summary>
+    /// <remarks>The command is registered by attribution's constructor, which calls this, so when that
+    /// constructor fails, or another mod already owns <c>/pulse</c>, nothing ever calls it and the
+    /// block can only be set at boot.</remarks>
     public string? Reload(PulseConfig loaded) => Apply(loaded.StratumTimings ?? new StratumTimingsConfig());
 }
