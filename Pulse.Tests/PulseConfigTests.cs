@@ -32,20 +32,20 @@ public class PulseConfigTests
         Assert.Equal(config.Attribution.IntervalSeconds, config.StratumTimings.IntervalSeconds);
     }
 
-    /// <summary>The keys an admin reads in a fresh file. StoreModConfig writes what the game's own
-    /// serializer makes of the config, which needs a Newtonsoft this test project does not carry, so
-    /// the framework's stands in: for a plain class the two agree on the names and on their order, the
-    /// order the properties are declared in.</summary>
+    /// <summary>The block an admin reads in a fresh file, under the names the config upgrade compares
+    /// with theirs. StoreModConfig writes what the game's own serializer makes of the config, which
+    /// needs a Newtonsoft this test project does not carry, so the framework's stands in. Its key order
+    /// is its own and not the game's, so the order is not asserted, only what is there.</summary>
     [Fact]
-    public void AFreshFile_Carries_TheStratumTimingsBlock_AfterAttribution_WithItsDefaults()
+    public void AFreshFile_Carries_TheStratumTimingsBlock_WithItsDefaults()
     {
         JsonObject written = Assert.IsType<JsonObject>(JsonNode.Parse(JsonSerializer.Serialize(new PulseConfig())));
 
-        Assert.Equal(
-            ["Enabled", "Bind", "Port", "RuntimeMetrics", "ChunksRefreshSeconds", "Attribution", "StratumTimings"],
-            written.Select(entry => entry.Key));
-        Assert.Equal(
-            """{"Enabled":false,"BurstTicks":10,"IntervalSeconds":10}""",
-            written["StratumTimings"]!.ToJsonString());
+        Assert.Contains("Attribution", written.Select(entry => entry.Key));
+        JsonObject block = Assert.IsType<JsonObject>(written["StratumTimings"]);
+        Assert.Equal(["BurstTicks", "Enabled", "IntervalSeconds"], block.Select(entry => entry.Key).Order());
+        Assert.False((bool)block["Enabled"]!);
+        Assert.Equal(10, (int)block["BurstTicks"]!);
+        Assert.Equal(10, (int)block["IntervalSeconds"]!);
     }
 }

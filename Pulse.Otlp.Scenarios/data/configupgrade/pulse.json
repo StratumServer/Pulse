@@ -8,5 +8,10 @@
     "Enabled": false,
     "BurstTicks": 30,
     "IntervalSeconds": 10
+  },
+  "StratumTimings": {
+    "Enabled": false,
+    "BurstTicks": 10,
+    "IntervalSeconds": 10
   }
 }
