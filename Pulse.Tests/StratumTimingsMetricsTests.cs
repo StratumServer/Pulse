@@ -31,9 +31,17 @@ public class StratumTimingsMetricsTests
     /// <summary>The totals of Stratum's accumulator behind the two delegates of a source, which a test
     /// moves between the ticks, and a count of what the feature asked of it. A lease counts every
     /// release it is given, so letting go of one twice shows.</summary>
+    /// <remarks>It models what the contract does with the totals, not only what it returns: with the
+    /// admin's switch off, which is how a server boots, Stratum empties its accumulator the moment the
+    /// last lease is released (<c>Refresh()</c> clears the buckets when nobody reads). So whatever the
+    /// feature reads has to be read before the lease goes back, and a fake that kept its totals
+    /// through the release would let a feature that reads them after it pass every test.</remarks>
     private sealed class FakeStratum
     {
         private readonly Dictionary<string, (long Ticks, long Calls)> totals = [];
+
+        /// <summary>Leases out right now: what Stratum counts its readers by.</summary>
+        private int held;
 
         public int Requested { get; private set; }
 
@@ -64,6 +72,7 @@ public class StratumTimingsMetricsTests
             }
 
             Requested++;
+            held++;
             return new Lease(this);
         }
 
@@ -85,9 +94,19 @@ public class StratumTimingsMetricsTests
 
         private sealed class Lease(FakeStratum owner) : IDisposable
         {
+            private bool released;
+
+            /// <summary>Counts the call, then does what Stratum does: the first release of a lease
+            /// gives its reader back, and the last reader to go empties the accumulator.</summary>
             public void Dispose()
             {
                 owner.Released++;
+                if (!released && --owner.held == 0)
+                {
+                    owner.totals.Clear();
+                }
+
+                released = true;
                 if (owner.ReleaseThrows != null)
                 {
                     throw owner.ReleaseThrows;
@@ -635,8 +654,10 @@ public class StratumTimingsMetricsTests
             throw new InvalidOperationException("the entity table is gone");
         });
 
+        // The same reading twice: Stratum emptied its accumulator when the lease of the first burst
+        // went back, so the second burst starts from nothing and adds one second again.
         rig.RunBurst(atEnd: () => rig.Stratum.Set("entity.behavior.players.health", 1, 10));
-        rig.RunBurst(atEnd: () => rig.Stratum.Set("entity.behavior.players.health", 2, 20));
+        rig.RunBurst(atEnd: () => rig.Stratum.Set("entity.behavior.players.health", 1, 10));
 
         (EnumLogType type, string message) = Assert.Single(rig.Logger.Entries, entry => entry.Type == EnumLogType.Warning);
         Assert.Equal(EnumLogType.Warning, type);

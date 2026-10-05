@@ -668,9 +668,12 @@ mutate Pulse/StratumFold.cs \
 
 # What wires those three pieces to the server fails just as silently. A lease that is never let go of
 # keeps Stratum recording for the rest of its run, once for a reload that drops a burst and once for
-# Stratum throwing. A count that is a tick too long reads every per-tick query ten percent low. A walk
-# that runs after the fold credits a behavior to its mod a burst late. And a family registered on a
-# server that cannot serve it breaks the promise that such a server serves what it always did.
+# Stratum throwing. A lease let go of too soon is worse in a quieter way: Stratum empties its
+# accumulator when the last reader goes, so a last snapshot taken after the release reads nothing and
+# only the count of timed ticks is served. A count that is a tick too long reads every per-tick query
+# ten percent low. A walk that runs after the fold credits a behavior to its mod a burst late. And a
+# family registered on a server that cannot serve it breaks the promise that such a server serves
+# what it always did.
 mutate Pulse/StratumTimingsMetrics.cs \
     '/public void Apply\(StratumTimingsConfig config\)/,/^    }$/ s/ReleaseLeaseBestEffort\(\);//' \
     "stratum timings: a reload part-way through a burst keeps the lease, so the next burst takes a second one and the first is never released"
@@ -678,6 +681,10 @@ mutate Pulse/StratumTimingsMetrics.cs \
 mutate Pulse/StratumTimingsMetrics.cs \
     '/private void GiveUp\(Exception e\)/,/^    }$/ s/ReleaseLeaseBestEffort\(\);//' \
     "stratum timings: giving up keeps the lease, so Stratum records for the rest of its run for a reader that has stopped"
+
+mutate Pulse/StratumTimingsMetrics.cs \
+    '/^    private void Finish\(\)$/,/^    }$/ { s/^        source!\.Snapshot\(end\);$/        ReleaseLease();/; t; s/^        ReleaseLease\(\);$/        source!.Snapshot(end);/ }' \
+    "stratum timings: the lease goes back before the last snapshot, which reads an accumulator Stratum has just emptied"
 
 mutate Pulse/StratumTimingsMetrics.cs \
     's/TimedTicks\.Add\(cycle\.BurstTicks\)/TimedTicks.Add(cycle.BurstTicks + 1)/' \
