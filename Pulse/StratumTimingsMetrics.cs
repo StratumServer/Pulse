@@ -18,8 +18,9 @@ namespace Pulse;
 /// <c>WarmUp</c> takes the first snapshot of the accumulator's totals, once recording is on and the
 /// tick it began in is behind it, so what is read describes whole ticks from here on. The samples in
 /// between cost nothing: Stratum records on its own, and this class does not even look. The last
-/// sample takes the second snapshot, lets go of the lease, which stops the recording, and folds the
-/// difference of the two snapshots into the series. That window is exactly
+/// sample takes the second snapshot, in that order, since Stratum empties its accumulator when the
+/// last lease goes back, lets go of the lease, which stops the recording, and folds the difference of
+/// the two snapshots into the series. That window is exactly
 /// <see cref="DutyCycle.BurstTicks"/> tick cycles, which is what
 /// <c>pulse_stratum_timed_ticks_total</c> counts, so the sampled seconds can be divided by the ticks
 /// they came from.</para>
@@ -199,6 +200,9 @@ internal sealed partial class StratumTimingsMetrics
 
     private void Finish()
     {
+        // Before the lease goes back, and not after: with the admin's switch off, which is how a
+        // server boots, Stratum empties its accumulator the moment the last reader lets go, so a
+        // snapshot taken after the release would read nothing, and only the timed ticks would be served.
         source!.Snapshot(end);
 
         // Recording stops here. Everything below is arithmetic on two lists, so it is not worth a
