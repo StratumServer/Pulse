@@ -31,6 +31,12 @@ public class ConfigUpgradeScenarios : AtlasScenarioBase
         Assert.Equal(10, (int)attribution["BurstTicks"]!);
         Assert.Equal(10, (int)attribution["IntervalSeconds"]!);
 
+        // The Stratum timings block, which arrived after that one: off, on the same duty cycle.
+        JsonObject stratumTimings = Assert.IsType<JsonObject>(config["StratumTimings"]);
+        Assert.False((bool)stratumTimings["Enabled"]!);
+        Assert.Equal(10, (int)stratumTimings["BurstTicks"]!);
+        Assert.Equal(10, (int)stratumTimings["IntervalSeconds"]!);
+
         // And the rest of the keys the file never had.
         Assert.True((bool)config["Enabled"]!);
         Assert.Equal("127.0.0.1", (string?)config["Bind"]);

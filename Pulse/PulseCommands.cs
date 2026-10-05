@@ -22,10 +22,11 @@ internal static class PulseCommands
         "pulse.json was not changed, so the file decides again after a restart.";
 
     /// <summary>Keys whose value on disk differs from the value the server is running on.</summary>
-    /// <remarks>Everything outside the <c>Attribution</c> block is read once in StartServerSide and
-    /// wired into a socket, a meter or a listener interval, so a difference here is something the
-    /// operator has to restart for. Compared against the config the server booted with rather than
-    /// the last file read, so a second reload still names a port that is still wrong.</remarks>
+    /// <remarks>Everything outside the <c>Attribution</c> and <c>StratumTimings</c> blocks is read once
+    /// in StartServerSide and wired into a socket, a meter or a listener interval, so a difference
+    /// here is something the operator has to restart for. Compared against the config the server
+    /// booted with rather than the last file read, so a second reload still names a port that is
+    /// still wrong.</remarks>
     public static IReadOnlyList<string> RestartKeys(PulseConfig running, PulseConfig loaded) =>
         new (string Key, bool Changed)[]
         {
