@@ -506,11 +506,14 @@ public class StratumTimingsMetricsTests
         Assert.Equal(EnumLogType.Warning, type);
         Assert.Equal(string.Format(GiveUpWarning, "no accumulator"), message);
 
-        // Off for the run, however Stratum behaves from here on and whatever a reload says.
+        // Off for the run, however Stratum behaves from here on and whatever a reload says, which does
+        // not even claim to have started it.
         rig.Stratum.RequestThrows = null;
+        int said = rig.Logger.Entries.Count;
         rig.Metrics.Apply(Config());
         rig.Tick(50);
         Assert.Equal(0, rig.Stratum.Requested);
+        Assert.Equal(said, rig.Logger.Entries.Count);
         Assert.Single(rig.Logger.Entries, entry => entry.Type == EnumLogType.Warning);
     }
 
@@ -722,7 +725,7 @@ public class StratumTimingsMetricsTests
     }
 
     /// <summary>One line for the family, the first time it spills, and not another for the bursts that
-    /// spill after it.</summary>
+    /// spill after it. Each of the three says which label it lumps into.</summary>
     [Fact]
     public void Tick_LogsOnce_ForEachFamilyThatSpillsOverItsCap()
     {
@@ -734,6 +737,7 @@ public class StratumTimingsMetricsTests
             {
                 rig.Stratum.Set($"entity.type.t{i:D3}-adult", 1, 1);
                 rig.Stratum.Set($"entity.ai.creatures.task.t{i:D3}", 1, 1);
+                rig.Stratum.Set($"entity.behavior.players.t{i:D3}", 1, 1);
             }
         });
         rig.RunBurst(atEnd: () =>
@@ -746,7 +750,11 @@ public class StratumTimingsMetricsTests
         });
 
         List<(EnumLogType Type, string Message)> entries = [.. rig.Logger.Entries.Where(entry => entry.Type == EnumLogType.Warning)];
-        Assert.Equal(2, entries.Count);
+        Assert.Equal(3, entries.Count);
+        Assert.Contains(
+            "Pulse already serves 100 series of Stratum behavior timings, the most it keeps for that family. "
+                + "What comes after is added to series whose behavior label reads other.",
+            entries.Select(entry => entry.Message));
         Assert.Contains(
             "Pulse already serves 100 series of Stratum entity type timings, the most it keeps for that family. "
                 + "What comes after is added to series whose type label reads other.",
