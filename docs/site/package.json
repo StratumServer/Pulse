@@ -11,7 +11,7 @@
     "serve": "python3 -m http.server --bind 127.0.0.1 --directory dist 4173"
   },
   "devDependencies": {
-    "marked": "18.0.14",
+    "marked": "18.1.2",
     "yaml": "2.9.1"
   }
 }
